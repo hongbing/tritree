@@ -407,8 +407,11 @@ describe("SkillSchema", () => {
     expect(workflowSkill?.prompt).toContain("草稿越完整，改动越克制");
     expect(workflowSkill?.prompt).toContain("有清楚主题、完整叙述链路、关键解释和自然收束");
     expect(workflowSkill?.prompt).toContain("当任务是提出编辑建议时");
-    expect(workflowSkill?.prompt).toContain("简单修改语病");
-    expect(workflowSkill?.prompt).toContain("避免所有建议都给重构、换角度、重写、扩写这类大改方向");
+    expect(workflowSkill?.prompt).toContain("按当前内容的问题程度和修改收益排序");
+    expect(workflowSkill?.prompt).toContain("文案表达、断句和分段整理不受发布前阶段限制");
+    expect(workflowSkill?.prompt).toContain("优先给保留原意的表达优化或分段整理");
+    expect(workflowSkill?.prompt).toContain("避免默认把所有建议都给重构、换角度、重写、扩写这类大改方向");
+    expect(workflowSkill?.prompt).not.toContain("应至少包含");
     expect(workflowSkill?.prompt).not.toContain("下一步选项");
     expect(workflowSkill?.prompt).not.toContain("用户手动编辑后");
     expect(workflowSkill?.prompt).not.toContain("三项");

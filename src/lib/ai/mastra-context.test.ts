@@ -73,6 +73,12 @@ describe("agent instructions", () => {
     const instructions = buildTreeOptionsInstructions(input);
 
     expect(instructions).toContain("先诊断当前内容最值得处理的问题");
+    expect(instructions).toContain("按当前内容的问题程度和修改收益决定三个建议的优先级");
+    expect(instructions).toContain("不要预设必须包含某一类建议");
+    expect(instructions).toContain("文案表达、断句和分段整理是任何阶段都可以优先选择的编辑建议");
+    expect(instructions).toContain("表达本身已经承载了主要信息，只是长段、口语散、层次不清或局部不顺");
+    expect(instructions).toContain("优先给保留原意的表达优化或分段整理");
+    expect(instructions).toContain("不要因为内容还没到发布前就排除这类建议");
     expect(instructions).toContain("每个建议都要来自一个明确诊断");
     expect(instructions).toContain("description 写为什么建议这样改");
     expect(instructions).toContain("impact 写选择后会改善什么");

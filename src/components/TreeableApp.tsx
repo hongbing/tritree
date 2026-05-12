@@ -7,7 +7,9 @@ import { useEffect, useRef, useState } from "react";
 import {
   SessionStateSchema,
   type BranchOption,
+  type ArtifactTypeId,
   DEFAULT_CREATION_REQUEST_OPTIONS,
+  DEFAULT_ARTIFACT_TYPE_ID,
   CUSTOM_OPTION_ID_PREFIX,
   type CreationRequestOption,
   type CustomBranchOptionId,
@@ -22,6 +24,7 @@ import {
   isCustomBranchOptionId,
   isPrimaryBranchOptionId
 } from "@/lib/domain";
+import { getArtifactType } from "@/lib/artifacts";
 import type { UserRole } from "@/lib/auth/types";
 import { LiveDraft } from "@/components/draft/LiveDraft";
 import { RootMemorySetup } from "@/components/root-memory/RootMemorySetup";
@@ -37,6 +40,7 @@ type DraftComparisonSelection = { fromNodeId: string | null; toNodeId: string | 
 type DraftComparisonEntry = { nodeId: string; label: string; draft: Draft };
 type NodeGenerationStage = { nodeId: string; stage: "draft" | "options" };
 type RootSetupDefaults = {
+  artifactTypeId?: ArtifactTypeId;
   creationRequest?: string;
   enabledSkillIds?: string[];
   seed: string;
@@ -68,7 +72,7 @@ function defaultCreationRequestOptions(): CreationRequestOption[] {
 type DraftStreamField = "title" | "body" | "hashtags" | "imagePrompt";
 type LiveDraftStreamingField = "body" | "imagePrompt";
 type StreamingDraftEntry = { nodeId: string; draft: Draft; previousDraft?: Draft | null; streamingField: DraftStreamField | null };
-type StreamingOptionsEntry = { nodeId: string; options: BranchOption[] };
+type StreamingOptionsEntry = { nodeId: string; options: BranchOption[]; roundIntent?: string | null };
 type StreamingThinkingEntry = { nodeId: string | null; stage: NodeGenerationStage["stage"]; text: string };
 type DraftSelectionRewriteRequest = {
   draft: Draft;
@@ -80,13 +84,14 @@ type DraftSelectionRewriteRequest = {
 };
 type DraftStreamEvent =
   | { type: "draft"; draft: Draft; streamingField?: DraftStreamField | null }
+  | { type: "options"; nodeId: string; options: BranchOption[]; roundIntent?: string | null }
   | { type: "thinking"; nodeId?: string | null; text: string }
   | { type: "done"; state: SessionState }
   | { type: "error"; error: string }
   | { type: "text"; text: string };
 type OptionsStreamEvent =
   | { type: "state"; state: SessionState }
-  | { type: "options"; nodeId: string; options: BranchOption[] }
+  | { type: "options"; nodeId: string; options: BranchOption[]; roundIntent?: string | null }
   | { type: "thinking"; nodeId?: string | null; text: string }
   | { type: "done"; state: SessionState }
   | { type: "error"; error: string };
@@ -124,7 +129,9 @@ function translatePreference(value: string) {
 function formatRootSummary(rootMemory: RootMemory | null) {
   if (!rootMemory) return "";
   const summary = rootMemory.summary.trim();
-  if (summary) return summary.replace(/\s*\n\s*/g, " | ");
+  const artifactType = getArtifactType(rootMemory.preferences.artifactTypeId);
+  const summaryPrefix = artifactType.id === DEFAULT_ARTIFACT_TYPE_ID ? "" : `${artifactType.label} | `;
+  if (summary) return `${summaryPrefix}${summary.replace(/\s*\n\s*/g, " | ")}`;
   if (rootMemory.preferences.seed.trim()) return `Seed：${rootMemory.preferences.seed.trim()}`;
 
   const { preferences } = rootMemory;
@@ -180,6 +187,13 @@ function isDraftStreamEvent(value: unknown): value is DraftStreamEvent {
   switch (value.type) {
     case "draft":
       return isDraft(value.draft) && (value.streamingField == null || isDraftStreamField(value.streamingField));
+    case "options":
+      return (
+        typeof value.nodeId === "string" &&
+        Array.isArray(value.options) &&
+        value.options.every((option) => isBranchOption(option)) &&
+        (value.roundIntent == null || typeof value.roundIntent === "string")
+      );
     case "thinking":
       return typeof value.text === "string" && (value.nodeId == null || typeof value.nodeId === "string");
     case "done":
@@ -204,7 +218,8 @@ function isOptionsStreamEvent(value: unknown): value is OptionsStreamEvent {
       return (
         typeof value.nodeId === "string" &&
         Array.isArray(value.options) &&
-        value.options.every((option) => isBranchOption(option))
+        value.options.every((option) => isBranchOption(option)) &&
+        (value.roundIntent == null || typeof value.roundIntent === "string")
       );
     case "thinking":
       return typeof value.text === "string" && (value.nodeId == null || typeof value.nodeId === "string");
@@ -228,11 +243,37 @@ function findTreeNode(state: SessionState, nodeId: string | null) {
 }
 
 function draftForNode(state: SessionState, nodeId: string | null) {
+  const directDraft = directDraftForNode(state, nodeId);
+  if (directDraft || !nodeId) return directDraft;
+
+  const node = findTreeNode(state, nodeId);
+  return nearestAncestorDraftForNode(state, node);
+}
+
+function directDraftForNode(state: SessionState, nodeId: string | null) {
   if (!nodeId) return null;
   return (
     state.nodeDrafts.find((item) => item.nodeId === nodeId)?.draft ??
     (state.currentNode?.id === nodeId ? state.currentDraft : null)
   );
+}
+
+function nearestAncestorDraftForNode(state: SessionState, node: TreeNode | null) {
+  if (!node?.parentId) return null;
+
+  const nodesById = new Map<string, TreeNode>();
+  [...(state.treeNodes ?? []), ...state.selectedPath, ...(state.currentNode ? [state.currentNode] : [])].forEach((item) => {
+    nodesById.set(item.id, item);
+  });
+
+  let cursor = nodesById.get(node.parentId) ?? null;
+  while (cursor) {
+    const draft = directDraftForNode(state, cursor.id);
+    if (draft) return draft;
+    cursor = cursor.parentId ? nodesById.get(cursor.parentId) ?? null : null;
+  }
+
+  return null;
 }
 
 function withCustomOption(node: TreeNode, customOption: BranchOption | null) {
@@ -249,6 +290,7 @@ function withStreamingOptions(node: TreeNode, streamingOptions: StreamingOptions
 
   return {
     ...node,
+    roundIntent: streamingOptions.roundIntent?.trim() ? streamingOptions.roundIntent : node.roundIntent,
     options: streamingOptions.options
   };
 }
@@ -263,7 +305,7 @@ function mergeSkills(current: Skill[], incoming: Skill[]) {
 
 function needsNodeOptions(state: SessionState, nodeId: string | null) {
   const node = findTreeNode(state, nodeId);
-  return Boolean(node && draftForNode(state, nodeId) && node.options.length < 3);
+  return Boolean(node && !node.isTerminal && directDraftForNode(state, nodeId) && node.options.length < 3);
 }
 
 async function allowDraftRender() {
@@ -383,6 +425,7 @@ function incomingOptionLabelForNode(node: TreeNode, nodesById: Map<string, TreeN
 }
 
 const emptyRootSetupDefaults: RootSetupDefaults = {
+  artifactTypeId: DEFAULT_ARTIFACT_TYPE_ID,
   creationRequest: "",
   enabledSkillIds: [],
   seed: ""
@@ -509,6 +552,17 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     activeMobilePanelRef.current = "draft";
     setActiveMobilePanel("draft");
     clearMobilePanelUnread("draft");
+  }
+
+  function showMobileTreeForOptionsGeneration() {
+    if (!isMobileLayoutRef.current) return;
+    if (mobileGenerationPanelOverrideRef.current) {
+      markMobilePanelUnread("tree");
+      return;
+    }
+    activeMobilePanelRef.current = "tree";
+    setActiveMobilePanel("tree");
+    clearMobilePanelUnread("tree");
   }
 
   function isCurrentLoadRequest(requestId: number) {
@@ -756,7 +810,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   }
 
   function previewDraftGeneration(state: SessionState, nodeId: string | null) {
-    if (!nodeId || draftForNode(state, nodeId)) return;
+    if (!nodeId || directDraftForNode(state, nodeId)) return;
     setGenerationStage({ nodeId, stage: "draft" });
   }
 
@@ -866,7 +920,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     note?: string,
     optionMode: OptionGenerationMode = "balanced"
   ) {
-    if (!nodeId || draftForNode(state, nodeId)) return state;
+    if (!nodeId || directDraftForNode(state, nodeId)) return state;
 
     setGenerationStage({ nodeId, stage: "draft" });
     setStreamingThinking(null);
@@ -898,8 +952,10 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
 
     let doneState: SessionState | null = null;
     let receivedDraft = false;
+    let receivedOptions = false;
     let receivedThinking = false;
     let receivedDone = false;
+    let streamRoutedToOptions = false;
     let streamError: string | null = null;
     const decoder = new TextDecoder();
     const reader = response.body.getReader();
@@ -919,6 +975,16 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
         return;
       }
 
+      if (value.type === "options") {
+        setGenerationStage({ nodeId: value.nodeId, stage: "options" });
+        setStreamingOptions({ nodeId: value.nodeId, roundIntent: value.roundIntent ?? null, options: value.options });
+        setStreamingThinking(null);
+        showMobileTreeForOptionsGeneration();
+        receivedOptions = true;
+        streamRoutedToOptions = true;
+        return;
+      }
+
       if (value.type === "thinking") {
         setStreamingThinking({ nodeId: value.nodeId ?? nodeId, stage: "draft", text: value.text });
         markMobilePanelUnread("draft");
@@ -928,7 +994,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
 
       if (value.type === "done") {
         doneState = value.state;
-        markMobilePanelUnread("draft");
+        markMobilePanelUnread(streamRoutedToOptions ? "tree" : "draft");
         receivedDone = true;
         setStreamingThinking(null);
         return;
@@ -939,8 +1005,9 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       }
     });
     const maybeAllowDraftRender = async () => {
-      const shouldAllowDraftRender = (receivedDraft || receivedThinking) && !receivedDone;
+      const shouldAllowDraftRender = (receivedDraft || receivedOptions || receivedThinking) && !receivedDone;
       receivedDraft = false;
+      receivedOptions = false;
       receivedThinking = false;
       receivedDone = false;
       if (shouldAllowDraftRender) await allowDraftRender();
@@ -1040,7 +1107,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           );
         }
 
-        setStreamingOptions({ nodeId: value.nodeId, options: value.options });
+        setStreamingOptions({ nodeId: value.nodeId, roundIntent: value.roundIntent ?? null, options: value.options });
         markMobilePanelUnread("tree");
         receivedOptions = true;
         return;
@@ -1109,10 +1176,11 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     let nextState = await ensureNodeDraft(state, nodeId, note, optionMode);
     if (nextState !== state) {
       const generatedNodeId = nextState.currentNode?.id ?? nodeId;
+      const hasGeneratedDraft = Boolean(directDraftForNode(nextState, generatedNodeId ?? null));
       setSessionState(nextState);
       setViewNodeId(generatedNodeId ?? null);
-      setGeneratedDiffNodeId(generatedNodeId ?? null);
-      markMobilePanelUnread("draft");
+      setGeneratedDiffNodeId(hasGeneratedDraft ? generatedNodeId ?? null : null);
+      markMobilePanelUnread(hasGeneratedDraft ? "draft" : "tree");
       await allowDraftRender();
     }
 
@@ -1132,7 +1200,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setViewNodeId(nodeId);
     setCustomOption(null);
     setGeneratedDiffNodeId(null);
-    if (!sessionState || isBusy || !draftForNode(sessionState, nodeId) || !needsNodeOptions(sessionState, nodeId)) return;
+    if (!sessionState || isBusy || !directDraftForNode(sessionState, nodeId) || !needsNodeOptions(sessionState, nodeId)) return;
 
     await allowDraftRender();
     setIsBusy(true);
@@ -1235,6 +1303,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   function restartFromCurrentSettings() {
     const preferences = rootMemory?.preferences ?? sessionState?.rootMemory.preferences;
     openSeedSetup({
+      artifactTypeId: sessionState?.session.artifactTypeId ?? preferences?.artifactTypeId ?? DEFAULT_ARTIFACT_TYPE_ID,
       seed: preferences?.seed ?? "",
       creationRequest: preferences?.creationRequest ?? "",
       enabledSkillIds: sessionState?.enabledSkillIds ?? []
@@ -1309,6 +1378,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
         <RootMemorySetup
           initialCreationRequest={rootSetupDefaults?.creationRequest}
           initialCreationRequestOptions={creationRequestOptions}
+          initialArtifactTypeId={rootSetupDefaults?.artifactTypeId}
           initialSeed={rootSetupDefaults?.seed}
           initialSkillIds={rootSetupDefaults?.enabledSkillIds}
           message={message}
@@ -1337,15 +1407,16 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   if (loadState === "error") return <main className="loading-screen">{message}</main>;
 
   const treeChoicesDisabled = isBusy;
-  const startButtonLabel = isBusy && !sessionState ? "生成方向中" : sessionState ? "重新开始" : "开始创作";
+  const startButtonLabel = isBusy && !sessionState ? "生成问题中" : sessionState ? "重新开始" : "开始创作";
   const activeViewNodeId = viewNodeId ?? sessionState?.currentNode?.id ?? null;
   const activeViewNode = sessionState ? findTreeNode(sessionState, activeViewNodeId) : null;
   const treePreviousDraft =
     activeViewNode?.parentId && sessionState
-      ? sessionState.nodeDrafts.find((item) => item.nodeId === activeViewNode.parentId)?.draft ?? null
+      ? draftForNode(sessionState, activeViewNode.parentId)
       : null;
   const activeStreamingDraft = streamingDraft?.nodeId === activeViewNodeId ? streamingDraft : null;
   const previousDraft = activeStreamingDraft?.previousDraft ?? treePreviousDraft;
+  const directDraftForView = sessionState ? directDraftForNode(sessionState, activeViewNodeId) : null;
   const persistedDraftForView = sessionState ? draftForNode(sessionState, activeViewNodeId) : null;
   const isDraftGenerationForView = Boolean(
     activeViewNodeId && generationStage?.nodeId === activeViewNodeId && generationStage.stage === "draft"
@@ -1357,7 +1428,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     : undefined;
   const viewedDraft = streamedDraftForView ?? (isDraftGenerationForView ? previousDraft : persistedDraftForView);
   const isGeneratedDiffReview = Boolean(
-    generatedDiffNodeId === activeViewNodeId && previousDraft && persistedDraftForView && !isDraftGenerationForView
+    generatedDiffNodeId === activeViewNodeId && previousDraft && directDraftForView && !isDraftGenerationForView
   );
   const isLiveDraftStreaming = isDraftGenerationForView;
   const shouldShowGeneratedDiff = isLiveDraftStreaming || isGeneratedDiffReview;
@@ -1366,15 +1437,16 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     sessionState &&
       activeViewNodeId &&
       isViewingCurrentNode &&
+      !activeViewNode?.isTerminal &&
       previousDraft &&
-      !persistedDraftForView &&
+      !directDraftForView &&
       !isBusy
   );
   const canRegenerateOptions = Boolean(
     sessionState &&
       activeViewNodeId &&
       isViewingCurrentNode &&
-      persistedDraftForView &&
+      directDraftForView &&
       activeViewNode?.options.length === 3
   );
   const streamedActiveViewNode = activeViewNode ? withStreamingOptions(activeViewNode, streamingOptions) : null;
@@ -1604,6 +1676,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
         className={mobilePanelClassName("draft")}
       >
         <LiveDraft
+          artifactTypeId={sessionState?.session.artifactTypeId ?? DEFAULT_ARTIFACT_TYPE_ID}
           canCompareDrafts={comparisonEntries.length >= 2}
           comparisonDrafts={comparisonDrafts}
           comparisonLabels={comparisonLabels}

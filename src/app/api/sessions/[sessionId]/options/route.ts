@@ -89,7 +89,12 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
           },
           onText(event) {
             if (event.partialOptions) {
-              send({ type: "options", nodeId: body.nodeId, options: event.partialOptions });
+              send({
+                type: "options",
+                nodeId: body.nodeId,
+                roundIntent: event.partialRoundIntent,
+                options: event.partialOptions
+              });
             }
           }
         });
@@ -106,6 +111,7 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
           nodeId: body.nodeId,
           output
         });
+        send({ type: "options", nodeId: body.nodeId, roundIntent: output.roundIntent, options: output.options });
         send({ type: "done", state: nextState });
       } catch (error) {
         console.error("[treeable:generate-options]", error);

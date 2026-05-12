@@ -106,7 +106,12 @@ export async function POST(request: Request) {
               },
               onText(event) {
                 if (event.partialOptions && draftState.currentNode) {
-                  send({ type: "options", nodeId: draftState.currentNode.id, options: event.partialOptions });
+                  send({
+                    type: "options",
+                    nodeId: draftState.currentNode.id,
+                    roundIntent: event.partialRoundIntent,
+                    options: event.partialOptions
+                  });
                 }
               }
             }
@@ -124,6 +129,7 @@ export async function POST(request: Request) {
             nodeId: draftState.currentNode!.id,
             output
           });
+          send({ type: "options", nodeId: draftState.currentNode!.id, roundIntent: output.roundIntent, options: output.options });
           send({ type: "done", state: nextState });
         } catch (error) {
           console.error("[treeable:start-session]", error);

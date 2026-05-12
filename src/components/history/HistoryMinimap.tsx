@@ -23,7 +23,7 @@ export function HistoryMinimap({ state }: { state: SessionState | null }) {
           ) : null}
         </div>
       ) : (
-        <span className="minimap-empty">第一组三个方向出现后，你的选择路径会出现在这里。</span>
+        <span className="minimap-empty">第一个问题出现后，你的选择路径会出现在这里。</span>
       )}
     </div>
   );

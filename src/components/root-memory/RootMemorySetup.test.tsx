@@ -96,6 +96,26 @@ describe("RootMemorySetup", () => {
     });
   });
 
+  it("lets the user choose PRD as the artifact type", async () => {
+    const onSubmit = vi.fn();
+    renderRootMemorySetup({ onSubmit });
+
+    await userEvent.click(screen.getByRole("button", { name: "PRD 文档" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "创作 seed" }), "移动端草稿管理");
+    await userEvent.click(screen.getByRole("button", { name: "用这个念头开始" }));
+
+    expect(screen.getByRole("group", { name: "作品类型" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "社媒内容" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "PRD 文档" })).toHaveAttribute("aria-pressed", "true");
+    expect(onSubmit).toHaveBeenCalledWith({
+      preferences: expect.objectContaining({
+        artifactTypeId: "prd",
+        seed: "移动端草稿管理"
+      }),
+      enabledSkillIds: ["system-analysis"]
+    });
+  });
+
   it("lets the user submit an optional creation request", async () => {
     const onSubmit = vi.fn();
     renderRootMemorySetup({ onSubmit });

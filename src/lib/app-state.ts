@@ -1,12 +1,14 @@
 import {
   SkillSchema,
   skillsForTarget,
+  DEFAULT_ARTIFACT_TYPE_ID,
   type BranchOption,
   type Draft,
   type OptionGenerationMode,
   type SessionState
 } from "@/lib/domain";
 import type { DirectorInputParts, DirectorMessage } from "@/lib/ai/prompts";
+import { formatArtifactInstructionsForDirector } from "@/lib/artifacts";
 
 export function summarizeSessionForDirector(
   state: SessionState,
@@ -17,22 +19,27 @@ export function summarizeSessionForDirector(
   const trimmedNote = selectedOptionNote?.trim();
   const modeHint = formatDraftDirectionRangeHint(optionMode);
   const selectedOptionLabel = formatWritingIntentLabel(selectedOption, trimmedNote, modeHint);
+  const currentDraft = currentDraftForState(state);
 
   return {
+    artifactContext: artifactContextForState(state),
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
-    currentDraft: state.currentDraft ? formatDraftForDirector(state.currentDraft) : "",
+    currentDraft: currentDraft ? formatDraftForDirector(currentDraft) : "",
     pathSummary: "",
     foldedSummary: "",
     selectedOptionLabel,
     enabledSkills: enabledSkillsForDirector(state),
     messages: buildDraftConversationMessages(
       state,
-      formatDraftUserRequest({
-        modeHint,
-        selectedOption,
-        selectedOptionNote: trimmedNote
-      })
+      [
+        shouldRepeatArtifactContextForFinalRequest(state) ? artifactContextForState(state) : "",
+        formatDraftUserRequest({
+          modeHint,
+          selectedOption,
+          selectedOptionNote: trimmedNote
+        })
+      ].join("\n\n")
     )
   };
 }
@@ -89,6 +96,7 @@ export function summarizeEditedDraftForDirector(state: SessionState, draft: Draf
   const selectedOptionLabel = "";
 
   return {
+    artifactContext: artifactContextForState(state),
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
     currentDraft: formatDraftForDirector(draft),
@@ -105,16 +113,18 @@ export function summarizeCurrentDraftOptionsForDirector(
   optionMode: OptionGenerationMode = "balanced"
 ): DirectorInputParts {
   const selectedOptionLabel = formatOptionsDirectionRangeHint(optionMode);
+  const currentDraft = currentDraftForState(state);
 
   return {
+    artifactContext: artifactContextForState(state),
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
-    currentDraft: state.currentDraft ? formatDraftForDirector(state.currentDraft) : "",
+    currentDraft: currentDraft ? formatDraftForDirector(currentDraft) : "",
     pathSummary: "",
     foldedSummary: "",
     selectedOptionLabel,
     enabledSkills: enabledSkillsForDirector(state),
-    messages: buildEditorMessages(state, state.currentDraft, selectedOptionLabel)
+    messages: buildEditorMessages(state, currentDraft, selectedOptionLabel)
   };
 }
 
@@ -188,6 +198,7 @@ function buildDraftConversationMessages(state: SessionState, finalUserRequest: s
     {
       role: "user",
       content: [
+        artifactContextForState(state),
         `初始内容：\n${state.rootMemory.summary}`,
         `已学习偏好：\n${state.rootMemory.learnedSummary || "暂无已学习偏好。"}`,
         formatToolMemoryForDirector(state.toolMemory)
@@ -223,6 +234,7 @@ function buildEditorMessages(state: SessionState, currentDraft: Draft | null, re
     {
       role: "user",
       content: [
+        artifactContextForState(state),
         `初始内容：\n${state.rootMemory.summary}`,
         `已学习偏好：\n${state.rootMemory.learnedSummary || "暂无已学习偏好。"}`,
         formatToolMemoryForDirector(state.toolMemory)
@@ -359,6 +371,18 @@ function isSelectionReferenceOption(option: BranchOption) {
   return option.id.startsWith("custom-reference-") || option.description.trim().startsWith("用户引用文本：");
 }
 
+function artifactTypeIdForState(state: SessionState) {
+  return state.session.artifactTypeId ?? state.rootMemory.preferences.artifactTypeId ?? DEFAULT_ARTIFACT_TYPE_ID;
+}
+
+function artifactContextForState(state: SessionState) {
+  return formatArtifactInstructionsForDirector(artifactTypeIdForState(state));
+}
+
+function shouldRepeatArtifactContextForFinalRequest(state: SessionState) {
+  return artifactTypeIdForState(state) !== DEFAULT_ARTIFACT_TYPE_ID;
+}
+
 function formatEditorCurrentReviewMaterial({
   currentDraft,
   latestRevisionSummary,
@@ -380,9 +404,9 @@ function formatEditorCurrentReviewMaterial({
 
 function formatEditorSuggestionRound(node: SessionState["selectedPath"][number]) {
   return [
-    `第 ${node.roundIndex} 次编辑建议摘要`,
-    `编辑判断：${truncateText(node.roundIntent, 120)}`,
-    `建议标题：${formatSuggestionsForDirector(node.options)}`
+    `第 ${node.roundIndex} 次澄清问题摘要`,
+    `当前问题：${truncateText(node.roundIntent, 120)}`,
+    `答案标题：${formatSuggestionsForDirector(node.options)}`
   ].join("\n");
 }
 
@@ -480,8 +504,29 @@ function formatDraftVersionSummary(draft: Draft) {
 }
 
 function draftForNode(state: SessionState, node: SessionState["selectedPath"][number]) {
-  return (
-    state.nodeDrafts.find((item) => item.nodeId === node.id)?.draft ??
-    (state.currentNode?.id === node.id ? state.currentDraft : null)
+  return draftForNodeId(state, node.id) ?? nearestAncestorDraftForNode(state, node);
+}
+
+function currentDraftForState(state: SessionState) {
+  if (!state.currentNode) return state.currentDraft;
+  return draftForNode(state, state.currentNode);
+}
+
+function draftForNodeId(state: SessionState, nodeId: string) {
+  return state.nodeDrafts.find((item) => item.nodeId === nodeId)?.draft ?? (state.currentNode?.id === nodeId ? state.currentDraft : null);
+}
+
+function nearestAncestorDraftForNode(state: SessionState, node: SessionState["selectedPath"][number]) {
+  const nodesById = new Map(
+    [...(state.treeNodes ?? []), ...state.selectedPath, ...(state.currentNode ? [state.currentNode] : [])].map((item) => [item.id, item])
   );
+  let cursor = node.parentId ? nodesById.get(node.parentId) : null;
+
+  while (cursor) {
+    const draft = draftForNodeId(state, cursor.id);
+    if (draft) return draft;
+    cursor = cursor.parentId ? nodesById.get(cursor.parentId) : null;
+  }
+
+  return null;
 }

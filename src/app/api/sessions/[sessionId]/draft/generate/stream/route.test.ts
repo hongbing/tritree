@@ -3,6 +3,8 @@ import { AuthApiError } from "@/lib/auth/current-user";
 import { POST } from "./route";
 
 const streamDirectorDraftMock = vi.hoisted(() => vi.fn());
+const decideDirectorNextStepMock = vi.hoisted(() => vi.fn());
+const streamDirectorNextStepMock = vi.hoisted(() => vi.fn());
 const extractPartialDirectorDraftMock = vi.hoisted(() => vi.fn());
 const extractActiveDirectorDraftFieldMock = vi.hoisted(() => vi.fn());
 const getRepositoryMock = vi.hoisted(() => vi.fn());
@@ -19,6 +21,8 @@ const currentUser = {
 };
 
 vi.mock("@/lib/ai/director-stream", () => ({
+  decideDirectorNextStep: decideDirectorNextStepMock,
+  streamDirectorNextStep: streamDirectorNextStepMock,
   streamDirectorDraft: streamDirectorDraftMock,
   extractPartialDirectorDraft: extractPartialDirectorDraftMock,
   extractActiveDirectorDraftField: extractActiveDirectorDraftFieldMock
@@ -100,11 +104,23 @@ const state = {
 
 beforeEach(() => {
   streamDirectorDraftMock.mockReset();
+  decideDirectorNextStepMock.mockReset();
+  streamDirectorNextStepMock.mockReset();
   extractPartialDirectorDraftMock.mockReset();
   extractActiveDirectorDraftFieldMock.mockReset();
   getRepositoryMock.mockReset();
   requireCurrentUserMock.mockReset();
   requireCurrentUserMock.mockResolvedValue(currentUser);
+  decideDirectorNextStepMock.mockResolvedValue({
+    action: "draft",
+    roundIntent: "可以生成草稿",
+    memoryObservation: ""
+  });
+  streamDirectorNextStepMock.mockResolvedValue({
+    action: "draft",
+    roundIntent: "可以生成草稿",
+    memoryObservation: ""
+  });
 });
 
 describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
@@ -172,6 +188,149 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
       nodeId: "node-2",
       output: finalOutput
     });
+  });
+
+  it("lets the director continue with three choices instead of calling the draft agent", async () => {
+    const nextStepOutput = {
+      action: "options",
+      roundIntent: "先澄清样式修改范围",
+      options: [
+        { id: "a", label: "补系统范围", description: "说明哪些页面或模块要改。", impact: "避免 PRD 编造范围。", kind: "deepen" },
+        { id: "b", label: "补目标风格", description: "说明希望改成什么视觉方向。", impact: "让需求更明确。", kind: "reframe" },
+        { id: "c", label: "补验收标准", description: "说明如何判断样式改好了。", impact: "让后续草稿可执行。", kind: "finish" }
+      ],
+      memoryObservation: "需要先澄清 PRD 事实。"
+    };
+    const routedState = {
+      ...state,
+      currentNode: {
+        ...childNode,
+        roundIntent: nextStepOutput.roundIntent,
+        options: nextStepOutput.options
+      },
+      treeNodes: [
+        parentNode,
+        {
+          ...childNode,
+          roundIntent: nextStepOutput.roundIntent,
+          options: nextStepOutput.options
+        }
+      ],
+      selectedPath: [
+        parentNode,
+        {
+          ...childNode,
+          roundIntent: nextStepOutput.roundIntent,
+          options: nextStepOutput.options
+        }
+      ]
+    };
+    const updateNodeOptions = vi.fn().mockReturnValue(routedState);
+    getRepositoryMock.mockReturnValue({
+      getSessionState: vi.fn().mockReturnValue(state),
+      updateNodeOptions
+    });
+    streamDirectorNextStepMock.mockImplementation(async (_parts, options) => {
+      options.onReasoningText({ delta: "先判断。", accumulatedText: "先判断。" });
+      options.onText({
+        delta: "partial",
+        accumulatedText: "partial",
+        partialRoundIntent: nextStepOutput.roundIntent,
+        partialOptions: [nextStepOutput.options[0]]
+      });
+      return nextStepOutput;
+    });
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/draft/generate/stream", {
+        method: "POST",
+        body: JSON.stringify({ nodeId: "node-2" })
+      }),
+      { params: Promise.resolve({ sessionId: "session-1" }) }
+    );
+    const text = await response.text();
+
+    expect(streamDirectorDraftMock).not.toHaveBeenCalled();
+    expect(updateNodeOptions).toHaveBeenCalledWith({
+      userId: "user-1",
+      sessionId: "session-1",
+      nodeId: "node-2",
+      output: {
+        roundIntent: nextStepOutput.roundIntent,
+        options: nextStepOutput.options,
+        memoryObservation: nextStepOutput.memoryObservation
+      }
+    });
+    expect(text).toContain('"type":"options"');
+    expect(text).toContain('"text":"先判断。"');
+    expect(text).toContain('"roundIntent":"先澄清样式修改范围"');
+    expect(text).toContain('"label":"补系统范围"');
+    expect(text).toContain('"type":"done"');
+    expect(text.indexOf('"type":"thinking"')).toBeLessThan(text.indexOf('"type":"options"'));
+    expect(text.indexOf('"type":"options"')).toBeLessThan(text.indexOf('"type":"done"'));
+  });
+
+  it("lets the director complete the current path without drafting or asking again", async () => {
+    const nextStepOutput = {
+      action: "complete",
+      roundIntent: "当前版本已经可以交付",
+      memoryObservation: "用户选择停在当前版本。"
+    };
+    const completedState = {
+      ...state,
+      currentNode: {
+        ...childNode,
+        roundIntent: nextStepOutput.roundIntent,
+        isTerminal: true
+      },
+      treeNodes: [
+        parentNode,
+        {
+          ...childNode,
+          roundIntent: nextStepOutput.roundIntent,
+          isTerminal: true
+        }
+      ],
+      selectedPath: [
+        parentNode,
+        {
+          ...childNode,
+          roundIntent: nextStepOutput.roundIntent,
+          isTerminal: true
+        }
+      ]
+    };
+    const completeNode = vi.fn().mockReturnValue(completedState);
+    const updateNodeOptions = vi.fn();
+    getRepositoryMock.mockReturnValue({
+      getSessionState: vi.fn().mockReturnValue(state),
+      completeNode,
+      updateNodeOptions
+    });
+    streamDirectorNextStepMock.mockResolvedValue(nextStepOutput);
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/draft/generate/stream", {
+        method: "POST",
+        body: JSON.stringify({ nodeId: "node-2" })
+      }),
+      { params: Promise.resolve({ sessionId: "session-1" }) }
+    );
+    const text = await response.text();
+
+    expect(streamDirectorDraftMock).not.toHaveBeenCalled();
+    expect(updateNodeOptions).not.toHaveBeenCalled();
+    expect(completeNode).toHaveBeenCalledWith({
+      userId: "user-1",
+      sessionId: "session-1",
+      nodeId: "node-2",
+      output: {
+        roundIntent: nextStepOutput.roundIntent,
+        memoryObservation: nextStepOutput.memoryObservation
+      }
+    });
+    expect(text).toContain('"type":"done"');
+    expect(text).toContain('"isTerminal":true');
   });
 
   it("passes the request signal to the provider stream", async () => {

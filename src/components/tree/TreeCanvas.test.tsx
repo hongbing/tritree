@@ -156,18 +156,41 @@ describe("TreeCanvas", () => {
         onChoose={vi.fn()}
         options={currentNode.options}
         pendingChoice={null}
+        question="这次最需要先确认什么？"
       />
     );
 
-    const tray = screen.getByRole("group", { name: "下一步方向选项" });
+    const tray = screen.getByRole("group", { name: "回答当前问题" });
     const controls = within(tray).getByRole("group", { name: "方向控制" });
     const main = within(tray).getByRole("group", { name: "三个主选项" });
 
+    expect(within(tray).getByText("这次最需要先确认什么？")).toBeInTheDocument();
     expect(main.querySelectorAll('[data-choice-button="true"]')).toHaveLength(3);
     expect(within(main).getByRole("button", { name: /具体场景/ })).toBeEnabled();
     expect(within(controls).getByRole("button", { name: "更多方向" })).toBeEnabled();
     expect(screen.queryByLabelText("补充要求 A")).not.toBeInTheDocument();
     expect(tray.querySelector("foreignObject")).toBeNull();
+  });
+
+  it("shows a completed panel instead of waiting option placeholders for terminal nodes", () => {
+    const terminalNode: TreeNode = {
+      ...currentNode,
+      isTerminal: true,
+      options: [],
+      roundIntent: "当前草稿已经覆盖用户目标，可以停止继续澄清。"
+    };
+
+    render(
+      <TreeCanvas currentNode={terminalNode} isBusy={false} onChoose={vi.fn()} pendingChoice={null} selectedPath={[]} />
+    );
+
+    const completePanel = screen.getByRole("status", { name: "当前路径已完成" });
+
+    expect(completePanel).toHaveTextContent("已完成");
+    expect(completePanel).toHaveTextContent("当前草稿已经覆盖用户目标，可以停止继续澄清。");
+    expect(screen.queryByRole("group", { name: "回答当前问题" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "三个主选项" })).not.toBeInTheDocument();
+    expect(screen.queryByText("等待中")).not.toBeInTheDocument();
   });
 
   it("keeps three primary slots while options stream in", () => {
@@ -265,6 +288,24 @@ describe("TreeCanvas", () => {
     expect(moreRule).toContain("border: 0");
   });
 
+  it("caps long current questions so the three choices remain visible", () => {
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    const trayRule = css.match(/\.branch-option-tray\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const questionRule = css.match(/\.branch-option-question\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const questionTextRule = css.match(/\.branch-option-question__text\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const mainRule = css.match(/\.branch-option-main\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+    expect(trayRule).toContain("max-height:");
+    expect(trayRule).toContain("overflow: hidden");
+    expect(questionRule).toContain("max-height:");
+    expect(questionRule).toContain("overflow: auto");
+    expect(questionRule).toContain("overscroll-behavior: contain");
+    expect(questionTextRule).toContain("overflow-wrap: anywhere");
+    expect(questionTextRule).toContain("word-break: break-word");
+    expect(mainRule).toContain("min-height: 0");
+    expect(mainRule).toContain("overflow: auto");
+  });
+
   it("expands an option card on first click before showing the confirmation controls", () => {
     const onChoose = vi.fn();
     const longDescription =
@@ -325,7 +366,7 @@ describe("TreeCanvas", () => {
       />
     );
 
-    const tray = screen.getByRole("group", { name: "下一步方向选项" });
+    const tray = screen.getByRole("group", { name: "回答当前问题" });
     const range = within(tray).getByRole("group", { name: "发散度" });
 
     expect(within(range).getByRole("button", { name: "发散" })).toHaveAttribute("aria-pressed", "false");
@@ -420,7 +461,7 @@ describe("TreeCanvas", () => {
       />
     );
 
-    const tray = screen.getByRole("group", { name: "下一步方向选项" });
+    const tray = screen.getByRole("group", { name: "回答当前问题" });
     const controls = within(tray).getByRole("group", { name: "方向控制" });
 
     expect(within(controls).getByRole("button", { name: "更多方向" })).toBeEnabled();
@@ -807,6 +848,16 @@ describe("TreeCanvas", () => {
     expect(graph.nodes.find((node) => node.kind === "loading")?.id).toBe("loading-b");
   });
 
+  it("does not attach future option leaves to a terminal current node", () => {
+    const graph = createForceTreeGraph({
+      currentNode: { ...currentNode, isTerminal: true },
+      layout: getOptionBranchLayout(900),
+      selectedPath: []
+    });
+
+    expect(graph.nodes.filter((node) => node.kind === "option" || node.kind === "loading")).toHaveLength(0);
+  });
+
   it("keeps option tray disabled until all three leaves have appeared", () => {
     render(
       <BranchOptionTray
@@ -818,7 +869,7 @@ describe("TreeCanvas", () => {
       />
     );
 
-    const tray = screen.getByRole("group", { name: "下一步方向选项" });
+    const tray = screen.getByRole("group", { name: "回答当前问题" });
 
     expect(within(tray).getByRole("button", { name: /具体场景/ })).toBeDisabled();
     expect(within(tray).getByRole("button", { name: /实践经验/ })).toBeDisabled();
@@ -829,7 +880,7 @@ describe("TreeCanvas", () => {
     vi.useFakeTimers();
     try {
       render(<TreeCanvas currentNode={currentNode} isBusy={false} onChoose={vi.fn()} pendingChoice={null} selectedPath={[]} />);
-      const tray = screen.getByRole("group", { name: "下一步方向选项" });
+      const tray = screen.getByRole("group", { name: "回答当前问题" });
 
       expect(within(tray).queryAllByRole("button")).toHaveLength(0);
       expect(within(tray).getAllByText("等待中")).toHaveLength(3);
@@ -884,7 +935,7 @@ describe("TreeCanvas", () => {
         />
       );
 
-      const tray = screen.getByRole("group", { name: "下一步方向选项" });
+      const tray = screen.getByRole("group", { name: "回答当前问题" });
 
       act(() => {
         vi.advanceTimersByTime(1100);
@@ -1544,7 +1595,7 @@ describe("TreeCanvas", () => {
       />
     );
 
-    expect(screen.queryByRole("group", { name: "下一步方向选项" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "回答当前问题" })).not.toBeInTheDocument();
     expect(screen.queryByText("自定义视角")).not.toBeInTheDocument();
   });
 

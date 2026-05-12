@@ -4,7 +4,15 @@ import Link from "next/link";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, FileText, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { SkillPicker } from "@/components/skills/SkillPicker";
-import { DEFAULT_CREATION_REQUEST_OPTIONS, type CreationRequestOption, type RootPreferences, type Skill } from "@/lib/domain";
+import {
+  DEFAULT_CREATION_REQUEST_OPTIONS,
+  DEFAULT_ARTIFACT_TYPE_ID,
+  type ArtifactTypeId,
+  type CreationRequestOption,
+  type RootPreferences,
+  type Skill
+} from "@/lib/domain";
+import { listArtifactTypes } from "@/lib/artifacts";
 
 const defaultPreferences = {
   domains: ["创作"],
@@ -39,6 +47,7 @@ function defaultCreationRequestOptions(): CreationRequestOption[] {
 }
 
 export function RootMemorySetup({
+  initialArtifactTypeId = DEFAULT_ARTIFACT_TYPE_ID,
   initialSeed = "",
   initialCreationRequest = "",
   initialCreationRequestOptions,
@@ -51,6 +60,7 @@ export function RootMemorySetup({
   onCreationRequestOptionsChange,
   skills
 }: {
+  initialArtifactTypeId?: ArtifactTypeId;
   initialSeed?: string;
   initialCreationRequest?: string;
   initialCreationRequestOptions?: CreationRequestOption[];
@@ -63,6 +73,7 @@ export function RootMemorySetup({
   onManageSkills: () => void;
   skills: Skill[];
 }) {
+  const [artifactTypeId, setArtifactTypeId] = useState<ArtifactTypeId>(initialArtifactTypeId);
   const [seed, setSeed] = useState(initialSeed);
   const [creationRequest, setCreationRequest] = useState(initialCreationRequest);
   const [creationRequestOptions, setCreationRequestOptions] = useState<CreationRequestOption[]>(
@@ -91,10 +102,15 @@ export function RootMemorySetup({
     ? creationRequestOptions
     : creationRequestOptions.slice(0, visibleRequestOptionCount);
   const hiddenRequestOptionCount = Math.max(0, creationRequestOptions.length - visibleCreationRequestOptions.length);
+  const artifactTypes = listArtifactTypes();
 
   useEffect(() => {
     setCreationRequestOptions(initialCreationRequestOptions ?? defaultCreationRequestOptions());
   }, [initialCreationRequestOptions]);
+
+  useEffect(() => {
+    setArtifactTypeId(initialArtifactTypeId);
+  }, [initialArtifactTypeId]);
 
   function toggleCreationRequestOption(option: string) {
     setCreationRequest((current) => {
@@ -238,6 +254,28 @@ export function RootMemorySetup({
             {message}
           </p>
         ) : null}
+        <section aria-label="作品类型" className="root-setup__artifact-type" role="group">
+          <div>
+            <p className="eyebrow">作品类型</p>
+            <p className="root-setup__request-copy">选择这棵树要生成的产物。</p>
+          </div>
+          <div className="artifact-type-options">
+            {artifactTypes.map((artifactType) => (
+              <button
+                aria-label={artifactType.label}
+                aria-pressed={artifactTypeId === artifactType.id}
+                className={`artifact-type-option${artifactTypeId === artifactType.id ? " artifact-type-option--active" : ""}`}
+                disabled={isSaving}
+                key={artifactType.id}
+                onClick={() => setArtifactTypeId(artifactType.id)}
+                type="button"
+              >
+                <span>{artifactType.label}</span>
+                <small>{artifactType.description}</small>
+              </button>
+            ))}
+          </div>
+        </section>
         <label className="seed-field">
           <span>创作 seed</span>
           <textarea
@@ -486,6 +524,7 @@ export function RootMemorySetup({
             onSubmit({
               preferences: {
                 ...defaultPreferences,
+                artifactTypeId,
                 seed: trimmedSeed,
                 creationRequest: trimmedCreationRequest
               },

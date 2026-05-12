@@ -4,6 +4,7 @@ import type { ToolsInput } from "@mastra/core/agent";
 import { getDirectorAuthToken, getDirectorBaseUrl, getDirectorModel } from "./director";
 import {
   buildTreeDraftInstructions,
+  buildTreeNextStepInstructions,
   buildTreeOptionsInstructions,
   type SharedAgentContextInput
 } from "./mastra-context";
@@ -50,6 +51,20 @@ export function createTreeOptionsAgent(
     id: "treeable-tree-options-agent",
     name: "Treeable Tree Options Agent",
     instructions: buildTreeOptionsInstructions(context),
+    model: createTreeableAnthropicModel(env),
+    ...(hasTools(tools) ? { tools } : {})
+  });
+}
+
+export function createTreeNextStepAgent(
+  context: SharedAgentContextInput,
+  env: Record<string, string | undefined> = process.env,
+  tools?: ToolsInput
+) {
+  return new Agent({
+    id: "treeable-tree-next-step-agent",
+    name: "Treeable Tree Next Step Agent",
+    instructions: buildTreeNextStepInstructions(context),
     model: createTreeableAnthropicModel(env),
     ...(hasTools(tools) ? { tools } : {})
   });

@@ -2,7 +2,7 @@
 
 import * as d3 from "d3";
 import clsx from "clsx";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, RefreshCw } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, RefreshCw } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -96,6 +96,7 @@ export type ForceTreeNode = {
   isInactiveRoute?: boolean;
   inactiveRouteSide?: RouteSide;
   isSeedRoot?: boolean;
+  isTerminal?: boolean;
   kind: ForceTreeNodeKind;
   label: string;
   nodeId?: string;
@@ -214,6 +215,7 @@ function treeGraphNodeSignature(node: TreeNode | null) {
   return JSON.stringify({
     foldedOptions: node.foldedOptions.map(treeGraphOptionSignature),
     id: node.id,
+    isTerminal: node.isTerminal === true,
     parentId: node.parentId,
     parentOptionId: node.parentOptionId,
     options: node.options.map(treeGraphOptionSignature),
@@ -476,6 +478,7 @@ export function createForceTreeGraph({
       isInactiveRoute: !isActive,
       inactiveRouteSide,
       isSeedRoot,
+      isTerminal: node.isTerminal === true,
       kind: "history",
       label: compactBranchLabel(isSeedRoot ? SEED_ROOT_LABEL : incomingOption?.label ?? node.roundIntent),
       nodeId: node.id,
@@ -567,7 +570,7 @@ export function createForceTreeGraph({
   }
 
   const currentNodeHasChildren = Boolean(currentNode && allTreeNodes.some((node) => node.parentId === currentNode.id));
-  if (currentNode && !currentNodeHasChildren) {
+  if (currentNode && !currentNodeHasChildren && !currentNode.isTerminal) {
     const currentSourceId = outgoingSourceGraphIdForTreeNode(currentNode, graphNodeIdByTreeNodeId);
     if (!currentSourceId) {
       return finishGraph();
@@ -675,14 +678,16 @@ export function TreeCanvas({
   const nodeId = currentNode?.id ?? null;
   const isBranchGenerating = Boolean(pendingBranch);
   const graphCurrentNode = isBranchGenerating ? null : currentNode;
+  const isTerminalNode = currentNode?.isTerminal === true;
   const currentNodeHasChildren = Boolean(
     currentNode && treeNodes?.some((node) => node.parentId === currentNode.id)
   );
-  const currentPrimaryOptionCount = currentNode?.options.filter((option) => isPrimaryBranchOptionId(option.id)).length ?? 0;
+  const currentPrimaryOptionCount =
+    !isTerminalNode && currentNode ? currentNode.options.filter((option) => isPrimaryBranchOptionId(option.id)).length : 0;
   const effectiveVisibleOptionCount =
     nodeId && previousNodeIdRef.current === nodeId && !isBranchGenerating ? visibleOptionCount : 0;
   const isRevealing = Boolean(
-    graphCurrentNode && !currentNodeHasChildren && effectiveVisibleOptionCount < currentPrimaryOptionCount
+    graphCurrentNode && !graphCurrentNode.isTerminal && !currentNodeHasChildren && effectiveVisibleOptionCount < currentPrimaryOptionCount
   );
   const stableGraphCurrentNode = useStableTreeGraphNode(graphCurrentNode);
   const graph = useMemo(
@@ -1166,9 +1171,11 @@ export function TreeCanvas({
         </div>
       ) : null}
       {!currentNode && !pendingBranch ? (
-        <div className="tree-empty">输入 seed 后开始创作，第一组三个方向会出现在这里。</div>
+        <div className="tree-empty">输入 seed 后开始创作，第一个问题和三个答案会出现在这里。</div>
       ) : null}
-      {currentNode && !pendingBranch ? (
+      {isTerminalNode && currentNode && !pendingBranch ? (
+        <BranchCompletePanel message={currentNode.roundIntent} />
+      ) : currentNode && !pendingBranch ? (
         <BranchOptionTray
           isBusy={isBusy}
           onAddCustomOption={onAddCustomOption}
@@ -1176,10 +1183,27 @@ export function TreeCanvas({
           onRegenerateOptions={onRegenerateOptions}
           options={currentNode.options}
           pendingChoice={pendingChoice}
+          question={currentNode.roundIntent}
           skills={skills}
           visibleCount={effectiveVisibleOptionCount}
         />
       ) : null}
+    </div>
+  );
+}
+
+function BranchCompletePanel({ message }: { message?: string }) {
+  const trimmedMessage = message?.trim() || "当前草稿已经收束。";
+
+  return (
+    <div aria-label="当前路径已完成" className="branch-complete-panel" role="status">
+      <div className="branch-complete-panel__status">
+        <span className="branch-complete-panel__icon" aria-hidden="true">
+          <CheckCircle2 size={16} strokeWidth={2.5} />
+        </span>
+        <span>已完成</span>
+      </div>
+      <p className="branch-complete-panel__text">{trimmedMessage}</p>
     </div>
   );
 }
@@ -1191,6 +1215,7 @@ export function BranchOptionTray({
   onRegenerateOptions,
   options,
   pendingChoice,
+  question,
   skills = [],
   visibleCount = options.length
 }: {
@@ -1200,6 +1225,7 @@ export function BranchOptionTray({
   onRegenerateOptions?: (optionMode: OptionGenerationMode) => void;
   options: BranchOption[];
   pendingChoice: string | null;
+  question?: string;
   skills?: Skill[];
   visibleCount?: number;
 }) {
@@ -1212,9 +1238,16 @@ export function BranchOptionTray({
   const primaryAllVisible = PRIMARY_BRANCH_OPTION_IDS.every(
     (optionId) => primaryOptionById.has(optionId) && visiblePrimaryOptionIds.has(optionId)
   );
+  const trimmedQuestion = question?.trim();
 
   return (
-    <div aria-label="下一步方向选项" className="branch-option-tray" role="group">
+    <div aria-label="回答当前问题" className="branch-option-tray" role="group">
+      {trimmedQuestion ? (
+        <div className="branch-option-question">
+          <p className="branch-option-question__eyebrow">当前问题</p>
+          <p className="branch-option-question__text">{trimmedQuestion}</p>
+        </div>
+      ) : null}
       {primaryAllVisible ? (
         <div aria-label="方向控制" className="branch-option-tray__controls" role="group">
           <OptionModeControl

@@ -16,13 +16,15 @@ import { EditorState } from "@codemirror/state";
 import { Decoration, EditorView, keymap } from "@codemirror/view";
 import { createPortal } from "react-dom";
 import { Copy, ImagePlus, Send, Sparkles, X } from "lucide-react";
-import type { Draft, PublishPackage } from "@/lib/domain";
+import { DEFAULT_ARTIFACT_TYPE_ID, type ArtifactTypeId, type Draft, type PublishPackage } from "@/lib/domain";
+import { buildArtifactDelivery, getArtifactType } from "@/lib/artifacts";
 import { resolveDraftTitle } from "@/lib/seed-draft";
 
 type GenerationStage = "draft" | "options";
 type GenerationPhase = "preparing" | "thinking" | "streaming";
 
 export function LiveDraft({
+  artifactTypeId = DEFAULT_ARTIFACT_TYPE_ID,
   canCompareDrafts = false,
   comparisonDrafts = null,
   comparisonLabels = null,
@@ -48,6 +50,7 @@ export function LiveDraft({
   previousDraft = null,
   thinkingText = ""
 }: {
+  artifactTypeId?: ArtifactTypeId;
   canCompareDrafts?: boolean;
   comparisonDrafts?: { from: Draft; to: Draft } | null;
   comparisonLabels?: { from: string; to: string } | null;
@@ -101,6 +104,7 @@ export function LiveDraft({
   });
   const [publishXiaohongshuTitle, setPublishXiaohongshuTitle] = useState("");
   const [publishImagePrompt, setPublishImagePrompt] = useState("");
+  const [artifactDeliveryText, setArtifactDeliveryText] = useState("");
   const [copiedPublishAction, setCopiedPublishAction] = useState<PublishCopyAction | null>(null);
   const [publishCopyError, setPublishCopyError] = useState("");
   const [showDiff, setShowDiff] = useState(false);
@@ -110,6 +114,8 @@ export function LiveDraft({
   const [imagePrompt, setImagePrompt] = useState(() => initialEditableDraft?.imagePrompt ?? "");
   const thinkingPreRef = useRef<HTMLPreElement | null>(null);
   const baseEditableDraft = comparisonDrafts?.to ?? content;
+  const artifactType = getArtifactType(artifactTypeId);
+  const isSocialArtifact = artifactType.showPublishAssistant;
   const hasVisibleStreamingImagePrompt = Boolean(
     content?.imagePrompt.trim() && previousDraft && content.imagePrompt !== previousDraft.imagePrompt
   );
@@ -125,10 +131,10 @@ export function LiveDraft({
     () => ({
       title,
       body,
-      hashtags: parseHashtags(hashtags),
-      imagePrompt
+      hashtags: artifactType.showTopics ? parseHashtags(hashtags) : [],
+      imagePrompt: artifactType.showImagePrompt ? imagePrompt : ""
     }),
-    [body, hashtags, imagePrompt, title]
+    [artifactType.showImagePrompt, artifactType.showTopics, body, hashtags, imagePrompt, title]
   );
   const streamingDisplayDraft = useMemo(
     () =>
@@ -200,6 +206,7 @@ export function LiveDraft({
   const selectedDiffToken =
     selectedDiffAction && draftDiff ? draftDiff[selectedDiffAction.field][selectedDiffAction.tokenIndex] : null;
   const selectedDiffPopoverPosition = selectedDiffAction ? diffPopoverPosition(selectedDiffAction.anchorRect) : null;
+  const artifactDelivery = content ? buildArtifactDelivery(artifactType.id, content) : null;
 
   useEffect(() => {
     const thinkingPre = thinkingPreRef.current;
@@ -216,10 +223,11 @@ export function LiveDraft({
     setCopiedPublishAction(null);
     setPublishCopyError("");
     setPublishFieldsFromDraft(baseEditableDraft);
+    setArtifactDeliveryFieldsFromDraft(baseEditableDraft);
     closeSelectionEdit();
     setShowDiff(false);
     setEditorFieldsFromDraft(baseEditableDraft);
-  }, [baseEditableDraft?.title, baseEditableDraft?.body, baseEditableDraft?.imagePrompt, baseEditableDraft?.hashtags]);
+  }, [artifactType.id, baseEditableDraft?.title, baseEditableDraft?.body, baseEditableDraft?.imagePrompt, baseEditableDraft?.hashtags]);
 
   useEffect(() => {
     if (isLiveDiff && !isLiveDiffStreaming) return;
@@ -471,7 +479,9 @@ export function LiveDraft({
     if (!content) return;
 
     const value =
-      action === "weibo"
+      action === "artifactDelivery"
+        ? artifactDeliveryText.trim()
+        : action === "weibo"
         ? publishTexts.weibo.trim()
         : action === "xiaohongshu"
           ? publishTexts.xiaohongshu.trim()
@@ -543,11 +553,15 @@ export function LiveDraft({
     setPublishImagePrompt(nextDraft?.imagePrompt.trim() ?? "");
   }
 
+  function setArtifactDeliveryFieldsFromDraft(nextDraft: Draft | null) {
+    setArtifactDeliveryText(nextDraft ? buildArtifactDelivery(artifactType.id, nextDraft).text : "");
+  }
+
   return (
     <aside className="draft-panel">
       <div className="panel-heading">
         <Sparkles size={16} />
-        <span>{mode === "history" ? "历史草稿" : "实时草稿"}</span>
+        <span>{mode === "history" ? artifactType.historyPanelTitle : artifactType.currentPanelTitle}</span>
         <div className="draft-panel__actions">
           {headerActions}
           {content && !isComparisonMode ? (
@@ -558,13 +572,19 @@ export function LiveDraft({
               onClick={() => {
                 setPublishCopyError("");
                 setCopiedPublishAction(null);
-                if (!isPublishPanelOpen) setPublishFieldsFromDraft(content);
+                if (!isPublishPanelOpen) {
+                  if (isSocialArtifact) {
+                    setPublishFieldsFromDraft(content);
+                  } else {
+                    setArtifactDeliveryFieldsFromDraft(content);
+                  }
+                }
                 setIsPublishPanelOpen((open) => !open);
               }}
               type="button"
             >
               <Send aria-hidden="true" size={13} />
-              <span>发布</span>
+              <span>{artifactType.actionLabel}</span>
             </button>
           ) : null}
           {canShowDiffControl ? (
@@ -586,7 +606,7 @@ export function LiveDraft({
         </div>
       </div>
       {headerPanel ? <div className="draft-panel__popover">{headerPanel}</div> : null}
-      {isPublishPanelOpen && content ? (
+      {isPublishPanelOpen && content ? isSocialArtifact ? (
         <aside aria-label="发布助手" className="draft-publish-panel" role="dialog">
           <div className="draft-publish-panel__header">
             <div>
@@ -750,6 +770,57 @@ export function LiveDraft({
             ))}
           </div>
         </aside>
+      ) : (
+        <aside aria-label={artifactType.actionDialogLabel} className="draft-publish-panel" role="dialog">
+          <div className="draft-publish-panel__header">
+            <div>
+              <p className="draft-publish-panel__title">{artifactDelivery?.title ?? artifactType.actionDialogTitle}</p>
+              <p className="draft-publish-panel__copy">{artifactType.actionCopy}</p>
+            </div>
+            <button
+              aria-label={`关闭${artifactType.actionDialogLabel}`}
+              className="draft-publish-panel__close"
+              onClick={() => setIsPublishPanelOpen(false)}
+              type="button"
+            >
+              <X aria-hidden="true" size={14} />
+            </button>
+          </div>
+          <section className="draft-publish-preview" aria-label={artifactDelivery?.title ?? artifactType.actionDialogTitle}>
+            <div className="draft-publish-preview__meta">
+              <span>{artifactDelivery?.textLabel ?? "交付稿"}</span>
+              <span>约 {artifactDeliveryText.length} 字</span>
+            </div>
+            <textarea
+              aria-label={artifactDelivery?.textLabel ?? "交付稿"}
+              onChange={(event) => {
+                setArtifactDeliveryText(event.target.value);
+                setCopiedPublishAction(null);
+              }}
+              rows={12}
+              value={artifactDeliveryText}
+            />
+          </section>
+          <div className="draft-publish-actions">
+            <button className="draft-publish-actions__primary" onClick={() => void copyPublishText("artifactDelivery")} type="button">
+              <Copy aria-hidden="true" size={13} />
+              <span>{copiedPublishAction === "artifactDelivery" ? "已复制" : artifactDelivery?.copyLabel ?? "复制交付稿"}</span>
+            </button>
+          </div>
+          {publishCopyError ? (
+            <p className="draft-publish-error" role="status">
+              {publishCopyError}
+            </p>
+          ) : null}
+          <div className="draft-publish-checks" aria-label={`${artifactType.label}交付检查`}>
+            {(artifactDelivery?.checks ?? []).map((check) => (
+              <p className={`draft-publish-check draft-publish-check--${check.tone}`} key={check.text}>
+                <span aria-hidden="true">{check.tone === "ok" ? "✓" : check.tone === "warn" ? "!" : "•"}</span>
+                <span>{check.text}</span>
+              </p>
+            ))}
+          </div>
+        </aside>
       ) : null}
       <div className="draft-panel__scroll">
         {isBusy ? (
@@ -784,11 +855,11 @@ export function LiveDraft({
         {content && isEditing ? (
           <div className="draft-editor">
             <label>
-              <span>标题</span>
+              <span>{artifactType.titleLabel}</span>
               <input onChange={(event) => setTitle(event.target.value)} value={title} />
             </label>
             <label>
-              <span>正文</span>
+              <span>{artifactType.bodyLabel}</span>
               <textarea
                 onChange={(event) => setBody(event.target.value)}
                 onMouseDown={preserveTextareaSelection}
@@ -797,14 +868,18 @@ export function LiveDraft({
                 value={body}
               />
             </label>
-            <label>
-              <span>话题</span>
-              <input onChange={(event) => setHashtags(event.target.value)} value={hashtags} />
-            </label>
-            <label>
-              <span>配图提示</span>
-              <textarea onChange={(event) => setImagePrompt(event.target.value)} rows={4} value={imagePrompt} />
-            </label>
+            {artifactType.showTopics ? (
+              <label>
+                <span>话题</span>
+                <input onChange={(event) => setHashtags(event.target.value)} value={hashtags} />
+              </label>
+            ) : null}
+            {artifactType.showImagePrompt ? (
+              <label>
+                <span>配图提示</span>
+                <textarea onChange={(event) => setImagePrompt(event.target.value)} rows={4} value={imagePrompt} />
+              </label>
+            ) : null}
             <div className="draft-editor__actions">
               <button className="secondary-button" disabled={isBusy} onClick={cancelEditing} type="button">
                 退出草稿
@@ -822,7 +897,7 @@ export function LiveDraft({
                   <DraftDiffMergeField
                     className="draft-cm-diff-field--title"
                     disabled={isBusy || isReadOnlyMergeDiff}
-                    label="标题"
+                    label={artifactType.titleLabel}
                     onChange={isReadOnlyMergeDiff ? undefined : setTitle}
                     original={resolveDraftTitle(inlineDiffOriginalDraft?.title, inlineDiffOriginalDraft?.body)}
                     rows={1}
@@ -832,7 +907,7 @@ export function LiveDraft({
                 <div className="draft-body">
                   <DraftDiffMergeField
                     disabled={isBusy || isReadOnlyMergeDiff}
-                    label="正文"
+                    label={artifactType.bodyLabel}
                     onChange={isReadOnlyMergeDiff ? undefined : setBody}
                     onSelectText={canUseSelectionRewrite ? captureMergeBodySelection : undefined}
                     original={inlineDiffOriginalDraft?.body ?? ""}
@@ -841,33 +916,37 @@ export function LiveDraft({
                     value={displayContent?.body ?? ""}
                   />
                 </div>
-                <div className="tag-row">
-                  <DiffTokens
-                    field="hashtags"
-                    isInteractive={false}
-                    onSelect={selectDiffAction}
-                    selectedAction={selectedDiffAction}
-                    tokens={draftDiff.hashtags}
-                  />
-                </div>
-                <section className="image-prompt">
-                  <div className="image-prompt__heading">
-                    <h3>配图提示</h3>
-                    <button className="image-prompt__generate-button" disabled={isBusy} onClick={generateImage} type="button">
-                      <ImagePlus aria-hidden="true" size={14} />
-                      <span>生成图片</span>
-                    </button>
+                {artifactType.showTopics ? (
+                  <div className="tag-row">
+                    <DiffTokens
+                      field="hashtags"
+                      isInteractive={false}
+                      onSelect={selectDiffAction}
+                      selectedAction={selectedDiffAction}
+                      tokens={draftDiff.hashtags}
+                    />
                   </div>
-                  <DraftDiffMergeField
-                    disabled={isBusy || isReadOnlyMergeDiff}
-                    label="配图提示"
-                    onChange={isReadOnlyMergeDiff ? undefined : setImagePrompt}
-                    original={inlineDiffOriginalDraft?.imagePrompt ?? ""}
-                    rows={4}
-                    streamingLinePosition={imagePromptStreamingLinePosition}
-                    value={displayContent?.imagePrompt ?? ""}
-                  />
-                </section>
+                ) : null}
+                {artifactType.showImagePrompt ? (
+                  <section className="image-prompt">
+                    <div className="image-prompt__heading">
+                      <h3>配图提示</h3>
+                      <button className="image-prompt__generate-button" disabled={isBusy} onClick={generateImage} type="button">
+                        <ImagePlus aria-hidden="true" size={14} />
+                        <span>生成图片</span>
+                      </button>
+                    </div>
+                    <DraftDiffMergeField
+                      disabled={isBusy || isReadOnlyMergeDiff}
+                      label="配图提示"
+                      onChange={isReadOnlyMergeDiff ? undefined : setImagePrompt}
+                      original={inlineDiffOriginalDraft?.imagePrompt ?? ""}
+                      rows={4}
+                      streamingLinePosition={imagePromptStreamingLinePosition}
+                      value={displayContent?.imagePrompt ?? ""}
+                    />
+                  </section>
+                ) : null}
                 {isInlineDiffEditor ? (
                   <div className="draft-diff-inline-actions">
                     <button className="secondary-button" disabled={isBusy} onClick={exitInlineDiffDraft} type="button">
@@ -927,41 +1006,45 @@ export function LiveDraft({
                     ))
                   )}
                 </div>
-                <div className="tag-row">
-                  {shouldShowInlineDiff && draftDiff ? (
-                    <DiffTokens
-                      field="hashtags"
-                      isInteractive={canUseInlineDiffEditing}
-                      onSelect={selectDiffAction}
-                      selectedAction={selectedDiffAction}
-                      tokens={draftDiff.hashtags}
-                    />
-                  ) : (
-                    (displayContent?.hashtags ?? []).map((tag) => <span key={tag}>{tag}</span>)
-                  )}
-                </div>
-                <section className="image-prompt">
-                  <div className="image-prompt__heading">
-                    <h3>配图提示</h3>
-                    <button className="image-prompt__generate-button" disabled={isBusy} onClick={generateImage} type="button">
-                      <ImagePlus aria-hidden="true" size={14} />
-                      <span>生成图片</span>
-                    </button>
-                  </div>
-                  <p className={shouldShowInlineDiff ? "draft-inline-diff" : undefined}>
+                {artifactType.showTopics ? (
+                  <div className="tag-row">
                     {shouldShowInlineDiff && draftDiff ? (
                       <DiffTokens
-                        field="imagePrompt"
+                        field="hashtags"
                         isInteractive={canUseInlineDiffEditing}
                         onSelect={selectDiffAction}
                         selectedAction={selectedDiffAction}
-                        tokens={draftDiff.imagePrompt}
+                        tokens={draftDiff.hashtags}
                       />
                     ) : (
-                      displayContent?.imagePrompt || "还没有配图方向。"
+                      (displayContent?.hashtags ?? []).map((tag) => <span key={tag}>{tag}</span>)
                     )}
-                  </p>
-                </section>
+                  </div>
+                ) : null}
+                {artifactType.showImagePrompt ? (
+                  <section className="image-prompt">
+                    <div className="image-prompt__heading">
+                      <h3>配图提示</h3>
+                      <button className="image-prompt__generate-button" disabled={isBusy} onClick={generateImage} type="button">
+                        <ImagePlus aria-hidden="true" size={14} />
+                        <span>生成图片</span>
+                      </button>
+                    </div>
+                    <p className={shouldShowInlineDiff ? "draft-inline-diff" : undefined}>
+                      {shouldShowInlineDiff && draftDiff ? (
+                        <DiffTokens
+                          field="imagePrompt"
+                          isInteractive={canUseInlineDiffEditing}
+                          onSelect={selectDiffAction}
+                          selectedAction={selectedDiffAction}
+                          tokens={draftDiff.imagePrompt}
+                        />
+                      ) : (
+                        displayContent?.imagePrompt || "还没有配图方向。"
+                      )}
+                    </p>
+                  </section>
+                ) : null}
               </>
             )}
             {selectedDiffAction && selectedDiffToken && selectedDiffPopoverPosition && typeof document !== "undefined"
@@ -1387,7 +1470,15 @@ type DiffToken = {
 type DiffField = "title" | "body" | "hashtags" | "imagePrompt";
 type LiveDiffStreamingField = Extract<DiffField, "body" | "imagePrompt">;
 type PublishPlatform = "weibo" | "xiaohongshu" | "moments";
-type PublishCopyAction = "weibo" | "xiaohongshu" | "moments" | "title" | "body" | "hashtags" | "imagePrompt";
+type PublishCopyAction =
+  | "artifactDelivery"
+  | "weibo"
+  | "xiaohongshu"
+  | "moments"
+  | "title"
+  | "body"
+  | "hashtags"
+  | "imagePrompt";
 type PublishCheck = {
   text: string;
   tone: "ok" | "warn" | "neutral";

@@ -45,6 +45,42 @@ describe("summarizeSessionForDirector", () => {
     expect(summary.learnedSummary).toContain("practical");
   });
 
+  it("includes artifact type instructions in draft and option contexts", () => {
+    const state = {
+      ...createStateWithPath([]),
+      rootMemory: {
+        ...createStateWithPath([]).rootMemory,
+        preferences: {
+          ...createStateWithPath([]).rootMemory.preferences,
+          artifactTypeId: "prd" as const,
+          seed: "移动端草稿管理"
+        },
+        summary: "Seed：移动端草稿管理"
+      },
+      session: {
+        ...createStateWithPath([]).session,
+        artifactTypeId: "prd" as const
+      },
+      currentDraft: {
+        title: "移动端草稿管理 PRD",
+        body: "## 背景\n用户需要移动端继续草稿。",
+        hashtags: [],
+        imagePrompt: ""
+      }
+    };
+
+    const draftSummary = summarizeSessionForDirector(state, option("a", "补完整需求"));
+    const optionSummary = summarizeCurrentDraftOptionsForDirector(state);
+    const draftMessages = (draftSummary as any).messages as Array<{ role: string; content: string }>;
+    const optionMessages = (optionSummary as any).messages as Array<{ role: string; content: string }>;
+
+    expect(draftSummary.artifactContext).toContain("作品类型：PRD 文档");
+    expect(draftSummary.artifactContext).toContain("hashtags 必须返回空数组");
+    expect(optionSummary.artifactContext).toContain("澄清问题和三个答案应该围绕 PRD 决策");
+    expect(draftMessages.at(-1)?.content).toContain("作品类型：PRD 文档");
+    expect(optionMessages.at(-1)?.content ?? optionMessages[0].content).toContain("作品类型：PRD 文档");
+  });
+
   it("includes user notes for the selected option", () => {
     const summary = summarizeSessionForDirector(
       {
@@ -94,7 +130,7 @@ describe("summarizeSessionForDirector", () => {
     expect(summary.selectedOptionLabel).toContain("沿当前稿已经成立的思路继续推进");
     expect(summary.selectedOptionLabel).not.toContain("硬约束");
     expect(summary.selectedOptionLabel).not.toContain("不主动改换主题、读者、前提或基本结构");
-    expect(summary.selectedOptionLabel).not.toContain("三个选项");
+    expect(summary.selectedOptionLabel).not.toContain("三个答案");
     expect(summary.selectedOptionLabel).not.toContain("近距离推进");
     expect(summary.selectedOptionLabel).not.toContain("草稿改动幅度由所选方向决定");
     expect(summary.selectedOptionLabel).not.toContain("本轮写作倾向");
@@ -477,8 +513,8 @@ describe("summarizeSessionForDirector", () => {
 
     expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
     expect(messages[0].content).toContain("初始内容：");
-    expect(messages[1].content).toContain("第 1 次编辑建议摘要");
-    expect(messages[1].content).toContain("建议标题：扩写完整经历；分析为什么写；确定写给谁看");
+    expect(messages[1].content).toContain("第 1 次澄清问题摘要");
+    expect(messages[1].content).toContain("答案标题：扩写完整经历；分析为什么写；确定写给谁看");
     expect(messages[1].content).not.toContain("扩写完整经历的说明");
     expect(finalMessage).toContain("最近一次修改：确定写给谁看");
     expect(finalMessage).not.toContain("确定写给谁看的说明");
@@ -496,6 +532,42 @@ describe("summarizeSessionForDirector", () => {
     expect(finalMessage).not.toContain("用户选择");
     expect(finalMessage).not.toContain("三选一");
     expectNoProcessTerms(finalMessage);
+  });
+
+  it("uses the nearest ancestor draft when the current clarification node has no draft", () => {
+    const parent = createNode({
+      id: "root",
+      roundIndex: 1,
+      options: [
+        option("a", "说明系统范围"),
+        option("b", "说明目标风格"),
+        option("c", "说明验收标准")
+      ],
+      selectedOptionId: "a"
+    });
+    const clarification = createNode({
+      id: "clarify",
+      parentId: "root",
+      parentOptionId: "a",
+      roundIndex: 2,
+      options: [option("a", "只改后台"), option("b", "只改前台"), option("c", "前后台都改")],
+      selectedOptionId: null
+    });
+    const state = {
+      ...createStateWithPath([parent, clarification]),
+      currentDraft: null,
+      nodeDrafts: [
+        {
+          nodeId: "root",
+          draft: { title: "旧 PRD", body: "## 背景\n旧内容", hashtags: [], imagePrompt: "" }
+        }
+      ]
+    };
+
+    const summary = summarizeSessionForDirector(state, clarification.options[0]);
+
+    expect(summary.currentDraft).toContain("旧 PRD");
+    expect(summary.currentDraft).toContain("旧内容");
   });
 
   it("asks for editorial suggestions after edited content without UI process language", () => {

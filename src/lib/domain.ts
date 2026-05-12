@@ -1,6 +1,9 @@
 import { z } from "zod";
 
 export const OptionGenerationModeSchema = z.enum(["divergent", "balanced", "focused"]);
+export const ARTIFACT_TYPE_IDS = ["social-post", "prd"] as const;
+export const DEFAULT_ARTIFACT_TYPE_ID = "social-post";
+export const ArtifactTypeIdSchema = z.enum(ARTIFACT_TYPE_IDS);
 
 export const SkillCategorySchema = z.enum(["方向", "约束", "风格", "平台", "检查"]);
 export const SkillAppliesToSchema = z.enum(["writer", "editor", "both"]);
@@ -55,7 +58,7 @@ export const DEFAULT_SYSTEM_SKILLS = [
     category: "方向",
     description: "判断内容所处阶段，并控制改动幅度。",
     prompt:
-      "帮助创作者判断当前内容处于哪种创作阶段，并据此控制 AI 介入强度。种子或零散想法阶段：只有概念、情绪、判断或材料清单，可以大幅组织材料、补上下文、生成初稿骨架。半成稿阶段：已有若干段落或素材，但主线、顺序、读者对象、开头结尾还不稳，可以中等调整，补主线、调顺序、增加过渡，但要保留主要素材和语气。结构成稿阶段：已经有开头、展开、解释或例子，但局部逻辑、转折、段落节奏仍可优化，优先做局部调整和小范围补齐。基本成稿阶段：有清楚主题、完整叙述链路、关键解释和自然收束，进入成稿保护，保留原有结构、段落和主要句子，只做必要的局部优化。当任务是提出编辑建议时，按当前内容的问题程度和修改收益排序，不要预设必须包含某一类建议；文案表达、断句和分段整理不受发布前阶段限制，如果表达本身已经承载了主要信息，只是长段、口语散、层次不清或局部不顺，应优先给保留原意的表达优化或分段整理；如果主线、读者、事实或结构问题更严重，再优先给澄清、补信息、调整角度或重组方向；避免默认把所有建议都给重构、换角度、重写、扩写这类大改方向。发布前阶段：只做标题、话题、配图提示、错别字、风险表达、结尾收束等轻量整理。当前内容优先，保留用户已经确认过的表达。草稿越完整，改动越克制；用户表达越明确，保留越多；只有用户明确要求重构、换角度或大改方向时，才允许明显重写。",
+      "帮助创作者判断当前内容处于哪种创作阶段，并据此控制 AI 介入强度。种子或零散想法阶段：只有概念、情绪、判断或材料清单，可以大幅组织材料、补上下文、生成初稿骨架。半成稿阶段：已有若干段落或素材，但主线、顺序、读者对象、开头结尾还不稳，可以中等调整，补主线、调顺序、增加过渡，但要保留主要素材和语气。结构成稿阶段：已经有开头、展开、解释或例子，但局部逻辑、转折、段落节奏仍可优化，优先做局部调整和小范围补齐。基本成稿阶段：有清楚主题、完整叙述链路、关键解释和自然收束，进入成稿保护，保留原有结构、段落和主要句子，只做必要的局部优化。当任务是设计澄清问题和答案时，按当前内容的问题程度和后续生成收益排序，不要预设必须询问某一类问题；文案表达、断句和分段整理不受发布前阶段限制，如果表达本身已经承载了主要信息，只是长段、口语散、层次不清或局部不顺，可以把保留原意的表达优化作为答案；如果主线、读者、事实或结构问题更严重，再优先给澄清、补信息、调整角度或重组方向；避免默认把所有答案都给重构、换角度、重写、扩写这类大改方向。发布前阶段：只做标题、话题、配图提示、错别字、风险表达、结尾收束等轻量整理。当前内容优先，保留用户已经确认过的表达。草稿越完整，改动越克制；用户表达越明确，保留越多；只有用户明确要求重构、换角度或大改方向时，才允许明显重写。",
     appliesTo: "both",
     defaultEnabled: true
   },
@@ -224,6 +227,7 @@ export const DEFAULT_SYSTEM_SKILLS = [
 ] satisfies Array<z.input<typeof SkillUpsertSchema> & { id: string }>;
 
 export const RootPreferencesSchema = z.object({
+  artifactTypeId: ArtifactTypeIdSchema.default(DEFAULT_ARTIFACT_TYPE_ID),
   seed: z.string().trim().default(""),
   creationRequest: z.string().trim().max(240).default(""),
   domains: z.array(z.string().min(1)).min(1),
@@ -275,11 +279,16 @@ export const BranchOptionSchema = z.object({
   mode: OptionGenerationModeSchema.optional()
 });
 
+const BranchOptionKindSchema = BranchOptionSchema.shape.kind;
+const DIRECTOR_NEXT_STEP_DEFAULT_KINDS = ["explore", "deepen", "reframe"] as const satisfies Array<
+  z.infer<typeof BranchOptionKindSchema>
+>;
+
 export const CUSTOM_EDIT_OPTION = {
   id: "custom-edit",
   label: "自定义编辑",
   description: "根据最新当前内容继续。",
-  impact: "保留这次手动修改，并从修改后的版本生成新的下一步方向。",
+  impact: "保留这次手动修改，并从修改后的版本生成新的澄清问题。",
   kind: "reframe"
 } satisfies z.infer<typeof BranchOptionSchema>;
 
@@ -337,6 +346,64 @@ export const DirectorOptionsOutputSchema = z.object({
   }
 });
 
+const DirectorNextStepDraftSchema = z.object({
+  action: z.literal("draft"),
+  roundIntent: z.string().min(1),
+  memoryObservation: z.string()
+});
+
+const DirectorNextStepCompleteSchema = z.object({
+  action: z.literal("complete"),
+  roundIntent: z.string().min(1),
+  memoryObservation: z.string()
+});
+
+const DirectorNextStepOptionsSchema = z.object({
+  action: z.literal("options").default("options"),
+  roundIntent: z.string().min(1),
+  options: z
+    .array(
+      z.object({
+        id: z.enum(PRIMARY_BRANCH_OPTION_IDS).optional(),
+        label: z.string().min(1),
+        description: z.string().min(1),
+        impact: z.string().min(1),
+        kind: BranchOptionKindSchema.optional(),
+        mode: OptionGenerationModeSchema.optional()
+      })
+    )
+    .length(3, "AI suggestions must include exactly three items."),
+  memoryObservation: z.string()
+}).transform((output) => {
+  const options = output.options.map((option, index) => ({
+    id: option.id ?? PRIMARY_BRANCH_OPTION_IDS[index],
+    label: option.label,
+    description: option.description,
+    impact: option.impact,
+    kind: option.kind ?? DIRECTOR_NEXT_STEP_DEFAULT_KINDS[index],
+    ...(option.mode ? { mode: option.mode } : {})
+  }));
+
+  return {
+    ...output,
+    options
+  };
+});
+
+export const DirectorNextStepOutputSchema = z.union([
+  DirectorNextStepDraftSchema,
+  DirectorNextStepCompleteSchema,
+  DirectorNextStepOptionsSchema
+]).superRefine((output, context) => {
+  if (output.action === "options" && !includesDirectorOptionIdsOnce(output.options)) {
+    context.addIssue({
+      code: "custom",
+      path: ["options"],
+      message: DIRECTOR_OPTION_IDS_ERROR
+    });
+  }
+});
+
 export const DirectorDraftOutputSchema = z.object({
   roundIntent: z.string().min(1),
   draft: DraftSchema,
@@ -355,6 +422,7 @@ export const TreeNodeSchema = z.object({
   options: z.array(BranchOptionSchema),
   selectedOptionId: BranchOptionSchema.shape.id.nullable(),
   foldedOptions: z.array(BranchOptionSchema),
+  isTerminal: z.boolean().optional(),
   createdAt: z.string()
 });
 
@@ -368,6 +436,7 @@ export const FoldedBranchSchema = z.object({
 export const SessionStateSchema = z.object({
   rootMemory: RootMemorySchema,
   session: z.object({
+    artifactTypeId: ArtifactTypeIdSchema.default(DEFAULT_ARTIFACT_TYPE_ID),
     id: z.string(),
     title: z.string(),
     status: SessionStatusSchema,
@@ -401,6 +470,7 @@ export const DraftSummarySchema = z.object({
 });
 
 export type RootPreferences = z.input<typeof RootPreferencesSchema>;
+export type ArtifactTypeId = z.infer<typeof ArtifactTypeIdSchema>;
 export type CreationRequestOption = z.infer<typeof CreationRequestOptionSchema>;
 export type CreationRequestOptionUpsert = z.input<typeof CreationRequestOptionUpsertSchema>;
 export type SkillCategory = z.infer<typeof SkillCategorySchema>;
@@ -417,6 +487,7 @@ export type OptionGenerationMode = z.infer<typeof OptionGenerationModeSchema>;
 export type DirectorOutput = z.infer<typeof DirectorOutputSchema>;
 export type DirectorOptionsOutput = z.infer<typeof DirectorOptionsOutputSchema>;
 export type DirectorDraftOutput = z.infer<typeof DirectorDraftOutputSchema>;
+export type DirectorNextStepOutput = z.infer<typeof DirectorNextStepOutputSchema>;
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 export type TreeNode = z.infer<typeof TreeNodeSchema>;
 export type FoldedBranch = z.infer<typeof FoldedBranchSchema>;

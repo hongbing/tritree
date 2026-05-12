@@ -3,6 +3,7 @@ import type { Skill } from "@/lib/domain";
 import { createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-agents";
 import {
   generateTreeDraft,
+  generateTreeNextStep,
   generateTreeOptions,
   streamTreeDraft,
   streamTreeOptions
@@ -232,6 +233,53 @@ describe("tree director compatibility generators", () => {
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:options]",
+      expect.not.stringContaining("自然短句")
+    );
+  });
+
+  it("lets the director route a selected choice to either options or draft", async () => {
+    const fakeAgent = {
+      generate: vi.fn(async () => ({
+        object: {
+          action: "options",
+          roundIntent: "先澄清背景",
+          options: [
+            { id: "a", label: "补系统范围", description: "先确认哪些模块要改。", impact: "避免 PRD 编造范围。", kind: "deepen" },
+            { id: "b", label: "补目标风格", description: "先确认要改成什么风格。", impact: "让需求更明确。", kind: "reframe" },
+            { id: "c", label: "补验收标准", description: "先确认怎么算改好。", impact: "让后续草稿可执行。", kind: "finish" }
+          ],
+          memoryObservation: "需要先澄清事实。"
+        }
+      }))
+    };
+
+    const output = await generateTreeNextStep({
+      parts: directorParts,
+      memory: { resource: "root", thread: "session-1" },
+      treeNextStepAgent: fakeAgent
+    });
+
+    expect(output.action).toBe("options");
+    expect(output.roundIntent).toBe("先澄清背景");
+    expect(output.action === "options" ? output.options[0] : null).toMatchObject({ id: "a", label: "补系统范围" });
+
+    expect(fakeAgent.generate).toHaveBeenCalledWith(
+      directorParts.messages,
+      expect.objectContaining({
+        memory: { resource: "root", thread: "session-1" },
+        structuredOutput: expect.objectContaining({ schema: expect.anything() })
+      })
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[treeable:mastra-prompt:next-step]",
+      expect.stringContaining("决定下一步是继续澄清，还是授权生成草稿")
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[treeable:mastra-prompt:next-step]",
+      expect.stringContaining("逻辑链审查")
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[treeable:mastra-prompt:next-step]",
       expect.not.stringContaining("自然短句")
     );
   });
@@ -541,7 +589,7 @@ describe("tree director compatibility generators", () => {
       stream: vi.fn(async () => ({
         fullStream: async function* () {
           yield { type: "reasoning-delta", payload: { text: "先判断当前稿。" } };
-          yield { type: "reasoning-delta", delta: "再给三个方向。" };
+          yield { type: "reasoning-delta", delta: "再给三个答案。" };
           yield { type: "object", object: { roundIntent: "选择下一步", options: [{ id: "a", label: "补具体场景" }] } };
           yield { type: "object-result", object: finalObject };
         },
@@ -563,7 +611,7 @@ describe("tree director compatibility generators", () => {
 
     expect(reasoningEvents).toEqual([
       { delta: "先判断当前稿。", accumulatedText: "先判断当前稿。" },
-      { delta: "再给三个方向。", accumulatedText: "先判断当前稿。再给三个方向。" }
+      { delta: "再给三个答案。", accumulatedText: "先判断当前稿。再给三个答案。" }
     ]);
     expect(partials).toContainEqual({ roundIntent: "选择下一步", options: [{ id: "a", label: "补具体场景" }] });
   });
@@ -1323,7 +1371,7 @@ describe("tree director compatibility generators", () => {
     );
     expect(mocks.agentConstructor).toHaveBeenCalledWith(
       expect.objectContaining({
-        instructions: expect.stringContaining("最终目标就是调用 submit_tree_options 完成本轮编辑建议任务")
+        instructions: expect.stringContaining("最终目标就是调用 submit_tree_options 完成本轮澄清选项任务")
       })
     );
     const streamOptions = (stream.mock.calls as unknown as Array<[unknown, Record<string, unknown>]>)[0]?.[1];

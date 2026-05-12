@@ -33,7 +33,7 @@ vi.mock("@/components/tree/TreeCanvas", () => ({
   }: {
     changedDraftNodeIds?: string[];
     comparisonNodeIds?: { fromNodeId: string | null; toNodeId: string | null } | null;
-    currentNode: { id: string; options: Array<{ id: "a"; label: string } | { id: string; label: string }> } | null;
+    currentNode: { id: string; options: Array<{ id: "a"; label: string } | { id: string; label: string }>; roundIntent?: string } | null;
     generationStage?: { nodeId: string; stage: "draft" | "options" } | null;
     isBusy: boolean;
     isComparisonMode?: boolean;
@@ -64,6 +64,7 @@ vi.mock("@/components/tree/TreeCanvas", () => ({
         {isBusy ? "choices disabled" : "choices enabled"}
         {isComparisonMode ? " comparison mode" : ""}
         <div data-testid="canvas-current-node">{currentNode?.id ?? "none"}</div>
+        <div data-testid="canvas-round-intent">{currentNode?.roundIntent ?? ""}</div>
         <div data-testid="canvas-generation-stage">
           {generationStage ? `${generationStage.nodeId}:${generationStage.stage}` : "idle"}
         </div>
@@ -1873,34 +1874,40 @@ describe("TreeableApp", () => {
     });
 
     act(() => {
-      optionsStream.push({ type: "thinking", text: "先看当前草稿，再拆三个方向。" });
+      optionsStream.push({ type: "thinking", text: "先看当前草稿，再拆一个问题。" });
     });
 
     await vi.waitFor(() => {
       expect(screen.getByTestId("live-draft-generation-status")).toHaveTextContent(
-        "options:thinking:先看当前草稿，再拆三个方向。"
+        "options:thinking:先看当前草稿，再拆一个问题。"
       );
     });
     expect(screen.queryByRole("status", { name: "AI 思考过程" })).not.toBeInTheDocument();
 
     act(() => {
-      optionsStream.push({ type: "thinking", text: "先看当前草稿，再拆三个方向。第二步排除重复建议。" });
+      optionsStream.push({ type: "thinking", text: "先看当前草稿，再拆一个问题。第二步排除重复答案。" });
     });
 
     await vi.waitFor(() => {
       expect(screen.getByTestId("live-draft-generation-status")).toHaveTextContent(
-        "options:thinking:先看当前草稿，再拆三个方向。第二步排除重复建议。"
+        "options:thinking:先看当前草稿，再拆一个问题。第二步排除重复答案。"
       );
     });
 
     act(() => {
-      optionsStream.push({ type: "options", nodeId: "node-2", options: [finalOptions[0]] });
+      optionsStream.push({
+        type: "options",
+        nodeId: "node-2",
+        roundIntent: "现在最需要确认哪个体验价值？",
+        options: [finalOptions[0]]
+      });
     });
 
     await vi.waitFor(() => {
       expect(screen.getByTestId("canvas-options").textContent).toBe("First A");
+      expect(screen.getByTestId("canvas-round-intent")).toHaveTextContent("现在最需要确认哪个体验价值？");
       expect(screen.getByTestId("live-draft-generation-status")).toHaveTextContent(
-        "options:streaming:先看当前草稿，再拆三个方向。第二步排除重复建议。"
+        "options:streaming:先看当前草稿，再拆一个问题。第二步排除重复答案。"
       );
     });
 
@@ -1919,11 +1926,11 @@ describe("TreeableApp", () => {
     await vi.waitFor(() => {
       expect(screen.getByTestId("canvas-options").textContent).toBe("First A|Second B|Third C");
       expect(screen.getByTestId("live-draft-generation-status")).toHaveTextContent("options:streaming:");
-      expect(screen.getByTestId("live-draft-generation-status")).not.toHaveTextContent("第二步排除重复建议");
+      expect(screen.getByTestId("live-draft-generation-status")).not.toHaveTextContent("第二步排除重复答案");
     });
 
     act(() => {
-      optionsStream.push({ type: "thinking", text: "结构修复重试，重新判断三个方向。" });
+      optionsStream.push({ type: "thinking", text: "结构修复重试，重新判断当前问题。" });
       optionsStream.push({
         type: "options",
         nodeId: "node-2",

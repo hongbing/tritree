@@ -3,6 +3,7 @@ import {
   BranchOptionSchema,
   DEFAULT_SYSTEM_SKILLS,
   DirectorOptionsOutputSchema,
+  DirectorNextStepOutputSchema,
   DirectorOutputSchema,
   RootPreferencesSchema,
   SessionStateSchema,
@@ -61,6 +62,28 @@ describe("RootPreferencesSchema", () => {
 
     expect(legacy.creationRequest).toBe("");
   });
+
+  it("defaults legacy works to social-post and accepts PRD works", () => {
+    const legacy = RootPreferencesSchema.parse({
+      seed: "旧 seed",
+      domains: ["AI"],
+      tones: ["calm"],
+      styles: ["opinion-driven"],
+      personas: ["practitioner"]
+    });
+
+    const prd = RootPreferencesSchema.parse({
+      artifactTypeId: "prd",
+      seed: "移动端草稿管理",
+      domains: ["Work"],
+      tones: ["calm"],
+      styles: ["document"],
+      personas: ["product manager"]
+    });
+
+    expect(legacy.artifactTypeId).toBe("social-post");
+    expect(prd.artifactTypeId).toBe("prd");
+  });
 });
 
 describe("DirectorOptionsOutputSchema", () => {
@@ -77,6 +100,96 @@ describe("DirectorOptionsOutputSchema", () => {
 
     expect(parsed.options.map((option) => option.id)).toEqual(["a", "b", "c"]);
     expect(parsed).not.toHaveProperty("draft");
+  });
+});
+
+describe("DirectorNextStepOutputSchema", () => {
+  it("accepts a decision to generate a draft without options", () => {
+    const parsed = DirectorNextStepOutputSchema.parse({
+      action: "draft",
+      roundIntent: "信息足够，生成一版 PRD",
+      memoryObservation: "用户想先改系统样式。"
+    });
+
+    expect(parsed.action).toBe("draft");
+    expect(parsed).not.toHaveProperty("options");
+  });
+
+  it("accepts a decision to complete the current path without more options or a draft", () => {
+    const parsed = DirectorNextStepOutputSchema.parse({
+      action: "complete",
+      roundIntent: "当前版本已经可以交付",
+      memoryObservation: "用户选择停在当前版本。"
+    });
+
+    expect(parsed.action).toBe("complete");
+    expect(parsed).not.toHaveProperty("options");
+  });
+
+  it("accepts a decision to continue with three real choices", () => {
+    const parsed = DirectorNextStepOutputSchema.parse({
+      action: "options",
+      roundIntent: "需要先澄清样式修改范围",
+      options: [
+        { id: "a", label: "说明页面范围", description: "先确认哪些页面需要改。", impact: "避免草稿假设范围。", kind: "deepen" },
+        { id: "b", label: "说明目标风格", description: "先确认要改成什么感觉。", impact: "让后续 PRD 更准确。", kind: "reframe" },
+        { id: "c", label: "说明验收标准", description: "先确认怎么判断改好了。", impact: "让需求可执行。", kind: "finish" }
+      ],
+      memoryObservation: "PRD 需要先澄清事实。"
+    });
+
+    expect(parsed.action).toBe("options");
+    if (parsed.action === "options") {
+      expect(parsed.options.map((option) => option.id)).toEqual(["a", "b", "c"]);
+    }
+  });
+
+  it("normalizes an options decision when the model omits the action field", () => {
+    const parsed = DirectorNextStepOutputSchema.parse({
+      roundIntent: "需要先澄清样式修改范围",
+      options: [
+        { id: "a", label: "说明页面范围", description: "先确认哪些页面需要改。", impact: "避免草稿假设范围。", kind: "deepen" },
+        { id: "b", label: "说明目标风格", description: "先确认要改成什么感觉。", impact: "让后续 PRD 更准确。", kind: "reframe" },
+        { id: "c", label: "说明验收标准", description: "先确认怎么判断改好了。", impact: "让需求可执行。", kind: "finish" }
+      ],
+      memoryObservation: "PRD 需要先澄清事实。"
+    });
+
+    expect(parsed.action).toBe("options");
+    if (parsed.action === "options") {
+      expect(parsed.options).toHaveLength(3);
+    }
+  });
+
+  it("normalizes director answers that omit branch ids and kinds", () => {
+    const parsed = DirectorNextStepOutputSchema.parse({
+      action: "options",
+      roundIntent: "需要先确认表达角度",
+      options: [
+        {
+          label: "改样式的方法论",
+          description: "聚焦我是如何做选择的。",
+          impact: "适合技术/设计混合读者。"
+        },
+        {
+          label: "审美迭代过程",
+          description: "聚焦我的审美是怎么变的。",
+          impact: "适合建立人设和情感连接。"
+        },
+        {
+          label: "组件设计哲学",
+          description: "聚焦这个组件为什么长这样。",
+          impact: "适合产品/设计视角分析。"
+        }
+      ],
+      memoryObservation: "需要先确定叙事角度。"
+    });
+
+    expect(parsed.action).toBe("options");
+    if (parsed.action === "options") {
+      expect(parsed.options.map((option) => option.id)).toEqual(["a", "b", "c"]);
+      expect(parsed.options.map((option) => option.kind)).toEqual(["explore", "deepen", "reframe"]);
+    }
   });
 });
 
@@ -406,11 +519,11 @@ describe("SkillSchema", () => {
     expect(workflowSkill?.prompt).toContain("发布前");
     expect(workflowSkill?.prompt).toContain("草稿越完整，改动越克制");
     expect(workflowSkill?.prompt).toContain("有清楚主题、完整叙述链路、关键解释和自然收束");
-    expect(workflowSkill?.prompt).toContain("当任务是提出编辑建议时");
-    expect(workflowSkill?.prompt).toContain("按当前内容的问题程度和修改收益排序");
+    expect(workflowSkill?.prompt).toContain("当任务是设计澄清问题和答案时");
+    expect(workflowSkill?.prompt).toContain("按当前内容的问题程度和后续生成收益排序");
     expect(workflowSkill?.prompt).toContain("文案表达、断句和分段整理不受发布前阶段限制");
-    expect(workflowSkill?.prompt).toContain("优先给保留原意的表达优化或分段整理");
-    expect(workflowSkill?.prompt).toContain("避免默认把所有建议都给重构、换角度、重写、扩写这类大改方向");
+    expect(workflowSkill?.prompt).toContain("可以把保留原意的表达优化作为答案");
+    expect(workflowSkill?.prompt).toContain("避免默认把所有答案都给重构、换角度、重写、扩写这类大改方向");
     expect(workflowSkill?.prompt).not.toContain("应至少包含");
     expect(workflowSkill?.prompt).not.toContain("下一步选项");
     expect(workflowSkill?.prompt).not.toContain("用户手动编辑后");
@@ -473,6 +586,7 @@ describe("SessionStateSchema", () => {
         updatedAt: "2026-04-24T00:00:00.000Z"
       },
       session: {
+        artifactTypeId: "prd",
         id: "session-1",
         title: "Treeable session",
         status: "active",
@@ -515,6 +629,7 @@ describe("SessionStateSchema", () => {
     });
 
     expect(parsed.session.status).toBe("active");
+    expect(parsed.session.artifactTypeId).toBe("prd");
     expect(parsed.toolMemory).toBe("");
   });
 });

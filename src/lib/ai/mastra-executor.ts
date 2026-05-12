@@ -1,9 +1,11 @@
 import {
   type BranchOption,
   DirectorDraftOutputSchema,
+  DirectorNextStepOutputSchema,
   DirectorOptionsOutputSchema,
   type Draft,
   type DirectorDraftOutput,
+  type DirectorNextStepOutput,
   type DirectorOptionsOutput,
   type Skill,
   skillsForTarget
@@ -13,9 +15,10 @@ import { createTool } from "@mastra/core/tools";
 import { ZodError, type ZodIssue } from "zod";
 import { createSkillRuntimeTools } from "@/lib/skills/skill-runtime";
 import { appendToolQueryMemoryObservation } from "@/lib/tool-memory";
-import { createTreeDraftAgent, createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-agents";
+import { createTreeDraftAgent, createTreeNextStepAgent, createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-agents";
 import {
   buildTreeDraftInstructions,
+  buildTreeNextStepInstructions,
   buildTreeOptionsInstructions,
   type SharedAgentContextInput
 } from "./mastra-context";
@@ -113,6 +116,13 @@ type TreeOptionsPartial = Partial<Omit<DirectorOptionsOutput, "options">> & {
   options?: Array<Partial<BranchOption>>;
 };
 
+type TreeNextStepPartial = {
+  action?: "draft" | "options";
+  memoryObservation?: string;
+  options?: Array<Partial<BranchOption>>;
+  roundIntent?: string;
+};
+
 type ReasoningTextEvent = {
   delta: string;
   accumulatedText: string;
@@ -148,6 +158,8 @@ const MAX_TOOL_TRANSCRIPT_CHARS = 24000;
 const SUBMIT_TREE_DRAFT_TOOL_NAME = "submit_tree_draft";
 const SUBMIT_TREE_OPTIONS_TOOL_NAME = "submit_tree_options";
 
+type TreeNextStepAgentLike = TreeOptionsAgentLike;
+
 export async function generateTreeDraft({
   parts,
   signal,
@@ -176,6 +188,97 @@ export async function generateTreeDraft({
     }
 
     return DirectorDraftOutputSchema.parse(unwrapMastraToolInput(result.object ?? result.output));
+  });
+}
+
+export async function generateTreeNextStep({
+  parts,
+  signal,
+  env,
+  memory,
+  context,
+  treeNextStepAgent
+}: TreeDirectorExecutionInput & {
+  treeNextStepAgent?: TreeNextStepAgentLike;
+}): Promise<DirectorNextStepOutput> {
+  const { agentContext, tools } = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeNextStepAgent));
+  const messages = directorMessagesForParts(parts);
+  logMastraPrompt("next-step", agentContext, messages);
+  const agent = treeNextStepAgent ?? (createTreeNextStepAgent(agentContext, env, tools) as unknown as TreeNextStepAgentLike);
+  return withStructuredOutputRetries(messages, "next-step", async (attemptMessages) => {
+    let result: Awaited<ReturnType<TreeNextStepAgentLike["generate"]>>;
+    try {
+      result = await agent.generate(attemptMessages, {
+        abortSignal: signal,
+        ...executionOptionsForTools(tools),
+        memory: memory ?? memoryScopeForDirectorParts(parts),
+        structuredOutput: structuredOutputForDirector(DirectorNextStepOutputSchema, env, tools, "generate")
+      });
+    } catch (error) {
+      return DirectorNextStepOutputSchema.parse(recoverMastraStructuredOutputValidationValue(error));
+    }
+
+    return DirectorNextStepOutputSchema.parse(unwrapMastraToolInput(result.object ?? result.output));
+  });
+}
+
+export async function streamTreeNextStep({
+  parts,
+  signal,
+  env,
+  memory,
+  context,
+  treeNextStepAgent,
+  onPartialObject,
+  onReasoningText
+}: TreeDirectorExecutionInput & {
+  treeNextStepAgent?: TreeNextStepAgentLike;
+  onPartialObject?: (partial: TreeNextStepPartial) => void;
+  onReasoningText?: (event: ReasoningTextEvent) => void;
+}): Promise<DirectorNextStepOutput> {
+  const { agentContext, tools } = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeNextStepAgent));
+  const messages = directorMessagesForParts(parts);
+  logMastraPrompt("next-step", agentContext, messages);
+  const agent = treeNextStepAgent ?? (createTreeNextStepAgent(agentContext, env, tools) as unknown as TreeNextStepAgentLike);
+
+  return withStructuredOutputRetries(messages, "next-step", async (attemptMessages) => {
+    const stream = agent.stream
+      ? await agent.stream(attemptMessages, {
+          abortSignal: signal,
+          ...executionOptionsForTools(tools),
+          memory: memory ?? memoryScopeForDirectorParts(parts),
+          structuredOutput: structuredOutputForDirector(DirectorNextStepOutputSchema, env, tools, "stream")
+        })
+      : null;
+
+    if (!stream) {
+      const output = await generateTreeNextStep({
+        parts: { ...parts, messages: attemptMessages },
+        signal,
+        env,
+        memory,
+        context,
+        treeNextStepAgent: agent
+      });
+      onPartialObject?.(output as TreeNextStepPartial);
+      return output;
+    }
+
+    let latestPartial: unknown = null;
+    if (stream.fullStream) {
+      latestPartial = await consumeStructuredFullStream<TreeNextStepPartial>(stream.fullStream, {
+        onPartialObject,
+        onReasoningText
+      });
+    } else if (stream.objectStream) {
+      for await (const partial of toAsyncIterable(stream.objectStream)) {
+        latestPartial = partial;
+        onPartialObject?.(partial as TreeNextStepPartial);
+      }
+    }
+
+    const output = await resolveStructuredStreamOutput(stream, latestPartial);
+    return DirectorNextStepOutputSchema.parse(output);
   });
 }
 
@@ -843,7 +946,7 @@ function attachToolMemoryObservation<TOutput>(output: TOutput, toolTranscript: s
 
 async function withStructuredOutputRetries<T>(
   messages: MastraConversationMessage[],
-  target: "draft" | "options",
+  target: "draft" | "next-step" | "options",
   run: (messages: MastraConversationMessage[]) => Promise<T>
 ): Promise<T> {
   let attemptMessages = messages;
@@ -877,7 +980,7 @@ function structuredOutputRepairMessage({
 }: {
   error: unknown;
   retryNumber: number;
-  target: "draft" | "options";
+  target: "draft" | "next-step" | "options";
 }): MastraConversationMessage {
   return {
     role: "user",
@@ -887,7 +990,11 @@ function structuredOutputRepairMessage({
       "结构问题：",
       structuredOutputIssueSummary(error),
       "最终结构要求：",
-      target === "draft" ? draftOutputShapeSummary() : optionsOutputShapeSummary()
+      target === "draft"
+        ? draftOutputShapeSummary()
+        : target === "next-step"
+          ? nextStepOutputShapeSummary()
+          : optionsOutputShapeSummary()
     ].join("\n")
   };
 }
@@ -954,6 +1061,16 @@ function optionsOutputShapeSummary() {
     "必须返回对象：{ roundIntent, options, memoryObservation }。",
     "options 必须正好 3 项，id 必须分别是 a、b、c 且只出现一次。",
     "每个 option 必须包含 { id, label, description, impact, kind }；kind 只能是 explore、deepen、reframe 或 finish。"
+  ].join("\n");
+}
+
+function nextStepOutputShapeSummary() {
+  return [
+    "必须返回对象：{ action, roundIntent, memoryObservation }。",
+    "action 只能是 draft、options 或 complete。",
+    "当 action=draft 时不要返回 options。",
+    "当 action=complete 时不要返回 options。",
+    "当 action=options 时必须返回 options 正好 3 项；每项只需要包含 { label, description, impact }，系统会自动补 id 和 kind。"
   ].join("\n");
 }
 
@@ -1753,11 +1870,16 @@ function structuredObjectFromStreamChunk(chunk: unknown) {
 }
 
 function logMastraPrompt(
-  kind: "draft" | "options",
+  kind: "draft" | "next-step" | "options",
   context: SharedAgentContextInput,
   messages: MastraConversationMessage[]
 ) {
-  const instructions = kind === "draft" ? buildTreeDraftInstructions(context) : buildTreeOptionsInstructions(context);
+  const instructions =
+    kind === "draft"
+      ? buildTreeDraftInstructions(context)
+      : kind === "next-step"
+        ? buildTreeNextStepInstructions(context)
+        : buildTreeOptionsInstructions(context);
   console.info(
     `[treeable:mastra-prompt:${kind}]`,
     JSON.stringify(

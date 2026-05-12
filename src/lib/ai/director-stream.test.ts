@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mastraMocks = vi.hoisted(() => ({
+  generateTreeNextStep: vi.fn(),
   streamTreeDraft: vi.fn(),
+  streamTreeNextStep: vi.fn(),
   streamTreeOptions: vi.fn()
 }));
 
 vi.mock("./mastra-executor", () => ({
+  generateTreeNextStep: mastraMocks.generateTreeNextStep,
   streamTreeDraft: mastraMocks.streamTreeDraft,
+  streamTreeNextStep: mastraMocks.streamTreeNextStep,
   streamTreeOptions: mastraMocks.streamTreeOptions
 }));
 
@@ -15,6 +19,7 @@ import {
   extractPartialDirectorOptions,
   extractPartialDirectorDraft,
   streamDirectorDraft,
+  streamDirectorNextStep,
   streamDirectorOptions
 } from "./director-stream";
 
@@ -29,7 +34,9 @@ const directorInput = {
 };
 
 beforeEach(() => {
+  mastraMocks.generateTreeNextStep.mockReset();
   mastraMocks.streamTreeDraft.mockReset();
+  mastraMocks.streamTreeNextStep.mockReset();
   mastraMocks.streamTreeOptions.mockReset();
 });
 
@@ -184,6 +191,88 @@ describe("extractPartialDirectorOptions", () => {
         kind: "reframe"
       }
     ]);
+  });
+
+  it("assigns stable preview ids when streamed answers omit ids", () => {
+    expect(
+      extractPartialDirectorOptions(
+        '{"action":"options","roundIntent":"需要先确认角度","options":[{"label":"方法论","description":"讲怎么决策","impact":"更实用"},{"label":"个人迭代"'
+      )
+    ).toEqual([
+      {
+        id: "a",
+        label: "方法论",
+        description: "讲怎么决策",
+        impact: "更实用",
+        kind: "explore"
+      },
+      {
+        id: "b",
+        label: "个人迭代",
+        description: "正在生成方向说明",
+        impact: "正在生成影响说明",
+        kind: "deepen"
+      }
+    ]);
+  });
+});
+
+describe("streamDirectorNextStep", () => {
+  it("streams next-step clarification answers before returning the final decision", async () => {
+    const output = {
+      action: "options",
+      roundIntent: "需要先确认角度",
+      options: [
+        { id: "a", label: "方法论", description: "讲怎么决策。", impact: "更实用。", kind: "explore" },
+        { id: "b", label: "个人迭代", description: "讲审美变化。", impact: "更有人味。", kind: "deepen" },
+        { id: "c", label: "设计哲学", description: "讲约束取舍。", impact: "更系统。", kind: "reframe" }
+      ],
+      memoryObservation: "需要确认叙事角度。"
+    };
+    mastraMocks.streamTreeNextStep.mockImplementation(async ({ onPartialObject }) => {
+      onPartialObject({
+        action: "options",
+        roundIntent: "需要先确认角度",
+        options: [{ label: "方法论", description: "讲怎么决策。", impact: "更实用。" }]
+      });
+      return output;
+    });
+    const onText = vi.fn();
+
+    await expect(
+      streamDirectorNextStep(directorInput, {
+        memory: { resource: "root", thread: "session-1" },
+        onText
+      })
+    ).resolves.toEqual(output);
+
+    expect(mastraMocks.streamTreeNextStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parts: directorInput,
+        memory: { resource: "root", thread: "session-1" }
+      })
+    );
+    expect(onText).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        partialRoundIntent: "需要先确认角度",
+        partialOptions: [
+          {
+            id: "a",
+            label: "方法论",
+            description: "讲怎么决策。",
+            impact: "更实用。",
+            kind: "explore"
+          }
+        ]
+      })
+    );
+    expect(onText).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        partialRoundIntent: output.roundIntent,
+        partialOptions: output.options
+      })
+    );
   });
 });
 

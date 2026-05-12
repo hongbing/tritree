@@ -1,6 +1,6 @@
-import type { BranchOption, DirectorDraftOutput, DirectorOptionsOutput, Draft } from "@/lib/domain";
+import type { BranchOption, DirectorDraftOutput, DirectorNextStepOutput, DirectorOptionsOutput, Draft } from "@/lib/domain";
 import { logTritreeAiDebug } from "./debug-log";
-import { streamTreeDraft, streamTreeOptions, type MemoryScope } from "./mastra-executor";
+import { generateTreeNextStep, streamTreeDraft, streamTreeNextStep, streamTreeOptions, type MemoryScope } from "./mastra-executor";
 import type { DirectorInputParts } from "./prompts";
 
 export type DirectorDraftField = "title" | "body" | "hashtags" | "imagePrompt";
@@ -16,10 +16,100 @@ type DirectorDraftStreamOptions = {
 type DirectorOptionsStreamOptions = {
   env?: Record<string, string | undefined>;
   memory?: MemoryScope;
-  onText?: (event: { delta: string; accumulatedText: string; partialOptions: BranchOption[] | null }) => void;
+  onText?: (event: {
+    delta: string;
+    accumulatedText: string;
+    partialOptions: BranchOption[] | null;
+    partialRoundIntent: string | null;
+  }) => void;
   onReasoningText?: (event: { delta: string; accumulatedText: string }) => void;
   signal?: AbortSignal;
 };
+
+type DirectorNextStepOptions = {
+  env?: Record<string, string | undefined>;
+  memory?: MemoryScope;
+  onText?: (event: {
+    delta: string;
+    accumulatedText: string;
+    partialOptions: BranchOption[] | null;
+    partialRoundIntent: string | null;
+  }) => void;
+  onReasoningText?: (event: { delta: string; accumulatedText: string }) => void;
+  signal?: AbortSignal;
+};
+
+export async function decideDirectorNextStep(
+  parts: DirectorInputParts,
+  options: DirectorNextStepOptions = {}
+): Promise<DirectorNextStepOutput> {
+  logTritreeAiDebug("director-stream", "next-step-start", {
+    rootChars: parts.rootSummary.length,
+    currentDraftChars: parts.currentDraft.length,
+    messageCount: parts.messages?.length ?? 0
+  });
+  const output = await generateTreeNextStep({
+    parts,
+    env: options.env,
+    memory: options.memory,
+    signal: options.signal
+  });
+    logTritreeAiDebug("director-stream", "next-step-output", {
+    action: output.action,
+    roundIntent: output.roundIntent,
+    optionCount: output.action === "options" ? output.options.length : 0
+  });
+  return output;
+}
+
+export async function streamDirectorNextStep(
+  parts: DirectorInputParts,
+  options: DirectorNextStepOptions = {}
+): Promise<DirectorNextStepOutput> {
+  let accumulatedText = "";
+  const emit = (value: unknown) => {
+    const text = JSON.stringify(value);
+    if (!text || text === accumulatedText) return;
+    accumulatedText = text;
+    const partialOptions = extractPartialDirectorOptions(accumulatedText);
+    const partialRoundIntent = extractStringField(accumulatedText, "roundIntent") || null;
+    logTritreeAiDebug("director-stream", "next-step-emit", {
+      action: isRecord(value) ? value.action : undefined,
+      chars: accumulatedText.length,
+      hasPartialRoundIntent: Boolean(partialRoundIntent),
+      hasPartialOptions: Boolean(partialOptions),
+      optionCount: partialOptions?.length ?? 0,
+      optionLabels: partialOptions?.map((option) => option.label) ?? []
+    });
+    options.onText?.({
+      delta: text,
+      accumulatedText,
+      partialOptions,
+      partialRoundIntent
+    });
+  };
+
+  logTritreeAiDebug("director-stream", "next-step-stream-start", {
+    rootChars: parts.rootSummary.length,
+    currentDraftChars: parts.currentDraft.length,
+    messageCount: parts.messages?.length ?? 0
+  });
+  const output = await streamTreeNextStep({
+    parts,
+    env: options.env,
+    memory: options.memory,
+    signal: options.signal,
+    onPartialObject: emit,
+    onReasoningText: options.onReasoningText
+  });
+  logTritreeAiDebug("director-stream", "next-step-stream-output", {
+    action: output.action,
+    roundIntent: output.roundIntent,
+    optionCount: output.action === "options" ? output.options.length : 0
+  });
+  emit(output);
+  return output;
+}
 
 export async function streamDirectorDraft(
   parts: DirectorInputParts,
@@ -75,8 +165,10 @@ export async function streamDirectorOptions(
     if (!text || text === accumulatedText) return;
     accumulatedText = text;
     const partialOptions = extractPartialDirectorOptions(accumulatedText);
+    const partialRoundIntent = extractStringField(accumulatedText, "roundIntent") || null;
     logTritreeAiDebug("director-stream", "options-emit", {
       chars: accumulatedText.length,
+      hasPartialRoundIntent: Boolean(partialRoundIntent),
       hasPartialOptions: Boolean(partialOptions),
       optionCount: partialOptions?.length ?? 0,
       optionLabels: partialOptions?.map((option) => option.label) ?? []
@@ -84,7 +176,8 @@ export async function streamDirectorOptions(
     options.onText?.({
       delta: text,
       accumulatedText,
-      partialOptions
+      partialOptions,
+      partialRoundIntent
     });
   };
 
@@ -140,10 +233,12 @@ export function extractPartialDirectorOptions(text: string): BranchOption[] | nu
   const optionsText = text.slice(optionsMatch.index + optionsMatch[0].length);
   const optionBlocks = extractVisibleObjectBlocks(optionsText);
   const partialById = new Map<BranchOption["id"], Partial<BranchOption>>();
+  const fallbackIds = ["a", "b", "c"] as const;
 
-  for (const block of optionBlocks) {
-    const id = extractStringField(block, "id");
-    if (id !== "a" && id !== "b" && id !== "c") {
+  for (const [index, block] of optionBlocks.entries()) {
+    const explicitId = extractStringField(block, "id");
+    const id = explicitId === "a" || explicitId === "b" || explicitId === "c" ? explicitId : fallbackIds[index];
+    if (!id) {
       continue;
     }
 
@@ -242,6 +337,10 @@ function extractOptionKind(text: string): BranchOption["kind"] | undefined {
   }
 
   return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function extractVisibleObjectBlocks(text: string) {

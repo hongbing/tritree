@@ -45,6 +45,7 @@ import {
   DEFAULT_SYSTEM_SKILLS,
   DraftSummarySchema,
   DraftSchema,
+  DEFAULT_ARTIFACT_TYPE_ID,
   RootPreferencesSchema,
   SessionStateSchema,
   SessionStatusSchema,
@@ -98,6 +99,7 @@ type SessionRow = {
   id: string;
   user_id: string | null;
   root_memory_id: string;
+  artifact_type_id: string;
   title: string;
   status: string;
   current_node_id: string | null;
@@ -122,6 +124,7 @@ type TreeNodeRow = {
   options_json: string;
   selected_option_id: string | null;
   folded_options_json: string;
+  is_terminal?: number;
   created_at: string;
 };
 
@@ -235,9 +238,13 @@ function withTransaction<T>(db: ReturnType<typeof createDatabase>, write: () => 
 }
 
 function summarizePreferences(preferences: RootPreferences) {
+  const artifactTypeId = preferences.artifactTypeId ?? DEFAULT_ARTIFACT_TYPE_ID;
   const seed = preferences.seed?.trim();
   const creationRequest = preferences.creationRequest?.trim();
-  const requestParts = [creationRequest ? `本次创作要求：${creationRequest}` : ""].filter(Boolean);
+  const requestParts = [
+    artifactTypeId !== DEFAULT_ARTIFACT_TYPE_ID ? `作品类型：${artifactTypeId}` : "",
+    creationRequest ? `本次创作要求：${creationRequest}` : ""
+  ].filter(Boolean);
 
   if (seed) {
     return [`Seed：${seed}`, ...requestParts].join("\n");
@@ -281,6 +288,7 @@ function toNode(row: TreeNodeRow): TreeNode {
     options,
     selectedOptionId: row.selected_option_id as BranchOption["id"] | null,
     foldedOptions,
+    isTerminal: Boolean(row.is_terminal),
     createdAt: row.created_at
   });
 }
@@ -1150,15 +1158,19 @@ export function createTreeableRepository(
     const parsedDraft = DraftSchema.parse(draft);
 
     return withTransaction(db, () => {
-      const root = db.prepare("SELECT id FROM root_memory WHERE id = ? AND user_id = ?").get(rootMemoryId, userId);
+      const rootRow = db.prepare("SELECT * FROM root_memory WHERE id = ? AND user_id = ?").get(rootMemoryId, userId) as
+        | RootMemoryRow
+        | undefined;
+      const root = rootRow ? toRootMemory(rootRow) : null;
       if (!root) throw new Error("Root memory was not found.");
+      const artifactTypeId = root.preferences.artifactTypeId ?? DEFAULT_ARTIFACT_TYPE_ID;
 
       db.prepare(
         `
-          INSERT INTO sessions (id, user_id, root_memory_id, title, status, current_node_id, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO sessions (id, user_id, root_memory_id, artifact_type_id, title, status, current_node_id, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
-      ).run(sessionId, userId, rootMemoryId, parsedDraft.title || "Untitled Tree", "active", nodeId, timestamp, timestamp);
+      ).run(sessionId, userId, rootMemoryId, artifactTypeId, parsedDraft.title || "Untitled Tree", "active", nodeId, timestamp, timestamp);
 
       db.prepare(
         `
@@ -1523,6 +1535,54 @@ export function createTreeableRepository(
     });
   }
 
+  function completeNode({
+    userId,
+    sessionId,
+    nodeId,
+    output
+  }: {
+    userId: string;
+    sessionId: string;
+    nodeId: string;
+    output: { memoryObservation: string; roundIntent: string };
+  }) {
+    const session = getActiveSession(userId, sessionId);
+    if (!session) {
+      throw new Error("Session was not found.");
+    }
+    const target = db.prepare("SELECT * FROM tree_nodes WHERE id = ?").get(nodeId) as TreeNodeRow | undefined;
+    if (!target || target.session_id !== sessionId) {
+      throw new Error("Tree node was not found.");
+    }
+
+    const timestamp = now();
+
+    return withTransaction(db, () => {
+      db.prepare(
+        `
+          UPDATE tree_nodes
+          SET round_intent = ?, options_json = '[]', is_terminal = 1
+          WHERE id = ?
+        `
+      ).run(output.roundIntent, nodeId);
+
+      const toolMemory = nextSessionToolMemory(session, output.memoryObservation);
+      db.prepare(
+        `
+          UPDATE sessions
+          SET tool_memory = ?, updated_at = ?
+          WHERE id = ? AND user_id = ?
+        `
+      ).run(toolMemory, timestamp, sessionId, userId);
+
+      const state = getSessionState(userId, sessionId);
+      if (!state) {
+        throw new Error("Failed to complete tree node.");
+      }
+      return state;
+    });
+  }
+
   function activateHistoricalBranch({
     userId,
     sessionId,
@@ -1858,6 +1918,7 @@ export function createTreeableRepository(
     return SessionStateSchema.parse({
       rootMemory: toRootMemory(root),
       session: {
+        artifactTypeId: session.artifact_type_id || DEFAULT_ARTIFACT_TYPE_ID,
         id: session.id,
         title: session.title,
         status: SessionStatusSchema.parse(session.status === "finished" ? "active" : session.status),
@@ -1927,6 +1988,7 @@ export function createTreeableRepository(
     resolveSkillsByIds,
     replaceSessionEnabledSkills,
     createSessionDraft,
+    completeNode,
     createDraftChild,
     activateHistoricalBranch,
     createHistoricalDraftChild,

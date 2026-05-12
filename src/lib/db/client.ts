@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = 10;
 const TREEABLE_TABLES = [
   "publish_packages",
   "branch_history",
@@ -119,6 +119,7 @@ function createSchema(sqlite: DatabaseSync) {
       id TEXT PRIMARY KEY,
       user_id TEXT REFERENCES users(id),
       root_memory_id TEXT NOT NULL REFERENCES root_memory(id),
+      artifact_type_id TEXT NOT NULL DEFAULT 'social-post',
       title TEXT NOT NULL,
       status TEXT NOT NULL CHECK (status IN ('active', 'finished')),
       current_node_id TEXT,
@@ -145,6 +146,7 @@ function createSchema(sqlite: DatabaseSync) {
       options_json TEXT NOT NULL,
       selected_option_id TEXT,
       folded_options_json TEXT NOT NULL,
+      is_terminal INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -180,11 +182,13 @@ function createSchema(sqlite: DatabaseSync) {
     );
   `);
   addColumnIfMissing(sqlite, "tree_nodes", "parent_option_id", "TEXT");
+  addColumnIfMissing(sqlite, "tree_nodes", "is_terminal", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(sqlite, "skills", "applies_to", "TEXT NOT NULL DEFAULT 'both'");
   addColumnIfMissing(sqlite, "root_memory", "user_id", "TEXT REFERENCES users(id)");
   addColumnIfMissing(sqlite, "sessions", "user_id", "TEXT REFERENCES users(id)");
   addColumnIfMissing(sqlite, "sessions", "is_archived", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(sqlite, "sessions", "tool_memory", "TEXT NOT NULL DEFAULT ''");
+  addColumnIfMissing(sqlite, "sessions", "artifact_type_id", "TEXT NOT NULL DEFAULT 'social-post'");
   addColumnIfMissing(sqlite, "skills", "user_id", "TEXT REFERENCES users(id)");
   addColumnIfMissing(sqlite, "creation_request_options", "user_id", "TEXT REFERENCES users(id)");
   sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS root_memory_user_id_unique ON root_memory(user_id) WHERE user_id IS NOT NULL;");

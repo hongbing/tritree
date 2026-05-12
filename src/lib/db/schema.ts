@@ -78,6 +78,7 @@ export const sessions = sqliteTable(
     rootMemoryId: text("root_memory_id")
       .notNull()
       .references(() => rootMemory.id),
+    artifactTypeId: text("artifact_type_id").notNull().default("social-post"),
     title: text("title").notNull(),
     status: text("status").notNull(),
     currentNodeId: text("current_node_id"),
@@ -115,6 +116,7 @@ export const treeNodes = sqliteTable("tree_nodes", {
   optionsJson: text("options_json").notNull(),
   selectedOptionId: text("selected_option_id"),
   foldedOptionsJson: text("folded_options_json").notNull(),
+  isTerminal: integer("is_terminal").notNull().default(0),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`)
 });
 

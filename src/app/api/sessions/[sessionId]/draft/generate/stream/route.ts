@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { extractActiveDirectorDraftField, extractPartialDirectorDraft, streamDirectorDraft } from "@/lib/ai/director-stream";
+import {
+  extractActiveDirectorDraftField,
+  extractPartialDirectorDraft,
+  streamDirectorDraft,
+  streamDirectorNextStep
+} from "@/lib/ai/director-stream";
 import { badRequestResponse, isBadRequestError, publicServerErrorMessage } from "@/lib/api/errors";
 import { focusSessionStateForNode, summarizeSessionForDirector } from "@/lib/app-state";
 import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
@@ -72,22 +77,73 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
       };
 
       try {
-        const output = await streamDirectorDraft(
-          summarizeSessionForDirector(parentState, selectedOption, body.note, selectedOption.mode ?? body.optionMode),
-          {
-            memory: { resource: state.rootMemory.id, thread: sessionId },
-            signal: request.signal,
-            onReasoningText(event) {
-              send({ type: "thinking", nodeId: targetNode.id, text: event.accumulatedText });
-            },
-            onText(event) {
-              const draft = extractPartialDirectorDraft(event.accumulatedText);
-              if (draft) {
-                send({ type: "draft", draft, streamingField: extractActiveDirectorDraftField(event.accumulatedText) });
-              }
+        const directorParts = summarizeSessionForDirector(
+          parentState,
+          selectedOption,
+          body.note,
+          selectedOption.mode ?? body.optionMode
+        );
+        const memory = { resource: state.rootMemory.id, thread: sessionId };
+        const nextStep = await streamDirectorNextStep(directorParts, {
+          memory,
+          signal: request.signal,
+          onReasoningText(event) {
+            send({ type: "thinking", nodeId: targetNode.id, text: event.accumulatedText });
+          },
+          onText(event) {
+            if (event.partialOptions) {
+              send({
+                type: "options",
+                nodeId: targetNode.id,
+                roundIntent: event.partialRoundIntent,
+                options: event.partialOptions
+              });
             }
           }
-        );
+        });
+
+        if (nextStep.action === "options") {
+          const nextState = repository.updateNodeOptions({
+            userId: user.id,
+            sessionId,
+            nodeId: targetNode.id,
+            output: {
+              roundIntent: nextStep.roundIntent,
+              options: nextStep.options,
+              memoryObservation: nextStep.memoryObservation
+            }
+          });
+          send({ type: "done", state: nextState });
+          return;
+        }
+
+        if (nextStep.action === "complete") {
+          const nextState = repository.completeNode({
+            userId: user.id,
+            sessionId,
+            nodeId: targetNode.id,
+            output: {
+              roundIntent: nextStep.roundIntent,
+              memoryObservation: nextStep.memoryObservation
+            }
+          });
+          send({ type: "done", state: nextState });
+          return;
+        }
+
+        const output = await streamDirectorDraft(directorParts, {
+          memory,
+          signal: request.signal,
+          onReasoningText(event) {
+            send({ type: "thinking", nodeId: targetNode.id, text: event.accumulatedText });
+          },
+          onText(event) {
+            const draft = extractPartialDirectorDraft(event.accumulatedText);
+            if (draft) {
+              send({ type: "draft", draft, streamingField: extractActiveDirectorDraftField(event.accumulatedText) });
+            }
+          }
+        });
         const latestState = repository.getSessionState(user.id, sessionId);
         if (!latestState) {
           throw new Error("Session disappeared before saving streamed draft.");

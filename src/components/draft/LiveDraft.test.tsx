@@ -722,13 +722,13 @@ describe("LiveDraft", () => {
         generationStage="options"
         isBusy
         publishPackage={null}
-        thinkingText="先看当前草稿，再拆三个方向。"
+        thinkingText="先看当前草稿，再拆一个问题。"
       />
     );
 
     const status = screen.getByRole("status", { name: "草稿生成状态" });
     expect(within(status).getByText("AI 正在思考下一步选项...")).toBeInTheDocument();
-    expect(within(status).getByText("先看当前草稿，再拆三个方向。")).toBeInTheDocument();
+    expect(within(status).getByText("先看当前草稿，再拆一个问题。")).toBeInTheDocument();
   });
 
   it("uses option streaming copy after option text has started", () => {
@@ -1630,6 +1630,64 @@ describe("LiveDraft", () => {
 
     expect(screen.getByText("朋友圈字数约 0")).toBeInTheDocument();
     expect(screen.getByText("缺少正文")).toBeInTheDocument();
+  });
+
+  it("opens a PRD delivery assistant with markdown export and document checks", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+
+    render(
+      <LiveDraft
+        artifactTypeId="prd"
+        draft={{
+          title: "移动端草稿管理 PRD",
+          body: ["## 背景", "用户需要在手机上继续草稿。", "## 目标", "降低继续写作成本。", "## 需求", "- 草稿列表"].join("\n"),
+          hashtags: ["#产品"],
+          imagePrompt: "桌面"
+        }}
+        isBusy={false}
+        publishPackage={null}
+      />
+    );
+
+    expect(screen.getByText("实时 PRD")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "发布" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "交付" }));
+
+    expect(screen.getByRole("dialog", { name: "交付助手" })).toBeInTheDocument();
+    expect(screen.getByText("PRD 交付稿")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "PRD Markdown" })).toHaveValue(
+      ["# 移动端草稿管理 PRD", "", "## 背景", "用户需要在手机上继续草稿。", "## 目标", "降低继续写作成本。", "## 需求", "- 草稿列表"].join("\n")
+    );
+    expect(screen.getByText("已包含：背景")).toBeInTheDocument();
+    expect(screen.getByText("缺少：非目标")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "复制 PRD Markdown" }));
+    expect(writeText).toHaveBeenCalledWith(
+      ["# 移动端草稿管理 PRD", "", "## 背景", "用户需要在手机上继续草稿。", "## 目标", "降低继续写作成本。", "## 需求", "- 草稿列表"].join("\n")
+    );
+  });
+
+  it("uses PRD field labels and hides social-only edit fields", async () => {
+    render(
+      <LiveDraft
+        artifactTypeId="prd"
+        draft={{ title: "PRD", body: "## 背景\n内容", hashtags: ["#话题"], imagePrompt: "图" }}
+        isBusy={false}
+        isEditable
+        publishPackage={null}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "编辑" }));
+
+    expect(screen.getByText("文档标题")).toBeInTheDocument();
+    expect(screen.getByText("PRD 内容")).toBeInTheDocument();
+    expect(screen.queryByText("话题")).not.toBeInTheDocument();
+    expect(screen.queryByText("配图提示")).not.toBeInTheDocument();
   });
 
   it("closes the publish assistant when editing starts or the draft changes", async () => {

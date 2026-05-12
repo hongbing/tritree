@@ -143,7 +143,7 @@ describe("buildDirectorInput", () => {
 
     expect(input).toContain("暂无已学习偏好。");
     expect(input).toContain("暂无已选技能。请基于 seed、草稿和用户选择继续判断创作下一步。");
-    expect(input).toContain("还没有选择方向。请先判断 seed 和当前草稿最需要创作者澄清、选择或推进什么");
+    expect(input).toContain("还没有选择答案。请先判断 seed 和当前草稿最需要创作者澄清、选择或推进什么");
     expect(input).toContain("暂无草稿。");
     expect(input).not.toContain("暂无已选路径。");
     expect(input).not.toContain("暂无未选方向。");
@@ -286,10 +286,10 @@ describe("buildDirectorInput", () => {
 
     expect(input).not.toContain("已选路径");
     expect(input).not.toContain("未选方向");
-    expect(input).toContain("选项以创作决策或方向为主");
+    expect(input).toContain("选项以创作决策或回答口径为主");
     expect(input).toContain("可以包含轻量收尾项");
-    expect(input).toContain("避免三个选项都变成同一段内容里的局部细节");
-    expect(input).toContain("三个选项在关键词和动作上保持差异");
+    expect(input).toContain("避免三个答案都变成同一段内容里的局部细节");
+    expect(input).toContain("三个答案在关键词和动作上保持差异");
   });
 
   it("frames options as creator decisions rather than editing tasks", () => {
@@ -304,7 +304,7 @@ describe("buildDirectorInput", () => {
     });
 
     expect(input).toContain("创作者澄清、选择或推进什么");
-    expect(input).toContain("创作决策或方向");
+    expect(input).toContain("创作决策或回答口径");
     expect(input).not.toContain("重组表达顺序");
     expect(input).not.toContain("补充个人经验");
     expect(input).not.toContain("回应常见质疑");

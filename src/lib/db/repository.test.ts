@@ -1426,6 +1426,38 @@ describe("Treeable repository", () => {
 
     expect(state.currentNode?.options).toHaveLength(3);
     expect(state.currentDraft?.body).toBe("Pick a starting point.");
+    expect(state.session.artifactTypeId).toBe("social-post");
+  });
+
+  it("persists the selected artifact type on the session", async () => {
+    const repo = createTreeableRepository(testDbPath());
+    const user = await createTestUser(repo, "writer");
+    const root = repo.saveRootMemory(user.id, {
+      artifactTypeId: "prd",
+      seed: "移动端草稿管理",
+      domains: ["Work"],
+      tones: ["calm"],
+      styles: ["document"],
+      personas: ["product manager"]
+    });
+
+    const state = repo.createSessionDraft({
+      userId: user.id,
+      rootMemoryId: root.id,
+      draft: { title: "移动端草稿管理", body: "移动端草稿管理", hashtags: [], imagePrompt: "" }
+    });
+
+    repo.saveRootMemory(user.id, {
+      artifactTypeId: "social-post",
+      seed: "另一个念头",
+      domains: ["Creation"],
+      tones: ["calm"],
+      styles: ["opinion-driven"],
+      personas: ["practitioner"]
+    });
+
+    expect(state.session.artifactTypeId).toBe("prd");
+    expect(repo.getSessionState(user.id, state.session.id)?.session.artifactTypeId).toBe("prd");
   });
 
   it("keeps finishing output as an active draft instead of a publish package", async () => {

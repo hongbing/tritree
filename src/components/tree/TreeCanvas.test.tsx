@@ -265,27 +265,30 @@ describe("TreeCanvas", () => {
     expect(moreRule).toContain("border: 0");
   });
 
-  it("uses a quiet details action to expand option text before showing notes", () => {
+  it("expands an option card on first click before showing the confirmation controls", () => {
+    const onChoose = vi.fn();
     const longDescription =
       "把当前内容重构为面向计划去青岛的读者的实用攻略，保留行程骨架，但增加交通建议、预算参考、排队避坑技巧、餐厅具体位置等实用信息。";
     render(
       <BranchOptionTray
         isBusy={false}
-        onChoose={vi.fn()}
+        onChoose={onChoose}
         options={[{ ...currentNode.options[0], description: longDescription }, ...currentNode.options.slice(1)]}
         pendingChoice={null}
       />
     );
 
     expect(screen.getByRole("button", { name: "A 展开详情" })).toHaveTextContent("详情");
-    expect(screen.queryByRole("button", { name: "A 补充要求" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("补充要求 A")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "A 确认生成" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "A 展开详情" }));
+    fireEvent.click(screen.getByRole("button", { name: /A 具体场景/ }));
 
+    expect(onChoose).not.toHaveBeenCalled();
     expect(screen.getByText(longDescription)).toHaveClass("branch-card__description--expanded");
     expect(screen.getByRole("button", { name: "A 收起详情" })).toHaveTextContent("收起");
-    expect(screen.getByRole("button", { name: "A 补充要求" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("补充要求 A")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("补充要求 A")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "A 确认生成" })).toBeInTheDocument();
     expect(screen.queryByText("更多备注")).not.toBeInTheDocument();
   });
 
@@ -300,14 +303,13 @@ describe("TreeCanvas", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "A 展开详情" }));
-    fireEvent.click(screen.getByRole("button", { name: "A 补充要求" }));
+    fireEvent.click(screen.getByRole("button", { name: /A 具体场景/ }));
     fireEvent.change(screen.getByLabelText("补充要求 A"), {
       target: { value: "请用更尖锐一点的对比。" }
     });
     expect(onChoose).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "A 按此方向生成" }));
+    fireEvent.click(screen.getByRole("button", { name: "A 确认生成" }));
 
     expect(onChoose).toHaveBeenCalledWith("a", "请用更尖锐一点的对比。", "balanced");
   });
@@ -338,6 +340,7 @@ describe("TreeCanvas", () => {
     expect(within(range).getByRole("button", { name: "发散" })).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.click(screen.getByRole("button", { name: /A 具体场景/ }));
+    fireEvent.click(screen.getByRole("button", { name: "A 确认生成" }));
 
     expect(onChoose).toHaveBeenCalledWith("a", "", "divergent");
   });
@@ -397,11 +400,10 @@ describe("TreeCanvas", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "A 展开详情" }));
-    fireEvent.click(screen.getByRole("button", { name: "A 补充要求" }));
+    fireEvent.click(screen.getByRole("button", { name: /A 具体场景/ }));
 
     expect(screen.getByLabelText("补充要求 A")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "A 按此方向生成" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "A 确认生成" })).toBeInTheDocument();
     expect(screen.getAllByRole("group", { name: "发散度" })).toHaveLength(1);
     expect(screen.queryByRole("group", { name: "A 生成倾向" })).not.toBeInTheDocument();
   });
@@ -537,10 +539,9 @@ describe("TreeCanvas", () => {
     expect(screen.queryByRole("group", { name: "A 生成倾向" })).not.toBeInTheDocument();
     const range = screen.getByRole("group", { name: "发散度" });
     fireEvent.click(within(range).getByRole("button", { name: "专注" }));
-    fireEvent.click(screen.getByRole("button", { name: "A 展开详情" }));
-    fireEvent.click(screen.getByRole("button", { name: "A 补充要求" }));
-    expect(screen.queryByRole("group", { name: "A 生成倾向" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /A 具体场景/ }));
+    expect(screen.queryByRole("group", { name: "A 生成倾向" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "A 确认生成" }));
 
     expect(onChoose).toHaveBeenCalledWith("a", "", "focused");
     expect(within(screen.getByRole("group", { name: "方向控制" })).queryAllByText("专注")).toHaveLength(1);

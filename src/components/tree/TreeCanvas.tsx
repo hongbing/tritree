@@ -1377,11 +1377,9 @@ function BranchOptionCard({
   variant?: "primary" | "side";
 }) {
   const [isDescriptionOpen, setIsDescriptionOpen] = useState(false);
-  const [isNoteOpen, setIsNoteOpen] = useState(false);
   const displayLabel = displayBranchLabel(option.label);
   const choiceLabel = isCustomBranchOptionId(option.id) && variant === "side" ? "自定义" : option.id.toUpperCase();
   const descriptionToggleLabel = isDescriptionOpen ? `${choiceLabel} 收起详情` : `${choiceLabel} 展开详情`;
-  const canShowNoteAction = isDescriptionOpen || note.trim().length > 0;
 
   return (
     <div
@@ -1393,12 +1391,13 @@ function BranchOptionCard({
       )}
     >
       <button
+        aria-expanded={isDescriptionOpen}
         aria-label={`${choiceLabel} ${displayLabel} ${option.description}${isPending ? " 生成中" : ""}`}
         className="branch-card__choose"
         data-pending={isPending ? "true" : undefined}
         data-choice-button="true"
         disabled={isBusy}
-        onClick={() => onChoose(option.id, note.trim(), optionMode)}
+        onClick={() => setIsDescriptionOpen(true)}
         type="button"
       >
         <span className="branch-card__header">
@@ -1430,20 +1429,8 @@ function BranchOptionCard({
           )}
           <span>{isDescriptionOpen ? "收起" : "详情"}</span>
         </button>
-        {canShowNoteAction ? (
-          <button
-            aria-expanded={isNoteOpen}
-            aria-label={`${choiceLabel} 补充要求`}
-            className={clsx("branch-card__more", note.trim() && "branch-card__more--active")}
-            disabled={isBusy}
-            onClick={() => setIsNoteOpen((open) => !open)}
-            type="button"
-          >
-            {note.trim() ? "编辑要求" : "补充要求"}
-          </button>
-        ) : null}
       </div>
-      {isNoteOpen ? (
+      {isDescriptionOpen ? (
         <div className="branch-card__more-panel">
           <label className="branch-card__note">
             <span>补充要求</span>
@@ -1458,13 +1445,13 @@ function BranchOptionCard({
           </label>
           <div className="branch-card__note-actions">
             <button
-              aria-label={`${choiceLabel} 按此方向生成`}
+              aria-label={`${choiceLabel} 确认生成`}
               className="branch-card__note-submit"
               disabled={isBusy}
               onClick={() => onChoose(option.id, note.trim(), optionMode)}
               type="button"
             >
-              按此方向生成
+              确认生成
             </button>
           </div>
         </div>

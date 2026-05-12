@@ -61,8 +61,8 @@ type StructuredObjectStreamResult = {
 type StreamSource<T> = AsyncIterable<T> | ReadableStream<T> | (() => AsyncIterable<T>);
 
 const SELECTION_REWRITE_SYSTEM_PROMPT = `
-You rewrite only the selected passage from an existing Treeable draft.
-Use the surrounding draft, path, learned preferences, and enabled skills as context.
+You rewrite only the selected passage from an existing draft.
+Use the surrounding draft, learned preferences, and enabled skills as context.
 Return only JSON. Do not wrap it in Markdown.
 All user-facing text must be Simplified Chinese unless the user's own text requires otherwise.
 Preserve the user's intent, local tone, and useful wording; only rewrite the selected passage.
@@ -82,9 +82,6 @@ ${input.rootSummary}
 
 已学习偏好：
 ${input.learnedSummary || "暂无已学习偏好。"}
-
-已选路径：
-${input.pathSummary || "暂无已选路径。"}
 
 当前草稿：
 标题：${input.currentDraft.title}

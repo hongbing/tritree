@@ -106,7 +106,7 @@ describe("parseDirectorOptionsText", () => {
 });
 
 describe("buildDirectorInput", () => {
-  it("includes root memory, selected option, draft, selected path, and folded history", () => {
+  it("includes root memory, selected option, and draft without tree path context", () => {
     const input = buildDirectorInput({
       rootSummary: "Seed：我想写 AI 产品经理的真实困境",
       learnedSummary: "Prefers practical choices.",
@@ -121,8 +121,10 @@ describe("buildDirectorInput", () => {
     expect(input).toContain("我想写 AI 产品经理的真实困境");
     expect(input).toContain("Make it sharper");
     expect(input).toContain("Draft body");
-    expect(input).toContain("Round 1: selected A");
-    expect(input).toContain("Round 1: folded B, C");
+    expect(input).not.toContain("Round 1: selected A");
+    expect(input).not.toContain("Round 1: folded B, C");
+    expect(input).not.toContain("已选路径");
+    expect(input).not.toContain("未选方向");
     expect(input).toContain("暂无已选技能。");
     expect(input).toContain("所有面向用户的字段都必须使用简体中文");
     expect(input).not.toContain("根系记忆");
@@ -140,11 +142,11 @@ describe("buildDirectorInput", () => {
     });
 
     expect(input).toContain("暂无已学习偏好。");
-    expect(input).toContain("暂无已选技能。请基于 seed、草稿、路径和用户选择继续判断创作下一步。");
+    expect(input).toContain("暂无已选技能。请基于 seed、草稿和用户选择继续判断创作下一步。");
     expect(input).toContain("还没有选择方向。请先判断 seed 和当前草稿最需要创作者澄清、选择或推进什么");
     expect(input).toContain("暂无草稿。");
-    expect(input).toContain("暂无已选路径。");
-    expect(input).toContain("暂无未选方向。");
+    expect(input).not.toContain("暂无已选路径。");
+    expect(input).not.toContain("暂无未选方向。");
   });
 
   it("includes enabled skills in the director input", () => {
@@ -282,7 +284,8 @@ describe("buildDirectorInput", () => {
       enabledSkills: []
     });
 
-    expect(input).toContain("选项标题优先避开已选路径、未选方向历史和刚刚选择过的选项标题");
+    expect(input).not.toContain("已选路径");
+    expect(input).not.toContain("未选方向");
     expect(input).toContain("选项以创作决策或方向为主");
     expect(input).toContain("可以包含轻量收尾项");
     expect(input).toContain("避免三个选项都变成同一段内容里的局部细节");

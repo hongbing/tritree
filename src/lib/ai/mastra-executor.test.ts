@@ -926,7 +926,7 @@ describe("tree director compatibility generators", () => {
       execute: vi.fn()
     };
     const markdownOutput = [
-      "roundIntent：当前稿件已形成清晰的反攻略结构和差异化角度，本轮需要给出近、中、远三个梯度的编辑建议。",
+      "roundIntent：当前稿件已形成清晰的反攻略结构和差异化角度，本轮需要给出中规中矩、稳妥可执行的编辑建议。",
       "",
       "**编辑判断**：正文约1002字，结构完整，但缺少让读者产生收藏冲动的钩子。",
       "",

@@ -32,11 +32,12 @@ const input = {
 } satisfies SelectionRewriteInput;
 
 describe("buildSelectionRewritePrompt", () => {
-  it("includes draft context, selected text, instruction, path, and enabled skills", () => {
+  it("includes draft context, selected text, instruction, and enabled skills without path context", () => {
     const prompt = buildSelectionRewritePrompt(input);
 
     expect(prompt).toContain("Seed：写一个产品故事");
-    expect(prompt).toContain("第 1 轮：起稿");
+    expect(prompt).not.toContain("第 1 轮：起稿");
+    expect(prompt).not.toContain("已选路径");
     expect(prompt).toContain("正文：第一句。第二句要更具体。第三句。");
     expect(prompt).toContain("选中的原文：\n第二句要更具体。");
     expect(prompt).toContain("修改要求：\n补一个真实工作细节");

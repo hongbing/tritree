@@ -353,8 +353,8 @@ function createSelectionReferenceOption(request: DraftSelectionRewriteRequest): 
   return {
     id: createCustomBranchOptionId("reference"),
     label: deriveCustomOptionLabel(instruction || selectedText || "引用选中文本"),
-    description: `引用选中文本继续生成：\n「${selectedText}」\n\n用户要求：${instruction}`,
-    impact: "按选中文本和用户要求作为自定义方向继续生成。",
+    description: `用户引用文本：\n「${selectedText}」\n\n用户要求：${instruction}`,
+    impact: "按引用文本和用户要求改写这一段。",
     kind: "reframe"
   };
 }

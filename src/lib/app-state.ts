@@ -22,14 +22,13 @@ export function summarizeSessionForDirector(
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
     currentDraft: state.currentDraft ? formatDraftForDirector(state.currentDraft) : "",
-    pathSummary: formatPathForDirector(state),
-    foldedSummary: formatCurrentPathFoldedOptionsForDirector(state),
+    pathSummary: "",
+    foldedSummary: "",
     selectedOptionLabel,
     enabledSkills: enabledSkillsForDirector(state),
     messages: buildDraftConversationMessages(
       state,
       formatDraftUserRequest({
-        currentDraft: state.currentDraft,
         modeHint,
         selectedOption,
         selectedOptionNote: trimmedNote
@@ -40,26 +39,26 @@ export function summarizeSessionForDirector(
 
 function formatOptionsDirectionRangeHint(optionMode: OptionGenerationMode) {
   if (optionMode === "divergent") {
-    return "方向范围：发散。硬约束：拉开下一步方向之间的语义距离，三个选项必须落在明显不同的创作维度；至少一个选项改变读者、叙事前提或整体结构，避免只给相近的局部微调。模式只影响方向范围；草稿改动幅度由所选方向决定。";
+    return "方向范围：发散。选项要更有脑洞，可以给更大胆的切入、结构、表达形式或读者场景。";
   }
 
   if (optionMode === "focused") {
-    return "方向范围：专注。硬约束：围绕当前稿最重要的未解决写作判断，三个选项必须共享同一个核心改写问题，只给近距离的三种处理办法；避免改换前提、读者或结构的大跳转。模式只影响方向范围；草稿改动幅度由所选方向决定。";
+    return "方向范围：专注。沿当前稿已经成立的思路继续推进，优先补清楚、写顺、写实。";
   }
 
-  return "方向范围：平衡。硬约束：兼顾当前稿的延展和推进，三个选项应形成近、中、远的梯度：一个贴近当前稿，一个适度展开，一个提供替代角度。模式只影响方向范围；草稿改动幅度由所选方向决定。";
+  return "";
 }
 
 function formatDraftDirectionRangeHint(optionMode: OptionGenerationMode) {
   if (optionMode === "divergent") {
-    return "方向范围：发散。硬约束：生成草稿时允许更明显改变表达角度、读者假设或结构组织，但仍必须服务用户选中的方向。模式只影响方向范围；草稿改动幅度由所选方向决定。";
+    return "方向范围：发散。可以更大胆地重组角度、结构或表达方式，让内容有更强的新鲜感。";
   }
 
   if (optionMode === "focused") {
-    return "方向范围：专注。硬约束：生成草稿时只围绕所选方向做近距离推进，保留当前稿的前提、读者和结构，不要扩散成新主题。模式只影响方向范围；草稿改动幅度由所选方向决定。";
+    return "方向范围：专注。沿当前稿已经成立的思路继续推进，优先补清楚、写顺、写实。";
   }
 
-  return "方向范围：平衡。硬约束：生成草稿时在保留当前稿主线的基础上适度推进，可补一个新角度或结构调整，但不要跳到全新主题。模式只影响方向范围；草稿改动幅度由所选方向决定。";
+  return "";
 }
 
 function formatWritingIntentLabel(
@@ -68,6 +67,14 @@ function formatWritingIntentLabel(
   modeHint: string
 ) {
   if (!selectedOption) return "";
+  if (isSelectionReferenceOption(selectedOption)) {
+    return [
+      selectedOption.description,
+      selectedOptionNote ? `补充要求：${selectedOptionNote}` : ""
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
 
   return [
     `${selectedOption.label}: ${selectedOption.description}`,
@@ -79,14 +86,14 @@ function formatWritingIntentLabel(
 }
 
 export function summarizeEditedDraftForDirector(state: SessionState, draft: Draft): DirectorInputParts {
-  const selectedOptionLabel = "最新当前内容；避免重复已有方向和已有建议。";
+  const selectedOptionLabel = "";
 
   return {
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
     currentDraft: formatDraftForDirector(draft),
-    pathSummary: formatPathForDirector(state),
-    foldedSummary: formatCurrentPathFoldedOptionsForDirector(state),
+    pathSummary: "",
+    foldedSummary: "",
     selectedOptionLabel,
     enabledSkills: enabledSkillsForDirector(state),
     messages: buildEditorMessages(state, draft, selectedOptionLabel)
@@ -97,14 +104,14 @@ export function summarizeCurrentDraftOptionsForDirector(
   state: SessionState,
   optionMode: OptionGenerationMode = "balanced"
 ): DirectorInputParts {
-  const selectedOptionLabel = ["当前内容；避免重复已有方向和已有建议。", formatOptionsDirectionRangeHint(optionMode)].join("\n");
+  const selectedOptionLabel = formatOptionsDirectionRangeHint(optionMode);
 
   return {
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
     currentDraft: state.currentDraft ? formatDraftForDirector(state.currentDraft) : "",
-    pathSummary: formatPathForDirector(state),
-    foldedSummary: formatCurrentPathFoldedOptionsForDirector(state),
+    pathSummary: "",
+    foldedSummary: "",
     selectedOptionLabel,
     enabledSkills: enabledSkillsForDirector(state),
     messages: buildEditorMessages(state, state.currentDraft, selectedOptionLabel)
@@ -121,7 +128,7 @@ export function summarizeSelectionRewriteForDirector(
   return {
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
-    pathSummary: formatPathForDirector(state),
+    pathSummary: "",
     currentDraft: draft,
     enabledSkills: skillsForTarget(enabledSkillsForDirector(state), "writer"),
     field,
@@ -171,30 +178,8 @@ function formatPathForDirector(state: SessionState) {
     return "暂无修改历程。";
   }
 
-  const pathSummary = state.selectedPath
-    .map((node, index) => {
-      const entryOption = optionThatEnteredNode(state.selectedPath, node, index);
-      const selectedOption = node.selectedOptionId
-        ? node.options.find((option) => option.id === node.selectedOptionId)
-        : null;
-      const parts = [
-        `第 ${node.roundIndex} 版：${node.roundIntent}`,
-        entryOption ? `进入本版的写作意图：${formatSuggestionForDirector(entryOption)}` : "",
-        node.options.length > 0 ? `已提出过的建议：${formatSuggestionsForDirector(node.options)}` : "",
-        selectedOption ? `随后推进的写作意图：${formatSuggestionForDirector(selectedOption)}` : "",
-        node.foldedOptions.length > 0 ? `当时暂未采纳的建议：${formatSuggestionsForDirector(node.foldedOptions)}` : ""
-      ].filter(Boolean);
-
-      return parts.join("；");
-    })
-    .join("\n");
-  const seenLabels = uniqueLabels(currentPathOptions(state));
-
-  return [
-    pathSummary,
-    seenLabels.length > 0 ? `已出现过的建议标题（用于避开复用）：${seenLabels.join("、")}` : ""
-  ]
-    .filter(Boolean)
+  return state.selectedPath
+    .map((node) => `第 ${node.roundIndex} 版：${node.roundIntent}`)
     .join("\n");
 }
 
@@ -212,17 +197,22 @@ function buildDraftConversationMessages(state: SessionState, finalUserRequest: s
     }
   ];
 
+  const lastPathIndex = state.selectedPath.length - 1;
   state.selectedPath.forEach((node, index) => {
-    messages.push({ role: "assistant", content: formatDraftHistoryRoundForWriter(state, node) });
+    messages.push({ role: "assistant", content: formatDraftHistoryRoundForWriter(state, node, index === lastPathIndex) });
 
     const selectedOption = node.selectedOptionId
       ? node.options.find((option) => option.id === node.selectedOptionId)
       : null;
-    const isCurrentDraftIntent = index === state.selectedPath.length - 1;
+    const isCurrentDraftIntent = index === lastPathIndex;
     if (selectedOption && !isCurrentDraftIntent) {
       messages.push({ role: "user", content: `下一步写作意图：${formatSuggestionForDirector(selectedOption)}` });
     }
   });
+
+  if (state.selectedPath.length === 0 && state.currentDraft) {
+    messages.push({ role: "assistant", content: formatCurrentDraftForWriter(state.currentDraft) });
+  }
 
   messages.push({ role: "user", content: finalUserRequest });
   return mergeConsecutiveUserMessages(messages);
@@ -266,10 +256,8 @@ function buildEditorMessages(state: SessionState, currentDraft: Draft | null, re
 
   const finalReviewMaterial = formatEditorCurrentReviewMaterial({
     currentDraft,
-    foldedSummary: formatCurrentPathFoldedSuggestionTitlesForEditor(state),
     latestRevisionSummary,
-    reviewInstruction,
-    state
+    reviewInstruction
   });
 
   if (messages.length === 1 && state.selectedPath.every((node) => node.options.length === 0)) {
@@ -307,66 +295,84 @@ function formatToolMemoryForDirector(toolMemory?: string) {
   ].join("\n");
 }
 
-function formatDraftHistoryRoundForWriter(state: SessionState, node: SessionState["selectedPath"][number]) {
+function formatDraftHistoryRoundForWriter(
+  state: SessionState,
+  node: SessionState["selectedPath"][number],
+  includeFullDraft = false
+) {
   const draft = draftForNode(state, node);
+  if (draft && includeFullDraft) {
+    return [
+      `第 ${node.roundIndex} 版已形成草稿`,
+      formatDraftForDirector(draft)
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
   return [
     `第 ${node.roundIndex} 版已形成版本摘要`,
-    `采用的写作意图：${node.roundIntent}`,
     `形成版本：${draft ? formatDraftVersionSummary(draft) : "暂无可用正文，仅保留本轮意图。"}`
   ]
     .filter(Boolean)
     .join("\n");
 }
 
+function formatCurrentDraftForWriter(draft: Draft) {
+  return ["当前已形成草稿", formatDraftForDirector(draft)].join("\n");
+}
+
 function formatDraftUserRequest({
-  currentDraft,
   modeHint,
   selectedOption,
   selectedOptionNote
 }: {
-  currentDraft: Draft | null;
   modeHint?: string;
   selectedOption?: BranchOption;
   selectedOptionNote?: string;
 }) {
+  if (selectedOption && isSelectionReferenceOption(selectedOption)) {
+    return [
+      selectedOption.description,
+      selectedOptionNote ? `补充要求：${selectedOptionNote}` : ""
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
   const selectedLines = selectedOption
     ? [
         `用户想要完成的写作意图：${formatSuggestionForDirector(selectedOption)}`,
         selectedOptionNote ? `用户补充要求：${selectedOptionNote}` : "",
         modeHint
       ].filter(Boolean)
-    : ["用户想要完成的写作意图：基于初始内容和当前内容生成新的内容版本。"];
+    : ["用户想要完成的写作意图：基于初始内容和上一版草稿生成新的内容版本。"];
 
   return [
-    ...selectedLines,
-    `当前内容：\n${currentDraft ? formatDraftForDirector(currentDraft) : "暂无内容。"}`
+    ...selectedLines
   ]
     .filter(Boolean)
     .join("\n\n");
 }
 
+function isSelectionReferenceOption(option: BranchOption) {
+  return option.id.startsWith("custom-reference-") || option.description.trim().startsWith("用户引用文本：");
+}
+
 function formatEditorCurrentReviewMaterial({
   currentDraft,
-  foldedSummary,
   latestRevisionSummary,
-  reviewInstruction,
-  state
+  reviewInstruction
 }: {
   currentDraft: Draft | null;
-  foldedSummary: string;
   latestRevisionSummary: string;
   reviewInstruction: string;
-  state: SessionState;
 }) {
-  const seenLabels = uniqueLabels(currentPathOptions(state));
-
   return [
     "本轮审稿材料：",
     reviewInstruction ? `本轮要求：\n${reviewInstruction}` : "",
     `当前内容：\n${currentDraft ? formatDraftForDirector(currentDraft) : "暂无内容。"}`,
-    latestRevisionSummary,
-    `暂未采纳的建议标题：\n${foldedSummary}`,
-    seenLabels.length > 0 ? `已出现过的建议标题：${seenLabels.join("、")}` : ""
+    latestRevisionSummary
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -392,17 +398,11 @@ function formatEditorRevisionSummary(
 }
 
 function formatCurrentPathFoldedOptionsForDirector(state: SessionState) {
-  const foldedOptions = uniqueOptions(state.selectedPath.flatMap((node) => node.foldedOptions));
-
-  return foldedOptions.length > 0
-    ? foldedOptions.map((option) => `${option.label}: ${option.description}`).join("\n")
-    : "暂无暂未采纳建议。";
+  return "";
 }
 
 function formatCurrentPathFoldedSuggestionTitlesForEditor(state: SessionState) {
-  const foldedOptions = uniqueOptions(state.selectedPath.flatMap((node) => node.foldedOptions));
-
-  return foldedOptions.length > 0 ? formatSuggestionsForDirector(foldedOptions) : "暂无暂未采纳建议。";
+  return "";
 }
 
 function currentPathOptions(state: SessionState) {

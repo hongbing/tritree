@@ -198,7 +198,7 @@ describe("POST /api/sessions/:sessionId/options", () => {
 
     expect(streamDirectorOptionsMock).toHaveBeenCalled();
     expect(streamDirectorOptionsMock.mock.calls[0][0].selectedOptionLabel).toContain("方向范围：发散");
-    expect(streamDirectorOptionsMock.mock.calls[0][0].selectedOptionLabel).toContain("拉开下一步方向之间的语义距离");
+    expect(streamDirectorOptionsMock.mock.calls[0][0].selectedOptionLabel).toContain("选项要更有脑洞");
   });
 
   it("regenerates an existing option set when forced with a direction range", async () => {

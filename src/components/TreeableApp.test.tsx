@@ -2919,14 +2919,16 @@ describe("TreeableApp", () => {
           optionMode: "balanced",
           customOption: expect.objectContaining({
             description: expect.stringContaining("目标句。"),
-            impact: "按选中文本和用户要求作为自定义方向继续生成。",
+            impact: "按引用文本和用户要求改写这一段。",
             kind: "reframe",
             label: "补一个细节"
           })
         })
       );
       expect(chooseBody.optionId).toBe(chooseBody.customOption.id);
+      expect(chooseBody.customOption.description).toContain("用户引用文本：");
       expect(chooseBody.customOption.description).toContain("补一个细节");
+      expect(chooseBody.customOption.description).not.toContain("引用选中文本继续生成");
     });
 
     await vi.waitFor(() => {

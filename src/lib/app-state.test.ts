@@ -91,11 +91,12 @@ describe("summarizeSessionForDirector", () => {
     expect(summary.selectedOptionLabel).toContain("职场黑话");
     expect(summary.selectedOptionLabel).toContain("用户补充要求：请保留一点讽刺感。");
     expect(summary.selectedOptionLabel).toContain("方向范围：专注");
-    expect(summary.selectedOptionLabel).toContain("生成草稿时只围绕所选方向做近距离推进");
-    expect(summary.selectedOptionLabel).toContain("硬约束");
-    expect(summary.selectedOptionLabel).toContain("保留当前稿的前提、读者和结构");
+    expect(summary.selectedOptionLabel).toContain("沿当前稿已经成立的思路继续推进");
+    expect(summary.selectedOptionLabel).not.toContain("硬约束");
+    expect(summary.selectedOptionLabel).not.toContain("不主动改换主题、读者、前提或基本结构");
     expect(summary.selectedOptionLabel).not.toContain("三个选项");
-    expect(summary.selectedOptionLabel).toContain("草稿改动幅度由所选方向决定");
+    expect(summary.selectedOptionLabel).not.toContain("近距离推进");
+    expect(summary.selectedOptionLabel).not.toContain("草稿改动幅度由所选方向决定");
     expect(summary.selectedOptionLabel).not.toContain("本轮写作倾向");
     expect(summary.selectedOptionLabel).not.toContain("收窄和深化");
     expect(summary.selectedOptionLabel).not.toContain("细节深化");
@@ -118,15 +119,38 @@ describe("summarizeSessionForDirector", () => {
 
     const summary = summarizeCurrentDraftOptionsForDirector(state, "divergent");
 
-    expect(summary.selectedOptionLabel).toContain("当前内容；避免重复已有方向和已有建议。");
+    expect(summary.selectedOptionLabel).not.toContain("避免重复已有方向");
     expect(summary.selectedOptionLabel).toContain("方向范围：发散");
-    expect(summary.selectedOptionLabel).toContain("拉开下一步方向之间的语义距离");
-    expect(summary.selectedOptionLabel).toContain("硬约束");
-    expect(summary.selectedOptionLabel).toContain("三个选项必须落在明显不同的创作维度");
-    expect(summary.selectedOptionLabel).toContain("至少一个选项改变读者、叙事前提或整体结构");
-    expect(summary.selectedOptionLabel).toContain("草稿改动幅度由所选方向决定");
+    expect(summary.selectedOptionLabel).toContain("选项要更有脑洞");
+    expect(summary.selectedOptionLabel).not.toContain("硬约束");
+    expect(summary.selectedOptionLabel).toContain("更大胆的切入、结构、表达形式或读者场景");
+    expect(summary.selectedOptionLabel).not.toContain("不要只是常规编辑动作");
+    expect(summary.selectedOptionLabel).not.toContain("草稿改动幅度由所选方向决定");
+    expect(summary.selectedOptionLabel).not.toContain("明显不同的创作维度");
+    expect(summary.selectedOptionLabel).not.toContain("语义距离");
     expect(summary.selectedOptionLabel).not.toContain("大改");
     expect(summary.selectedOptionLabel).not.toContain("小改");
+  });
+
+  it("does not add a direction range hint for the default balanced mode", () => {
+    const state = createStateWithPath([
+      createNode({
+        id: "root",
+        roundIndex: 1,
+        options: [],
+        selectedOptionId: null
+      })
+    ]);
+
+    const draftSummary = summarizeSessionForDirector(state, option("a", "补一个细节"));
+    const optionSummary = summarizeCurrentDraftOptionsForDirector(state);
+    const draftMessages = (draftSummary as any).messages as Array<{ role: string; content: string }>;
+    const optionMessages = (optionSummary as any).messages as Array<{ role: string; content: string }>;
+
+    expect(draftMessages.at(-1)?.content ?? "").not.toContain("方向范围：平衡");
+    expect(optionMessages.at(-1)?.content ?? "").not.toContain("方向范围：平衡");
+    expect(draftSummary.selectedOptionLabel).not.toContain("方向范围：平衡");
+    expect(optionSummary.selectedOptionLabel).not.toContain("方向范围：平衡");
   });
 
   it("includes completed tool query memory in later draft and option prompts", () => {
@@ -171,8 +195,9 @@ describe("summarizeSessionForDirector", () => {
 
     expect(finalMessage).toContain("本轮要求：");
     expect(finalMessage).toContain("方向范围：专注");
-    expect(finalMessage).toContain("三个选项必须共享同一个核心改写问题");
-    expect(finalMessage).toContain("只给近距离的三种处理办法");
+    expect(finalMessage).toContain("沿当前稿已经成立的思路继续推进");
+    expect(finalMessage).not.toContain("不要主动改换主题、读者、前提或基本结构");
+    expect(finalMessage).not.toContain("近距离的三种处理办法");
     expect(finalMessage.indexOf("本轮要求：")).toBeLessThan(finalMessage.indexOf("当前内容："));
   });
 
@@ -205,13 +230,8 @@ describe("summarizeSessionForDirector", () => {
 
     const summary = summarizeSessionForDirector(state, option("c", "重组为问题-解决结构"));
 
-    expect(summary.pathSummary).toContain("已提出过的建议：扩写成完整草稿；锁定写给谁看；重组为问题-解决结构");
-    expect(summary.pathSummary).toContain("随后推进的写作意图：锁定写给谁看");
-    expect(summary.pathSummary).toContain("进入本版的写作意图：锁定写给谁看");
-    expect(summary.pathSummary).toContain("已提出过的建议：展开值班全过程；锁定写给谁看；重组为问题-解决结构");
-    expect(summary.pathSummary).toContain("已出现过的建议标题（用于避开复用）");
-    expect(summary.pathSummary).toContain("展开值班全过程");
-    expect(summary.foldedSummary).toContain("扩写成完整草稿");
+    expect(summary.pathSummary).toBe("");
+    expect(summary.foldedSummary).toBe("");
     expect(summary.selectedOptionLabel).toContain("重组为问题-解决结构");
   });
 
@@ -258,13 +278,15 @@ describe("summarizeSessionForDirector", () => {
 
     expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "user", "assistant", "user"]);
     expect(messages[1].content).toContain("第 1 版已形成版本摘要");
-    expect(messages[1].content).toContain("采用的写作意图：第 1 轮意图");
+    expect(messages[1].content).not.toContain("采用的写作意图");
     expect(messages[1].content).toContain("旧版标题");
     expect(messages[1].content).not.toContain("正文：这是一段旧版正文，应该只作为摘要来源，而不应该完整进入 draft 历史消息。");
     expect(messages[1].content).not.toContain("选项：");
     expect(messages[2].content).toContain("下一步写作意图：确定写给谁看");
     expect(messages[2].content).not.toContain("用户选择");
-    expect(messages[3].content).toContain("第 2 版已形成版本摘要");
+    expect(messages[3].content).toContain("第 2 版已形成草稿");
+    expect(messages[3].content).not.toContain("采用的写作意图");
+    expect(messages[3].content).toContain("配图提示");
     expect(messages[3].content).not.toContain("选项：");
     expect(messages[4].content).toContain("用户想要完成的写作意图：分析做这个的动机");
     expect(messages[4].content).not.toContain("请按本轮写作意图生成新的内容版本");
@@ -274,7 +296,8 @@ describe("summarizeSessionForDirector", () => {
     expect(messages[4].content).not.toContain("已选技能是创作判断镜头");
     expect(messages[4].content).not.toContain("实质变化");
     expect(messages[4].content).not.toContain("会怎么改");
-    expect(messages[4].content).toContain("配图提示");
+    expect(messages[4].content).not.toContain("当前内容：");
+    expect(messages[4].content).not.toContain("配图提示");
     expect(messages[4].content).not.toContain("用户刚刚选择");
     expect(messages[4].content).not.toContain("三选一");
     expectNoProcessTerms(messages[4].content);
@@ -313,6 +336,76 @@ describe("summarizeSessionForDirector", () => {
     expectNoProcessTerms(finalMessage);
   });
 
+  it("puts the current generated draft in assistant history instead of the final user request", () => {
+    const state = createStateWithPath([
+      createNode({
+        id: "current",
+        roundIndex: 3,
+        options: [
+          option("a", "换成行业观察"),
+          option("b", "压缩三段对比"),
+          option("c", "补需求理解")
+        ],
+        selectedOptionId: null
+      })
+    ]);
+    state.currentDraft = {
+      title: "用AI写代码，人和人的差距到底在哪",
+      body: "比如我知道要做啥——不是“帮我写个登录功能”这种。",
+      hashtags: ["#AI编程"],
+      imagePrompt: "多屏幕代码工作台"
+    };
+
+    const summary = summarizeSessionForDirector(
+      state,
+      option("a", "换成行业观察"),
+      "知道要做啥指的是我知道用户需求，而不是被动接受任务。"
+    );
+    const messages = (summary as any).messages as Array<{ role: string; content: string }>;
+    const assistantHistory = messages[1].content;
+    const finalUserRequest = messages.at(-1)?.content ?? "";
+
+    expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+    expect(assistantHistory).toContain("第 3 版已形成草稿");
+    expect(assistantHistory).not.toContain("采用的写作意图");
+    expect(assistantHistory).toContain("正文：比如我知道要做啥——不是“帮我写个登录功能”这种。");
+    expect(finalUserRequest).toContain("用户想要完成的写作意图：换成行业观察");
+    expect(finalUserRequest).toContain("用户补充要求：知道要做啥指的是我知道用户需求，而不是被动接受任务。");
+    expect(finalUserRequest).not.toContain("当前内容：");
+    expect(finalUserRequest).not.toContain("帮我写个登录功能");
+  });
+
+  it("formats selected text reference directions as local rewrite requests", () => {
+    const state = createStateWithPath([
+      createNode({
+        id: "current",
+        roundIndex: 2,
+        options: [],
+        selectedOptionId: null
+      })
+    ]);
+    const selectedText = "我这边更像：先把整个模块拆成几块，同时开几个窗口并行出草稿。";
+    const selectedOption: BranchOption = {
+      id: "custom-reference-test",
+      label: "同时做几个不相关需求",
+      description: `用户引用文本：\n「${selectedText}」\n\n用户要求：是同时做几个不相关需求，不是一个需求拆一堆方向，另外现在这一段已经太长了`,
+      impact: "按引用文本和用户要求改写这一段。",
+      kind: "reframe"
+    };
+
+    const summary = summarizeSessionForDirector(state, selectedOption, undefined, "balanced");
+    const messages = (summary as any).messages as Array<{ role: string; content: string }>;
+    const finalUserRequest = messages.at(-1)?.content ?? "";
+
+    expect(finalUserRequest).toContain("用户引用文本：");
+    expect(finalUserRequest).toContain(selectedText);
+    expect(finalUserRequest).toContain("用户要求：是同时做几个不相关需求");
+    expect(finalUserRequest).not.toContain("用户想要完成的写作意图");
+    expect(finalUserRequest).not.toContain("引用选中文本继续生成");
+    expect(finalUserRequest).not.toContain("方向范围：");
+    expect(finalUserRequest).not.toContain("中规中矩的稳妥改法");
+  });
+
   it("includes current node option labels when regenerating options for an existing draft", () => {
     const state = createStateWithPath([
       createNode({
@@ -325,9 +418,8 @@ describe("summarizeSessionForDirector", () => {
 
     const summary = summarizeCurrentDraftOptionsForDirector(state);
 
-    expect(summary.pathSummary).toContain("已提出过的建议：展开值班全过程；锁定写给谁看；重组为问题-解决结构");
-    expect(summary.pathSummary).toContain("已出现过的建议标题（用于避开复用）");
-    expect(summary.selectedOptionLabel).toContain("避免重复已有方向");
+    expect(summary.pathSummary).toBe("");
+    expect(summary.selectedOptionLabel).toBe("");
   });
 
   it("asks the editor agent for first-round suggestions with initial and current content", () => {
@@ -393,8 +485,9 @@ describe("summarizeSessionForDirector", () => {
     expect(finalMessage).toContain("确定写给谁看");
     expect(finalMessage).toContain("当前内容：");
     expect(finalMessage).toContain("本轮审稿材料：");
-    expect(finalMessage).toContain("暂未采纳的建议标题：");
-    expect(finalMessage).toContain("扩写完整经历；分析为什么写");
+    expect(finalMessage).not.toContain("暂未采纳");
+    expect(finalMessage).not.toContain("已出现过的建议");
+    expect(finalMessage).not.toContain("扩写完整经历；分析为什么写");
     expect(finalMessage).not.toContain("扩写完整经历的说明");
     expect(finalMessage.indexOf("当前内容：")).toBeLessThan(finalMessage.indexOf("最近一次修改："));
     expect(finalMessage).not.toContain("请作为责任编辑");
@@ -454,7 +547,7 @@ describe("summarizeSessionForDirector", () => {
 
     const summary = summarizeCurrentDraftOptionsForDirector(state);
 
-    expect(summary.foldedSummary).toContain("锁定写给谁看");
+    expect(summary.foldedSummary).toBe("");
     expect(summary.foldedSummary).not.toContain("旧路线里的选项");
     expect(summary.pathSummary).not.toContain("旧路线里的选项");
   });

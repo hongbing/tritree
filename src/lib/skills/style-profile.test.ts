@@ -56,7 +56,7 @@ describe("style profile helpers", () => {
       description: "偏克制、具体。",
       prompt: "使用短句，少形容词。",
       appliesTo: "both",
-      defaultEnabled: false,
+      defaultEnabled: true,
       isArchived: false
     });
   });

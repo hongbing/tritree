@@ -60,7 +60,7 @@ export function normalizeGeneratedStyleDraft(value: unknown): SkillUpsert {
     description: parsed.data.description,
     prompt: parsed.data.prompt,
     appliesTo: "both",
-    defaultEnabled: false,
+    defaultEnabled: true,
     isArchived: false
   });
   if (!normalized.success) {

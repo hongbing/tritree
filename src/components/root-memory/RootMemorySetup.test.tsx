@@ -42,7 +42,7 @@ const personalStyleSkill: Skill = {
   prompt: "保持短句，写具体例子。",
   appliesTo: "writer",
   isSystem: false,
-  defaultEnabled: false,
+  defaultEnabled: true,
   isArchived: false,
   createdAt: "2026-05-13T00:00:00.000Z",
   updatedAt: "2026-05-13T00:00:00.000Z"
@@ -416,11 +416,38 @@ describe("RootMemorySetup", () => {
       expect.objectContaining({
         title: "我的风格：克制产品随笔",
         category: "风格",
-        appliesTo: "both"
+        appliesTo: "both",
+        defaultEnabled: true
       })
     );
     expect(onSubmit).toHaveBeenCalledWith({
       preferences: expect.objectContaining({ seed: "我想写 AI 产品经理的真实困境" }),
+      enabledSkillIds: ["system-analysis", "style-new"]
+    });
+  });
+
+  it("selects a default personal style skill for future new thoughts", async () => {
+    const onSubmit = vi.fn();
+    renderRootMemorySetup({
+      onCreateSkill: vi.fn(),
+      onSubmit,
+      onUpdateSkill: vi.fn(),
+      skills: [...skills, personalStyleSkill]
+    });
+
+    expect(screen.getByText("正在使用：我的风格：克制产品随笔")).toBeInTheDocument();
+    expect(screen.getByText("已启用 2 个技能")).toBeInTheDocument();
+    expect(screen.getByText("我的风格：克制产品随笔")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "展开技能列表" }));
+
+    expect(screen.getByRole("checkbox", { name: /我的风格：克制产品随笔/ })).toBeChecked();
+
+    await userEvent.type(screen.getByRole("textbox", { name: "创作 seed" }), "我想写下一个念头");
+    await userEvent.click(screen.getByRole("button", { name: "用这个念头开始" }));
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      preferences: expect.objectContaining({ seed: "我想写下一个念头" }),
       enabledSkillIds: ["system-analysis", "style-new"]
     });
   });

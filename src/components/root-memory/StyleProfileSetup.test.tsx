@@ -31,7 +31,7 @@ const generatedDraft = {
   description: "更自然的短句表达。",
   prompt: "使用自然短句，减少抽象形容。",
   appliesTo: "both",
-  defaultEnabled: false,
+  defaultEnabled: true,
   isArchived: false
 } as const;
 
@@ -688,6 +688,7 @@ describe("StyleProfileSetup", () => {
       expect.objectContaining({
         title: "我的风格：产品观察",
         appliesTo: "both",
+        defaultEnabled: true,
         prompt: "写作时具体、克制。"
       })
     );
@@ -738,6 +739,7 @@ describe("StyleProfileSetup", () => {
         expect.objectContaining({
           title: "我的风格：产品观察",
           description: "具体、克制。",
+          defaultEnabled: true,
           prompt: "写作时具体、克制。"
         })
       )

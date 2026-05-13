@@ -71,7 +71,7 @@ describe("generateStyleFromSamples", () => {
       description: "短句、具体、少夸张。",
       prompt: "写作时使用短句，保留具体例子，避免夸张承诺。",
       appliesTo: "both",
-      defaultEnabled: false,
+      defaultEnabled: true,
       isArchived: false
     });
   });
@@ -106,7 +106,7 @@ describe("generateStyleFromSamples", () => {
       description: "测试双替代真实模型。",
       prompt: "保持测试里的具体表达。",
       appliesTo: "both",
-      defaultEnabled: false,
+      defaultEnabled: true,
       isArchived: false
     });
   });
@@ -152,7 +152,7 @@ describe("generateStyleFromSamples", () => {
       description: "短句、具体。",
       prompt: "写作时使用短句，保留具体例子。",
       appliesTo: "both",
-      defaultEnabled: false,
+      defaultEnabled: true,
       isArchived: false
     });
   });
@@ -210,7 +210,7 @@ describe("generateStyleFromSamples", () => {
       description: "短句、具体。",
       prompt: "写作时使用短句。",
       appliesTo: "both",
-      defaultEnabled: false,
+      defaultEnabled: true,
       isArchived: false
     });
   });
@@ -235,7 +235,7 @@ describe("generateStyleFromSamples", () => {
       description: "从 output 读取。",
       prompt: "正常归一化 output 字段里的草稿。",
       appliesTo: "both",
-      defaultEnabled: false,
+      defaultEnabled: true,
       isArchived: false
     });
   });

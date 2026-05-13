@@ -16,6 +16,7 @@ The open-source default path uses Tritree's own AI flow to infer style from past
 - Return every generation result as an editable skill draft before saving.
 - Save the result as a normal user skill with `category = 风格`.
 - Automatically enable the saved style skill for the current work.
+- Make saved personal style skills default-enabled for future new thoughts.
 - Support updating an existing `我的风格：...` skill or creating a new version.
 - Keep the existing skill library, skill picker, and generation prompt model intact.
 - Preserve multi-user isolation: a user can only generate, save, update, and enable their own style skills.
@@ -29,7 +30,6 @@ The open-source default path uses Tritree's own AI flow to infer style from past
 - Do not make representative sample count or length a hard validation gate.
 - Do not make the user choose between internal and external model providers.
 - Do not expose administrator-triggered style generation for other users.
-- Do not make personal style skills default-enabled globally for future works.
 - Do not change how system skills are edited or archived.
 
 ## Current Context
@@ -110,6 +110,7 @@ The feature must never silently overwrite an existing personal style. If the use
 After a successful save:
 
 - The saved skill id is added to the Seed screen's selected skill ids.
+- The saved skill is marked `defaultEnabled = true`, so future new thoughts use it by default.
 - The user remains on the Seed screen.
 - The workbench collapses to show the selected personal style.
 - Starting the work sends the enabled skill ids to the existing session start flow.
@@ -122,8 +123,8 @@ Generated personal styles use the existing skill schema:
 - `category`: `风格`
 - `description`: a concise user-facing summary
 - `prompt`: the full style instruction used by writing generation
-- `appliesTo`: `writer`
-- `defaultEnabled`: `false`
+- `appliesTo`: `both`
+- `defaultEnabled`: `true`
 - `isArchived`: `false`
 
 The feature should not add a source or metadata column. Existing and newly generated personal style skills are identified in the workbench by convention:

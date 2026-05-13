@@ -25,7 +25,7 @@ const emptyStyleDraft: SkillUpsert = {
   description: "",
   prompt: "",
   appliesTo: "both",
-  defaultEnabled: false,
+  defaultEnabled: true,
   isArchived: false
 };
 const initialSampleTexts = [""];

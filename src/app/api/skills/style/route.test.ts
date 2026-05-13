@@ -25,8 +25,8 @@ const skillDraft = {
   category: "风格",
   description: "短句、具体。",
   prompt: "使用短句，保留具体例子。",
-  appliesTo: "writer",
-  defaultEnabled: false,
+  appliesTo: "both",
+  defaultEnabled: true,
   isArchived: false
 };
 

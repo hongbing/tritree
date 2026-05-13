@@ -40,27 +40,43 @@ export async function generateStyleFromSamples({
     throw new StyleProfileGenerationError("请先粘贴至少一段代表作。", 400);
   }
 
-  const agent =
-    styleAgent ??
-    (new Agent({
-      id: "tritree-style-profile-agent",
-      name: "Tritree Style Profile Agent",
-      instructions: STYLE_PROFILE_SYSTEM_PROMPT,
-      model: createTreeableAnthropicModel(env)
-    }) as unknown as StyleProfileAgentLike);
+  try {
+    const agent =
+      styleAgent ??
+      (new Agent({
+        id: "tritree-style-profile-agent",
+        name: "Tritree Style Profile Agent",
+        instructions: STYLE_PROFILE_SYSTEM_PROMPT,
+        model: createTreeableAnthropicModel(env)
+      }) as unknown as StyleProfileAgentLike);
 
-  const result = await agent.generate(
-    [{ role: "user", content: buildStyleProfileUserPrompt(normalizedSamples) }],
-    {
-      abortSignal: signal,
-      structuredOutput: {
-        jsonPromptInjection: true,
-        schema: StyleProfileOutputSchema
+    const result = await agent.generate(
+      [{ role: "user", content: buildStyleProfileUserPrompt(normalizedSamples) }],
+      {
+        abortSignal: signal,
+        structuredOutput: {
+          jsonPromptInjection: true,
+          schema: StyleProfileOutputSchema
+        }
       }
-    }
-  );
+    );
 
-  return normalizeGeneratedStyleDraft(result.object ?? result.output);
+    return normalizeGeneratedStyleDraft(result.object ?? result.output);
+  } catch (error) {
+    if (error instanceof StyleProfileGenerationError || isAbortError(error)) {
+      throw error;
+    }
+
+    throw new StyleProfileGenerationError("无法生成我的风格。", 500);
+  }
+}
+
+function isAbortError(error: unknown) {
+  if (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError") {
+    return true;
+  }
+
+  return Boolean(error && typeof error === "object" && "name" in error && error.name === "AbortError");
 }
 
 const STYLE_PROFILE_SYSTEM_PROMPT = `

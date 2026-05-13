@@ -132,11 +132,19 @@ describe("StyleProfileSetup", () => {
       json: async () => ({ skillDraft: generatedDraft })
     });
     vi.stubGlobal("fetch", fetchMock);
+    const onCreateSkill = vi.fn(async () => ({
+      ...generatedDraft,
+      id: "style-new",
+      isSystem: false,
+      createdAt: "",
+      updatedAt: ""
+    }));
     const onUpdateSkill = vi.fn(async () => ({ ...baseSkill, ...generatedDraft }));
     const onSavedSkill = vi.fn();
 
     renderSetup({
       externalStyleGenerationAvailable: true,
+      onCreateSkill,
       onSavedSkill,
       onUpdateSkill,
       selectedSkillIds: ["style-1"],
@@ -146,7 +154,10 @@ describe("StyleProfileSetup", () => {
     await userEvent.click(screen.getByRole("button", { name: "展开我的风格设置" }));
     await userEvent.click(screen.getByRole("button", { name: "一键生成我的风格" }));
     await screen.findByRole("textbox", { name: "风格名称" });
-    await userEvent.click(screen.getByRole("radio", { name: "更新已有风格" }));
+
+    expect(screen.getByRole("radio", { name: "更新已有风格" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "创建新版本" })).not.toBeChecked();
+
     await userEvent.click(screen.getByRole("button", { name: "保存并用于本作品" }));
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -154,6 +165,7 @@ describe("StyleProfileSetup", () => {
       expect.objectContaining({ method: "POST" })
     );
     expect(onUpdateSkill).toHaveBeenCalledWith("style-1", generatedDraft);
+    expect(onCreateSkill).not.toHaveBeenCalled();
     expect(onSavedSkill).toHaveBeenCalledWith(expect.objectContaining({ id: "style-1" }));
   });
 

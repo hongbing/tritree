@@ -25,6 +25,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   Object.defineProperty(window, "location", {
     configurable: true,
     value: originalLocation
@@ -60,6 +61,29 @@ describe("LoginForm", () => {
     await userEvent.click(screen.getByRole("button", { name: "登录" }));
 
     await waitFor(() => expect(assign).toHaveBeenCalledWith("/"));
+  });
+
+  it("uses the configured web base path for auth callback URLs", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TRITREE_WEB_BASE_PATH", "/tritree");
+    const assign = mockLocationAssign();
+    signInMock.mockResolvedValue({ ok: true, url: "/" });
+    render(<LoginForm isOidcEnabled={true} />);
+
+    await userEvent.type(screen.getByLabelText("用户名"), "awei");
+    await userEvent.type(screen.getByLabelText("密码"), "password-123");
+    await userEvent.click(screen.getByRole("button", { name: "登录" }));
+
+    expect(signInMock).toHaveBeenCalledWith("credentials", {
+      username: "awei",
+      password: "password-123",
+      redirect: false,
+      callbackUrl: "/tritree/"
+    });
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/tritree/"));
+
+    await userEvent.click(screen.getByRole("button", { name: "使用 OIDC 登录" }));
+
+    expect(signInMock).toHaveBeenCalledWith("oidc", { callbackUrl: "/tritree/" });
   });
 
   it("displays an invalid credentials error", async () => {

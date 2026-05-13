@@ -32,6 +32,7 @@ import { SkillLibraryPanel } from "@/components/skills/SkillLibraryPanel";
 import { SkillPicker } from "@/components/skills/SkillPicker";
 import { TreeCanvas } from "@/components/tree/TreeCanvas";
 import { createNdjsonParser } from "@/lib/stream/ndjson";
+import { apiPath, appPath } from "@/lib/web-base-path";
 
 type LoadState = "loading" | "root" | "ready" | "error";
 type MobilePanel = "tree" | "draft";
@@ -573,7 +574,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setMessage("");
     setRootSetupDefaults(null);
     try {
-      const skillsResponse = await fetch("/api/skills");
+      const skillsResponse = await fetch(apiPath("/api/skills"));
       const skillsData = (await skillsResponse.json()) as {
         creationRequestOptions?: CreationRequestOption[];
         error?: string;
@@ -584,7 +585,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       setSkills(skillsData.skills);
       setCreationRequestOptions(skillsData.creationRequestOptions ?? defaultCreationRequestOptions());
 
-      const response = await fetch("/api/root-memory");
+      const response = await fetch(apiPath("/api/root-memory"));
       if (!isCurrentLoadRequest(requestId)) return;
       if (!response.ok) throw new Error("Seed 加载失败。");
       const data = (await response.json()) as { rootMemory: RootMemory | null };
@@ -599,7 +600,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
 
       if (initialSessionId) {
         try {
-          const sessionResponse = await fetch(`/api/sessions/${encodeURIComponent(initialSessionId)}`);
+          const sessionResponse = await fetch(apiPath(`/api/sessions/${encodeURIComponent(initialSessionId)}`));
           const sessionData = (await sessionResponse.json()) as { state?: SessionState | null; error?: string };
           if (!isCurrentLoadRequest(requestId)) return;
           if (!sessionResponse.ok || !sessionData.state) throw new Error(sessionData.error ?? "草稿不存在或已归档。");
@@ -624,7 +625,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
         return;
       }
 
-      const sessionResponse = await fetch("/api/sessions");
+      const sessionResponse = await fetch(apiPath("/api/sessions"));
       const sessionData = (await sessionResponse.json()) as { state?: SessionState | null; error?: string };
       if (!isCurrentLoadRequest(requestId)) return;
       if (!sessionResponse.ok) throw new Error(sessionData.error ?? "创作树加载失败。");
@@ -646,7 +647,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsBusy(true);
     setMessage("");
     try {
-      const response = await fetch("/api/root-memory", {
+      const response = await fetch(apiPath("/api/root-memory"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload.preferences)
@@ -665,7 +666,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
 
   async function requestNewSession(enabledSkillIds?: string[]) {
     const response = await fetch(
-      "/api/sessions",
+      apiPath("/api/sessions"),
       enabledSkillIds
         ? {
             method: "POST",
@@ -700,7 +701,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsBusy(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/sessions/${sessionState.session.id}/skills`, {
+      const response = await fetch(apiPath(`/api/sessions/${sessionState.session.id}/skills`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabledSkillIds: skillIds })
@@ -719,7 +720,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsBusy(true);
     setSkillLibraryMessage("");
     try {
-      const response = await fetch("/api/skills", {
+      const response = await fetch(apiPath("/api/skills"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input)
@@ -740,7 +741,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsBusy(true);
     setSkillLibraryMessage("");
     try {
-      const response = await fetch("/api/skills/import", {
+      const response = await fetch(apiPath("/api/skills/import"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sourceUrl })
@@ -761,7 +762,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsBusy(true);
     setSkillLibraryMessage("");
     try {
-      const response = await fetch(`/api/skills/${skillId}`, {
+      const response = await fetch(apiPath(`/api/skills/${skillId}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input)
@@ -833,7 +834,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsBusy(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/sessions/${sessionState.session.id}/choose`, {
+      const response = await fetch(apiPath(`/api/sessions/${sessionState.session.id}/choose`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -884,7 +885,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsBusy(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/sessions/${sessionState.session.id}/branch`, {
+      const response = await fetch(apiPath(`/api/sessions/${sessionState.session.id}/branch`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -938,7 +939,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       })
     };
 
-    const streamResponse = await fetch(`/api/sessions/${state.session.id}/draft/generate/stream`, requestOptions);
+    const streamResponse = await fetch(apiPath(`/api/sessions/${state.session.id}/draft/generate/stream`), requestOptions);
     if (!streamResponse.ok) {
       const data = (await streamResponse.json().catch(() => null)) as { error?: string } | null;
       throw new Error(data?.error ?? "生成下一版草稿失败。");
@@ -1085,7 +1086,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setStreamingOptions({ nodeId, options: [] });
     setStreamingThinking(null);
     markMobilePanelUnread("tree");
-    const response = await fetch(`/api/sessions/${state.session.id}/options`, {
+    const response = await fetch(apiPath(`/api/sessions/${state.session.id}/options`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1325,7 +1326,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   }
 
   async function saveDraftForNode(draft: Draft, draftParentNodeId: string) {
-    const response = await fetch(`/api/sessions/${sessionState!.session.id}/draft`, {
+    const response = await fetch(apiPath(`/api/sessions/${sessionState!.session.id}/draft`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nodeId: draftParentNodeId, draft })
@@ -1578,7 +1579,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
                   <span>用户管理</span>
                 </Link>
               ) : null}
-              <button onClick={() => signOut({ callbackUrl: "/login" })} type="button">
+              <button onClick={() => signOut({ callbackUrl: appPath("/login") })} type="button">
                 <LogOut aria-hidden="true" size={15} strokeWidth={2.25} />
                 <span>退出登录</span>
               </button>

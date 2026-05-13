@@ -2,6 +2,7 @@
 
 import { type FormEvent, useState } from "react";
 import { signIn } from "next-auth/react";
+import { appPath } from "@/lib/web-base-path";
 
 type LoginFormProps = {
   isOidcEnabled: boolean;
@@ -36,7 +37,7 @@ export function LoginForm({ isOidcEnabled }: LoginFormProps) {
         username,
         password,
         redirect: false,
-        callbackUrl: "/"
+        callbackUrl: appPath("/")
       });
 
       if (result?.error || result?.ok === false) {
@@ -44,7 +45,7 @@ export function LoginForm({ isOidcEnabled }: LoginFormProps) {
         return;
       }
 
-      window.location.assign(getRelativeRedirectUrl(result?.url));
+      window.location.assign(appPath(getRelativeRedirectUrl(result?.url)));
     } catch {
       setMessage("登录失败，请稍后再试。");
     } finally {
@@ -85,7 +86,7 @@ export function LoginForm({ isOidcEnabled }: LoginFormProps) {
           {isSubmitting ? "登录中" : "登录"}
         </button>
         {isOidcEnabled ? (
-          <button className="secondary-button" onClick={() => void signIn("oidc", { callbackUrl: "/" })} type="button">
+          <button className="secondary-button" onClick={() => void signIn("oidc", { callbackUrl: appPath("/") })} type="button">
             使用 OIDC 登录
           </button>
         ) : null}

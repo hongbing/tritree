@@ -57,11 +57,14 @@ ANTHROPIC_MODEL=your_model_name
 
 TRITREE_DB_PATH=.tritree/tritree.sqlite
 TRITREE_SKILL_EXECUTION_MODE=auto
+# TRITREE_WEB_BASE_PATH=/tritree
 ```
 
 补充说明：
 
 - `ANTHROPIC_BASE_URL` 会自动补齐 `/v1` 后缀，以适配 AI SDK 的 Anthropic provider。
+- 如果要把 Tritree 挂在域名子路径下，例如 `https://test.com/tritree/`，设置 `TRITREE_WEB_BASE_PATH=/tritree` 后重新构建；负载均衡需要把 `/tritree/*` 原样转发到 Next.js 服务。这个值会写入 Next.js `basePath`，改动后必须重新 build。
+- 使用子路径部署且启用 NextAuth 时，生产环境的 `NEXTAUTH_URL` 应配置为完整认证接口地址，例如 `https://test.com/tritree/api/auth`。
 - 本地开发没有配置 `NEXTAUTH_SECRET` 时会使用开发默认值；生产环境请显式设置随机长字符串。
 - 可选 OIDC 登录变量：`OIDC_ISSUER`、`OIDC_CLIENT_ID`、`OIDC_CLIENT_SECRET`、`OIDC_SCOPE`。
 - `TRITREE_SKILL_EXECUTION_MODE` 可取 `auto`、`trusted-host` 或 `macos-seatbelt`。

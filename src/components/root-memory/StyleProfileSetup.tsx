@@ -11,6 +11,7 @@ import {
 
 type GenerationMode = "external" | "samples";
 type SaveMode = "create" | "update";
+type SetupStep = "choose" | "external" | "review" | "samples";
 
 const emptyStyleDraft: SkillUpsert = {
   title: MY_STYLE_TITLE_PREFIX,
@@ -40,8 +41,11 @@ export function StyleProfileSetup({
   skills: Skill[];
 }) {
   const personalStyleSkills = useMemo(() => skills.filter(isPersonalStyleSkill), [skills]);
+  const hasPersonalStyles = personalStyleSkills.length > 0;
   const selectedPersonalStyle = personalStyleSkills.find((skill) => selectedSkillIds.includes(skill.id)) ?? null;
-  const [isExpanded, setIsExpanded] = useState(!selectedPersonalStyle);
+  const collapsedPersonalStyle = selectedPersonalStyle ?? personalStyleSkills[0] ?? null;
+  const [isExpanded, setIsExpanded] = useState(!hasPersonalStyles);
+  const [step, setStep] = useState<SetupStep>("choose");
   const [samplesText, setSamplesText] = useState("");
   const [generationMode, setGenerationMode] = useState<GenerationMode>("samples");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -52,7 +56,8 @@ export function StyleProfileSetup({
   const [updateSkillId, setUpdateSkillId] = useState(selectedPersonalStyle?.id ?? personalStyleSkills[0]?.id ?? "");
   const [hasUserExpanded, setHasUserExpanded] = useState(false);
   const isBusy = disabled || isGenerating || isSaving;
-  const hasActiveWork = Boolean(draft) || samplesText.trim().length > 0 || hasUserExpanded || isGenerating || isSaving;
+  const hasActiveWork =
+    Boolean(draft) || samplesText.trim().length > 0 || step !== "choose" || hasUserExpanded || isGenerating || isSaving;
 
   useEffect(() => {
     const fallbackUpdateSkillId = selectedPersonalStyle?.id ?? personalStyleSkills[0]?.id ?? "";
@@ -66,14 +71,14 @@ export function StyleProfileSetup({
 
     if (hasActiveWork) return;
 
-    if (selectedPersonalStyle) {
+    if (hasPersonalStyles) {
       setIsExpanded(false);
       setHasUserExpanded(false);
-      setSaveMode("update");
+      setSaveMode(selectedPersonalStyle ? "update" : "create");
     } else {
       setSaveMode("create");
     }
-  }, [hasActiveWork, personalStyleSkills, selectedPersonalStyle]);
+  }, [hasActiveWork, hasPersonalStyles, personalStyleSkills, selectedPersonalStyle]);
 
   async function generateFromSamples() {
     const samples = splitRepresentativeSamples(samplesText);
@@ -86,6 +91,7 @@ export function StyleProfileSetup({
   }
 
   async function generateExternal() {
+    setStep("external");
     await requestGeneration("external", "/api/skills/style/generate-external");
   }
 
@@ -104,6 +110,7 @@ export function StyleProfileSetup({
       if (!response.ok || !data.skillDraft) throw new Error(data.error ?? "无法生成我的风格。");
 
       setDraft(normalizeGeneratedStyleDraft(data.skillDraft));
+      setStep("review");
       setSaveMode(selectedPersonalStyle ? "update" : "create");
       setUpdateSkillId(selectedPersonalStyle?.id ?? personalStyleSkills[0]?.id ?? "");
     } catch (error) {
@@ -130,6 +137,7 @@ export function StyleProfileSetup({
       onSavedSkill(savedSkill);
       setIsExpanded(false);
       setHasUserExpanded(false);
+      setStep("choose");
     } catch (error) {
       setError(error instanceof Error ? error.message : "技能保存失败。");
     } finally {
@@ -140,13 +148,31 @@ export function StyleProfileSetup({
   function startManualDraft() {
     setError("");
     setDraft({ ...emptyStyleDraft });
+    setStep("review");
+    setGenerationMode("samples");
     setSaveMode(selectedPersonalStyle ? "update" : "create");
     setUpdateSkillId(selectedPersonalStyle?.id ?? personalStyleSkills[0]?.id ?? "");
   }
 
-  function switchToSampleGeneration() {
+  function startSampleGeneration() {
+    setError("");
+    setDraft(null);
+    setGenerationMode("samples");
+    setStep("samples");
+  }
+
+  function returnToMethodSelection() {
     setError("");
     setGenerationMode("samples");
+    setStep("choose");
+  }
+
+  function toggleExpanded() {
+    setIsExpanded((expanded) => {
+      const nextExpanded = !expanded;
+      setHasUserExpanded(nextExpanded);
+      return nextExpanded;
+    });
   }
 
   return (
@@ -159,24 +185,20 @@ export function StyleProfileSetup({
           <p className="eyebrow">我的风格</p>
           {selectedPersonalStyle && !isExpanded ? (
             <p className="style-profile-setup__summary">正在使用：{selectedPersonalStyle.title}</p>
+          ) : collapsedPersonalStyle && !isExpanded ? (
+            <p className="style-profile-setup__summary">已有个人风格：{collapsedPersonalStyle.title}</p>
           ) : (
-            <p className="style-profile-setup__summary">生成个人风格 Skill，并自动用于这次作品。</p>
+            <p className="style-profile-setup__summary">创建一个可复用的个人风格 Skill，并用于这次作品。</p>
           )}
         </div>
         <button
           aria-expanded={isExpanded}
           className="secondary-button"
           disabled={isBusy}
-          onClick={() => {
-            setIsExpanded((expanded) => {
-              const nextExpanded = !expanded;
-              setHasUserExpanded(nextExpanded);
-              return nextExpanded;
-            });
-          }}
+          onClick={toggleExpanded}
           type="button"
         >
-          {isExpanded ? "收起我的风格设置" : "展开我的风格设置"}
+          {isExpanded ? "暂不设置" : "设置"}
         </button>
       </header>
 
@@ -188,30 +210,66 @@ export function StyleProfileSetup({
             </p>
           ) : null}
 
-          <div className="style-profile-setup__actions">
-            {externalStyleGenerationAvailable ? (
-              <button className="primary-action" disabled={isBusy} onClick={() => void generateExternal()} type="button">
-                {isGenerating && generationMode === "external"
-                  ? "正在一键生成..."
-                  : error && generationMode === "external"
-                    ? "重试生成"
-                    : "一键生成我的风格"}
+          {step !== "choose" ? (
+            <div className="style-profile-setup__nav">
+              <button className="secondary-button" disabled={isBusy} onClick={returnToMethodSelection} type="button">
+                返回选择方式
               </button>
-            ) : null}
-            <button
-              className="secondary-button"
-              disabled={isBusy}
-              onClick={switchToSampleGeneration}
-              type="button"
-            >
-              粘贴代表作生成
-            </button>
-            <button className="secondary-button" disabled={isBusy} onClick={startManualDraft} type="button">
-              改为手动创建
-            </button>
-          </div>
+            </div>
+          ) : null}
 
-          {generationMode === "samples" ? (
+          {step === "choose" ? (
+            <div className="style-profile-methods">
+              {externalStyleGenerationAvailable ? (
+                <button
+                  aria-label="一键生成我的风格"
+                  className="style-profile-method"
+                  disabled={isBusy}
+                  onClick={() => void generateExternal()}
+                  type="button"
+                >
+                  <span>一键生成我的风格</span>
+                  <small>从已接入的外部 AI 获取你的风格。</small>
+                </button>
+              ) : null}
+              <button
+                aria-label="粘贴代表作生成"
+                className="style-profile-method"
+                disabled={isBusy}
+                onClick={startSampleGeneration}
+                type="button"
+              >
+                <span>粘贴代表作生成</span>
+                <small>适合有几段自己的作品，Tritree 会归纳表达习惯。</small>
+              </button>
+              <button
+                aria-label="手动填写"
+                className="style-profile-method"
+                disabled={isBusy}
+                onClick={startManualDraft}
+                type="button"
+              >
+                <span>手动填写</span>
+                <small>适合你已经知道自己想要的风格提示词。</small>
+              </button>
+            </div>
+          ) : null}
+
+          {step === "external" ? (
+            <div className="style-profile-setup__generate-row">
+              <p className="style-profile-setup__step-copy">正在从外部 AI 获取你的风格。</p>
+              <button
+                className="primary-action"
+                disabled={isBusy}
+                onClick={() => void generateExternal()}
+                type="button"
+              >
+                {isGenerating ? "正在一键生成..." : error ? "重试生成" : "一键生成我的风格"}
+              </button>
+            </div>
+          ) : null}
+
+          {step === "samples" ? (
             <>
               <label className="style-profile-setup__samples">
                 <span>代表作样本</span>
@@ -231,13 +289,13 @@ export function StyleProfileSetup({
                   onClick={() => void generateFromSamples()}
                   type="button"
                 >
-                  {isGenerating && generationMode === "samples" ? "正在生成..." : error ? "重试生成" : "生成风格草稿"}
+                  {isGenerating && generationMode === "samples" ? "正在生成..." : error ? "重试生成" : "生成我的风格"}
                 </button>
               </div>
             </>
           ) : null}
 
-          {draft ? (
+          {step === "review" && draft ? (
             <section aria-label="风格草稿" className="style-profile-review">
               <label>
                 <span>风格名称</span>
@@ -324,7 +382,7 @@ export function StyleProfileSetup({
                 onClick={() => void saveDraft()}
                 type="button"
               >
-                {isSaving ? "正在保存..." : "保存并用于本作品"}
+                {isSaving ? "正在保存..." : "保存"}
               </button>
             </section>
           ) : null}

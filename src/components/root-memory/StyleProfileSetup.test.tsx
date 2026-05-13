@@ -70,11 +70,13 @@ describe("StyleProfileSetup", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders expanded when no personal style is selected", () => {
+  it("renders expanded method choices when no personal style exists", () => {
     renderSetup();
 
     expect(screen.getByRole("region", { name: "我的风格" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "手动填写" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "一键生成我的风格" })).not.toBeInTheDocument();
   });
 
@@ -84,7 +86,19 @@ describe("StyleProfileSetup", () => {
     expect(screen.getByText("正在使用：我的风格：克制产品随笔")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "展开我的风格设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "设置" }));
+
+    expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();
+  });
+
+  it("renders collapsed when a personal style exists but is not selected", async () => {
+    renderSetup({ selectedSkillIds: [], skills: [baseSkill] });
+
+    expect(screen.getByText("已有个人风格：我的风格：克制产品随笔")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "粘贴代表作生成" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "设置" }));
 
     expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
   });
@@ -99,6 +113,7 @@ describe("StyleProfileSetup", () => {
     const { rerender } = renderSetup();
 
     expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();
 
     rerender(
       <StyleProfileSetup
@@ -119,7 +134,8 @@ describe("StyleProfileSetup", () => {
   it("keeps a manually expanded sample editor open across parent skills refreshes", async () => {
     const { rerender } = renderSetup({ selectedSkillIds: ["style-1"], skills: [baseSkill] });
 
-    await userEvent.click(screen.getByRole("button", { name: "展开我的风格设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
     await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "这一段代表我的表达习惯。");
 
     rerender(
@@ -134,7 +150,7 @@ describe("StyleProfileSetup", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "收起我的风格设置" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "暂不设置" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "代表作样本" })).toHaveValue("这一段代表我的表达习惯。");
   });
 
@@ -157,7 +173,7 @@ describe("StyleProfileSetup", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
     await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。\n\n第二段代表作。");
-    await userEvent.click(screen.getByRole("button", { name: "生成风格草稿" }));
+    await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/skills/style/generate-from-samples",
@@ -169,7 +185,7 @@ describe("StyleProfileSetup", () => {
     );
     expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：自然短句");
 
-    await userEvent.click(screen.getByRole("button", { name: "保存并用于本作品" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
     expect(onCreateSkill).toHaveBeenCalledWith(generatedDraft);
     expect(onSavedSkill).toHaveBeenCalledWith(expect.objectContaining({ id: "style-new" }));
@@ -200,14 +216,14 @@ describe("StyleProfileSetup", () => {
       skills: [baseSkill]
     });
 
-    await userEvent.click(screen.getByRole("button", { name: "展开我的风格设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "设置" }));
     await userEvent.click(screen.getByRole("button", { name: "一键生成我的风格" }));
     await screen.findByRole("textbox", { name: "风格名称" });
 
     expect(screen.getByRole("radio", { name: "更新已有风格" })).toBeChecked();
     expect(screen.getByRole("radio", { name: "创建新版本" })).not.toBeChecked();
 
-    await userEvent.click(screen.getByRole("button", { name: "保存并用于本作品" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/skills/style/generate-external",
@@ -243,7 +259,7 @@ describe("StyleProfileSetup", () => {
       skills: [baseSkill, alternateSkill]
     });
 
-    await userEvent.click(screen.getByRole("button", { name: "展开我的风格设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "设置" }));
     await userEvent.click(screen.getByRole("button", { name: "一键生成我的风格" }));
     await screen.findByRole("textbox", { name: "风格名称" });
 
@@ -262,7 +278,7 @@ describe("StyleProfileSetup", () => {
     await waitFor(() => expect(screen.getByRole("combobox", { name: "选择要更新的风格" })).toHaveValue("style-2"));
     expect(screen.getByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：自然短句");
 
-    await userEvent.click(screen.getByRole("button", { name: "保存并用于本作品" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
     expect(onUpdateSkill).toHaveBeenCalledWith("style-2", generatedDraft);
     expect(onCreateSkill).not.toHaveBeenCalled();
@@ -282,7 +298,7 @@ describe("StyleProfileSetup", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("外部风格服务暂时不可用。");
     expect(screen.getByRole("button", { name: "重试生成" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "改为手动创建" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回选择方式" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "重试生成" }));
 
@@ -308,10 +324,11 @@ describe("StyleProfileSetup", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("外部风格服务暂时不可用。");
     expect(screen.getByRole("button", { name: "重试生成" })).toBeInTheDocument();
 
+    await userEvent.click(screen.getByRole("button", { name: "返回选择方式" }));
     await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "生成风格草稿" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "生成我的风格" })).toBeInTheDocument();
   });
 
   it("shows an alert when generated draft normalization fails", async () => {
@@ -323,8 +340,9 @@ describe("StyleProfileSetup", () => {
 
     renderSetup();
 
+    await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
     await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。");
-    await userEvent.click(screen.getByRole("button", { name: "生成风格草稿" }));
+    await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("生成的风格内容不完整。");
     expect(screen.queryByRole("textbox", { name: "风格名称" })).not.toBeInTheDocument();
@@ -336,10 +354,10 @@ describe("StyleProfileSetup", () => {
 
     renderSetup({ onCreateSkill, onSavedSkill });
 
-    await userEvent.click(screen.getByRole("button", { name: "改为手动创建" }));
+    await userEvent.click(screen.getByRole("button", { name: "手动填写" }));
     await userEvent.type(screen.getByRole("textbox", { name: "风格名称" }), "产品观察");
     await userEvent.type(screen.getByRole("textbox", { name: "风格提示词" }), "写作时具体、克制。");
-    await userEvent.click(screen.getByRole("button", { name: "保存并用于本作品" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("技能保存失败。");
     expect(onSavedSkill).not.toHaveBeenCalled();
@@ -355,12 +373,11 @@ describe("StyleProfileSetup", () => {
       externalStyleGenerationAvailable: true
     });
 
-    expect(screen.getByRole("button", { name: "收起我的风格设置" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "暂不设置" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "一键生成我的风格" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "改为手动创建" })).toBeDisabled();
-    expect(screen.getByRole("textbox", { name: "代表作样本" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "生成风格草稿" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "手动填写" })).toBeDisabled();
+    expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();
 
     rerender(
       <StyleProfileSetup
@@ -376,10 +393,10 @@ describe("StyleProfileSetup", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "一键生成我的风格" }));
 
-    expect(screen.getByRole("button", { name: "收起我的风格设置" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "暂不设置" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "正在一键生成..." })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "改为手动创建" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "粘贴代表作生成" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "手动填写" })).not.toBeInTheDocument();
 
     generation.resolve({ ok: true, json: async () => ({ skillDraft: generatedDraft }) });
     expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：自然短句");
@@ -398,12 +415,13 @@ describe("StyleProfileSetup", () => {
       />
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "改为手动创建" }));
+    await userEvent.click(screen.getByRole("button", { name: "返回选择方式" }));
+    await userEvent.click(screen.getByRole("button", { name: "手动填写" }));
     await userEvent.type(screen.getByRole("textbox", { name: "风格名称" }), "产品观察");
     await userEvent.type(screen.getByRole("textbox", { name: "风格提示词" }), "写作时具体、克制。");
-    await userEvent.click(screen.getByRole("button", { name: "保存并用于本作品" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
-    expect(screen.getByRole("button", { name: "收起我的风格设置" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "暂不设置" })).toBeDisabled();
     expect(screen.getByRole("textbox", { name: "风格名称" })).toBeDisabled();
     expect(screen.getByRole("textbox", { name: "风格提示词" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "正在保存..." })).toBeDisabled();
@@ -431,7 +449,8 @@ describe("StyleProfileSetup", () => {
 
     renderSetup({ onCreateSkill, onUpdateSkill, selectedSkillIds: [], skills: [baseSkill] });
 
-    await userEvent.click(screen.getByRole("button", { name: "改为手动创建" }));
+    await userEvent.click(screen.getByRole("button", { name: "设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "手动填写" }));
 
     expect(screen.getByRole("radio", { name: "创建新版本" })).toBeChecked();
     expect(screen.getByRole("radio", { name: "更新已有风格" })).not.toBeChecked();
@@ -445,7 +464,7 @@ describe("StyleProfileSetup", () => {
 
     await userEvent.type(screen.getByRole("textbox", { name: "风格名称" }), "产品观察");
     await userEvent.type(screen.getByRole("textbox", { name: "风格提示词" }), "写作时具体、克制。");
-    await userEvent.click(screen.getByRole("button", { name: "保存并用于本作品" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
     expect(onCreateSkill).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -467,12 +486,12 @@ describe("StyleProfileSetup", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
     await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "只有一句。");
-    await userEvent.click(screen.getByRole("button", { name: "生成风格草稿" }));
+    await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("样本太少，请再贴一段。");
     expect(screen.getByRole("textbox", { name: "代表作样本" })).toHaveValue("只有一句。");
     expect(screen.getByRole("button", { name: "重试生成" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "改为手动创建" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回选择方式" })).toBeInTheDocument();
   });
 
   it("lets the user edit a manual draft before saving", async () => {
@@ -489,11 +508,11 @@ describe("StyleProfileSetup", () => {
 
     renderSetup({ onCreateSkill });
 
-    await userEvent.click(screen.getByRole("button", { name: "改为手动创建" }));
+    await userEvent.click(screen.getByRole("button", { name: "手动填写" }));
     await userEvent.type(screen.getByRole("textbox", { name: "风格名称" }), "产品观察");
     await userEvent.type(screen.getByRole("textbox", { name: "风格说明" }), "具体、克制。");
     await userEvent.type(screen.getByRole("textbox", { name: "风格提示词" }), "写作时具体、克制。");
-    await userEvent.click(screen.getByRole("button", { name: "保存并用于本作品" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() =>
       expect(onCreateSkill).toHaveBeenCalledWith(

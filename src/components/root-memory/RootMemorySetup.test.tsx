@@ -372,11 +372,12 @@ describe("RootMemorySetup", () => {
       styleProfileExternalAvailable: false
     });
 
+    await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
     await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。\n\n第二段代表作。");
-    await userEvent.click(screen.getByRole("button", { name: "生成风格草稿" }));
+    await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
     expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：克制产品随笔");
 
-    await userEvent.click(screen.getByRole("button", { name: "保存并用于本作品" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
     await userEvent.type(screen.getByRole("textbox", { name: "创作 seed" }), "我想写 AI 产品经理的真实困境");
     await userEvent.click(screen.getByRole("button", { name: "用这个念头开始" }));
 

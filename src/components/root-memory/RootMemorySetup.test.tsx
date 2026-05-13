@@ -61,6 +61,26 @@ function requestOption(option: { id: string; label: string }, sortOrder = 0): Cr
 
 const defaultRequestOptions = DEFAULT_CREATION_REQUEST_OPTIONS.map((option, index) => requestOption(option, index));
 
+function styleStreamResponse(events: unknown[]) {
+  const encoder = new TextEncoder();
+
+  return {
+    ok: true,
+    headers: new Headers({ "Content-Type": "application/x-ndjson; charset=utf-8" }),
+    body: new ReadableStream({
+      start(controller) {
+        for (const event of events) {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        }
+        controller.close();
+      }
+    }),
+    json: async () => {
+      throw new Error("stream response should not call json");
+    }
+  };
+}
+
 function renderRootMemorySetup(props: Partial<ComponentProps<typeof RootMemorySetup>> = {}) {
   return render(
     <RootMemorySetup
@@ -353,16 +373,18 @@ describe("RootMemorySetup", () => {
   it("enables a saved personal style skill for the new work", async () => {
     const onSubmit = vi.fn();
     const onCreateSkill = vi.fn(async (_input: SkillUpsert) => personalStyleSkill);
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        skillDraft: {
-          title: "克制产品随笔",
-          description: "短句、具体、少夸张。",
-          prompt: "保持短句，写具体例子。"
+    const fetchMock = vi.fn().mockResolvedValue(
+      styleStreamResponse([
+        {
+          type: "done",
+          skillDraft: {
+            title: "克制产品随笔",
+            description: "短句、具体、少夸张。",
+            prompt: "保持短句，写具体例子。"
+          }
         }
-      })
-    });
+      ])
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     renderRootMemorySetup({
@@ -385,7 +407,7 @@ describe("RootMemorySetup", () => {
       "/api/skills/style/generate-from-samples",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ samples: ["第一段代表作。", "第二段代表作。"] })
+        body: JSON.stringify({ samples: ["第一段代表作。\n\n第二段代表作。"] })
       })
     );
     expect(onCreateSkill).toHaveBeenCalledWith(

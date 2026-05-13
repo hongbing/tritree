@@ -83,11 +83,9 @@ describe("style profile helpers", () => {
     expect(run).toThrow("生成的风格内容不完整。");
   });
 
-  it("splits representative samples by blank lines and trims empty entries", () => {
-    expect(splitRepresentativeSamples(" 第一段内容。\n\n\n第二段内容。\n  \n第三段内容。 ")).toEqual([
-      "第一段内容。",
-      "第二段内容。",
-      "第三段内容。"
+  it("keeps pasted representative content together as one sample", () => {
+    expect(splitRepresentativeSamples(" 第一段内容。\n\n第二段仍属于同一条微博。\n  \n第三段也属于同一批代表作。 ")).toEqual([
+      "第一段内容。\n\n第二段仍属于同一条微博。\n  \n第三段也属于同一批代表作。"
     ]);
   });
 

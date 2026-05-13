@@ -43,10 +43,8 @@ export function isPersonalStyleSkill(
 }
 
 export function splitRepresentativeSamples(value: string) {
-  return value
-    .split(/\n\s*\n/)
-    .map((sample) => sample.trim())
-    .filter(Boolean);
+  const trimmed = value.trim();
+  return trimmed ? [trimmed] : [];
 }
 
 export function normalizeGeneratedStyleDraft(value: unknown): SkillUpsert {

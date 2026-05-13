@@ -106,6 +106,110 @@ describe("generateStyleFromSamples", () => {
     });
   });
 
+  it("streams partial style drafts before returning the final normalized skill draft", async () => {
+    const partials: unknown[] = [];
+    const styleAgent = {
+      generate: vi.fn(),
+      stream: vi.fn(async () => ({
+        objectStream: (async function* () {
+          yield { title: "克制产品" };
+          yield { title: "克制产品随笔", description: "短句、具体。" };
+        })(),
+        object: Promise.resolve({
+          title: "克制产品随笔",
+          description: "短句、具体。",
+          prompt: "写作时使用短句，保留具体例子。"
+        })
+      }))
+    };
+
+    const draft = await generateStyleFromSamples({
+      samples: ["一整坨代表作。\n\n里面本来就有空行。"],
+      styleAgent,
+      onPartialDraft: (partial) => partials.push(partial)
+    });
+
+    expect(styleAgent.stream).toHaveBeenCalledWith(
+      [expect.objectContaining({ role: "user", content: expect.stringContaining("一整坨代表作。\n\n里面本来就有空行。") })],
+      expect.objectContaining({
+        structuredOutput: expect.objectContaining({ jsonPromptInjection: true })
+      })
+    );
+    expect(styleAgent.generate).not.toHaveBeenCalled();
+    expect(partials).toEqual([
+      { title: "克制产品" },
+      { title: "克制产品随笔", description: "短句、具体。" },
+      { title: "克制产品随笔", description: "短句、具体。", prompt: "写作时使用短句，保留具体例子。" }
+    ]);
+    expect(draft).toEqual({
+      title: "我的风格：克制产品随笔",
+      category: "风格",
+      description: "短句、具体。",
+      prompt: "写作时使用短句，保留具体例子。",
+      appliesTo: "writer",
+      defaultEnabled: false,
+      isArchived: false
+    });
+  });
+
+  it("streams partial style drafts from full stream text deltas", async () => {
+    const partials: unknown[] = [];
+    const styleAgent = {
+      generate: vi.fn(),
+      stream: vi.fn(async () => ({
+        fullStream: (async function* () {
+          yield { type: "text-delta", text: '{"title":"克制' };
+          yield { type: "text-delta", text: '产品随笔","description":"短句、具体。' };
+          yield { type: "text-delta", text: '","prompt":"写作时使用短句，保留具体例子。"}' };
+        })(),
+        object: Promise.resolve({
+          title: "克制产品随笔",
+          description: "短句、具体。",
+          prompt: "写作时使用短句，保留具体例子。"
+        })
+      }))
+    };
+
+    await generateStyleFromSamples({
+      samples: ["一整坨代表作。"],
+      styleAgent,
+      onPartialDraft: (partial) => partials.push(partial)
+    });
+
+    expect(partials).toEqual([
+      { title: "克制" },
+      { title: "克制产品随笔", description: "短句、具体。" },
+      { title: "克制产品随笔", description: "短句、具体。", prompt: "写作时使用短句，保留具体例子。" }
+    ]);
+  });
+
+  it("falls back to the latest streamed draft when the final structured stream object rejects", async () => {
+    const styleAgent = {
+      generate: vi.fn(),
+      stream: vi.fn(async () => ({
+        fullStream: (async function* () {
+          yield { type: "text-delta", text: '{"title":"短句口语风","description":"短句、具体。","prompt":"写作时使用短句。"}' };
+        })(),
+        object: Promise.reject(new Error("Structured output validation failed: - root: Required"))
+      }))
+    };
+
+    const draft = await generateStyleFromSamples({
+      samples: ["一整坨代表作。"],
+      styleAgent
+    });
+
+    expect(draft).toEqual({
+      title: "我的风格：短句口语风",
+      category: "风格",
+      description: "短句、具体。",
+      prompt: "写作时使用短句。",
+      appliesTo: "writer",
+      defaultEnabled: false,
+      isArchived: false
+    });
+  });
+
   it("normalizes output fallback when object is absent", async () => {
     const draft = await generateStyleFromSamples({
       samples: ["一段代表作。"],

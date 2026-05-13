@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -63,6 +63,73 @@ function renderSetup(props: Partial<ComponentProps<typeof StyleProfileSetup>> = 
       {...props}
     />
   );
+}
+
+function styleStreamResponse(events: unknown[]) {
+  const encoder = new TextEncoder();
+
+  return {
+    ok: true,
+    headers: new Headers({ "Content-Type": "application/x-ndjson; charset=utf-8" }),
+    body: new ReadableStream({
+      start(controller) {
+        for (const event of events) {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        }
+        controller.close();
+      }
+    }),
+    json: async () => {
+      throw new Error("stream response should not call json");
+    }
+  };
+}
+
+function styleStreamResponseWithoutContentType(events: unknown[]) {
+  const encoder = new TextEncoder();
+
+  return {
+    ok: true,
+    headers: new Headers(),
+    body: new ReadableStream({
+      start(controller) {
+        for (const event of events) {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        }
+        controller.close();
+      }
+    }),
+    json: async () => {
+      throw new Error("stream response should not call json");
+    }
+  };
+}
+
+function deferredStyleStreamResponse() {
+  const encoder = new TextEncoder();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const response = {
+    ok: true,
+    headers: new Headers({ "Content-Type": "application/x-ndjson; charset=utf-8" }),
+    body: new ReadableStream<Uint8Array>({
+      start(streamController) {
+        controller = streamController;
+      }
+    }),
+    json: async () => {
+      throw new Error("stream response should not call json");
+    }
+  };
+
+  return {
+    close() {
+      controller.close();
+    },
+    enqueue(event: unknown) {
+      controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+    },
+    response
+  };
 }
 
 describe("StyleProfileSetup", () => {
@@ -158,10 +225,12 @@ describe("StyleProfileSetup", () => {
   });
 
   it("generates from pasted samples and saves a new skill", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ skillDraft: generatedDraft })
-    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      styleStreamResponse([
+        { type: "progress", message: "正在归纳你的表达习惯..." },
+        { type: "done", skillDraft: generatedDraft }
+      ])
+    );
     vi.stubGlobal("fetch", fetchMock);
     const onCreateSkill = vi.fn(async () => ({
       ...generatedDraft,
@@ -175,6 +244,7 @@ describe("StyleProfileSetup", () => {
     renderSetup({ onCreateSkill, onSavedSkill });
 
     await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
+    expect(screen.getByPlaceholderText("粘贴你觉得最像自己的作品内容。内容越多，AI 越能准确分析你的创作方式。")).toBeInTheDocument();
     await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。\n\n第二段代表作。");
     await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
 
@@ -183,7 +253,7 @@ describe("StyleProfileSetup", () => {
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ samples: ["第一段代表作。", "第二段代表作。"] })
+        body: JSON.stringify({ samples: ["第一段代表作。\n\n第二段代表作。"] })
       })
     );
     expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：自然短句");
@@ -192,6 +262,59 @@ describe("StyleProfileSetup", () => {
 
     expect(onCreateSkill).toHaveBeenCalledWith(generatedDraft);
     expect(onSavedSkill).toHaveBeenCalledWith(expect.objectContaining({ id: "style-new" }));
+  });
+
+  it("shows streamed style draft content while sample generation is running", async () => {
+    const stream = deferredStyleStreamResponse();
+    const fetchMock = vi.fn().mockResolvedValue(stream.response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSetup();
+
+    await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。\n\n第二段代表作。");
+    await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
+
+    await act(async () => {
+      stream.enqueue({ type: "progress", message: "正在归纳你的表达习惯..." });
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("正在归纳你的表达习惯...");
+
+    await act(async () => {
+      stream.enqueue({
+        type: "draft",
+        skillDraft: {
+          title: "我的风格：自然短句",
+          description: "更自然的短句表达。",
+          prompt: "使用自然短句"
+        }
+      });
+    });
+    expect(await screen.findByRole("region", { name: "生成中的风格草稿" })).toHaveTextContent("我的风格：自然短句");
+    expect(screen.getByRole("region", { name: "生成中的风格草稿" })).toHaveTextContent("使用自然短句");
+
+    await act(async () => {
+      stream.enqueue({ type: "done", skillDraft: generatedDraft });
+      stream.close();
+    });
+
+    expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：自然短句");
+  });
+
+  it("consumes sample generation streams even when the response content type is missing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      styleStreamResponseWithoutContentType([{ type: "done", skillDraft: generatedDraft }])
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSetup();
+
+    await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。");
+    await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
+
+    expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：自然短句");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("generates from external provider and updates an existing style", async () => {

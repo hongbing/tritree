@@ -8,10 +8,17 @@ import {
   normalizeGeneratedStyleDraft,
   splitRepresentativeSamples
 } from "@/lib/skills/style-profile";
+import { createNdjsonParser } from "@/lib/stream/ndjson";
 
 type GenerationMode = "external" | "samples";
 type SaveMode = "create" | "update";
 type SetupStep = "choose" | "external" | "review" | "samples";
+type StyleDraftPreview = Partial<Pick<SkillUpsert, "description" | "prompt" | "title">>;
+type StyleGenerationStreamEvent =
+  | { type: "progress"; message: string }
+  | { type: "draft"; skillDraft: unknown }
+  | { type: "done"; skillDraft: unknown }
+  | { type: "error"; error: string };
 
 const emptyStyleDraft: SkillUpsert = {
   title: MY_STYLE_TITLE_PREFIX,
@@ -52,6 +59,8 @@ export function StyleProfileSetup({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<SkillUpsert | null>(null);
+  const [generationMessage, setGenerationMessage] = useState("");
+  const [streamingDraft, setStreamingDraft] = useState<StyleDraftPreview | null>(null);
   const [saveMode, setSaveMode] = useState<SaveMode>(selectedPersonalStyle ? "update" : "create");
   const [updateSkillId, setUpdateSkillId] = useState(selectedPersonalStyle?.id ?? personalStyleSkills[0]?.id ?? "");
   const [hasUserExpanded, setHasUserExpanded] = useState(false);
@@ -97,6 +106,8 @@ export function StyleProfileSetup({
 
   async function requestGeneration(mode: GenerationMode, url: string, body?: unknown) {
     setError("");
+    setGenerationMessage("");
+    setStreamingDraft(null);
     setGenerationMode(mode);
     setIsGenerating(true);
 
@@ -106,6 +117,12 @@ export function StyleProfileSetup({
         headers: { "Content-Type": "application/json" },
         ...(body ? { body: JSON.stringify(body) } : {})
       });
+
+      if (shouldConsumeStyleGenerationStream(mode, response)) {
+        await consumeStyleGenerationStream(response);
+        return;
+      }
+
       const data = (await response.json().catch(() => ({}))) as { error?: string; skillDraft?: unknown };
       if (!response.ok || !data.skillDraft) throw new Error(data.error ?? "无法生成我的风格。");
 
@@ -147,6 +164,8 @@ export function StyleProfileSetup({
 
   function startManualDraft() {
     setError("");
+    setGenerationMessage("");
+    setStreamingDraft(null);
     setDraft({ ...emptyStyleDraft });
     setStep("review");
     setGenerationMode("samples");
@@ -156,6 +175,8 @@ export function StyleProfileSetup({
 
   function startSampleGeneration() {
     setError("");
+    setGenerationMessage("");
+    setStreamingDraft(null);
     setDraft(null);
     setGenerationMode("samples");
     setStep("samples");
@@ -163,8 +184,62 @@ export function StyleProfileSetup({
 
   function returnToMethodSelection() {
     setError("");
+    setGenerationMessage("");
+    setStreamingDraft(null);
     setGenerationMode("samples");
     setStep("choose");
+  }
+
+  async function consumeStyleGenerationStream(response: Response) {
+    if (!response.body) throw new Error("无法生成我的风格。");
+
+    const decoder = new TextDecoder();
+    const reader = response.body.getReader();
+    let finalDraft: SkillUpsert | null = null;
+    let streamError = "";
+    const parser = createNdjsonParser((value) => {
+      if (!isStyleGenerationStreamEvent(value)) return;
+
+      if (value.type === "progress") {
+        setGenerationMessage(value.message);
+        return;
+      }
+
+      if (value.type === "draft") {
+        const preview = styleDraftPreviewFrom(value.skillDraft);
+        if (preview) {
+          setStreamingDraft((current) => ({ ...(current ?? {}), ...preview }));
+        }
+        return;
+      }
+
+      if (value.type === "done") {
+        finalDraft = normalizeGeneratedStyleDraft(value.skillDraft);
+        return;
+      }
+
+      streamError = value.error;
+    });
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parser.push(decoder.decode(value, { stream: true }));
+      }
+      parser.push(decoder.decode());
+      parser.flush();
+    } finally {
+      reader.releaseLock();
+    }
+
+    if (streamError) throw new Error(streamError);
+    if (!finalDraft) throw new Error("无法生成我的风格。");
+
+    setDraft(finalDraft);
+    setStep("review");
+    setSaveMode(selectedPersonalStyle ? "update" : "create");
+    setUpdateSkillId(selectedPersonalStyle?.id ?? personalStyleSkills[0]?.id ?? "");
   }
 
   function toggleExpanded() {
@@ -244,7 +319,7 @@ export function StyleProfileSetup({
                 type="button"
               >
                 <span>粘贴代表作生成</span>
-                <small>适合有几段自己的作品，Tritree 会归纳表达习惯。</small>
+                <small>适合直接粘贴自己的作品内容，Tritree 会归纳表达习惯。</small>
               </button>
               <button
                 aria-label="手动填写"
@@ -281,11 +356,40 @@ export function StyleProfileSetup({
                   aria-label="代表作样本"
                   disabled={isBusy}
                   onChange={(event) => setSamplesText(event.target.value)}
-                  placeholder="粘贴几段最像你的作品。用空行分隔多段样本。"
+                  placeholder="粘贴你觉得最像自己的作品内容。内容越多，AI 越能准确分析你的创作方式。"
                   rows={5}
                   value={samplesText}
                 />
               </label>
+              {isGenerating || streamingDraft ? (
+                <section aria-label="生成中的风格草稿" className="style-profile-stream-preview">
+                  <p className="style-profile-stream-preview__status" role="status">
+                    {generationMessage || "正在生成我的风格..."}
+                  </p>
+                  {streamingDraft ? (
+                    <div className="style-profile-stream-preview__fields">
+                      {streamingDraft.title ? (
+                        <div>
+                          <span>风格名称</span>
+                          <p>{streamingDraft.title}</p>
+                        </div>
+                      ) : null}
+                      {streamingDraft.description ? (
+                        <div>
+                          <span>风格说明</span>
+                          <p>{streamingDraft.description}</p>
+                        </div>
+                      ) : null}
+                      {streamingDraft.prompt ? (
+                        <div>
+                          <span>风格提示词</span>
+                          <p>{streamingDraft.prompt}</p>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
               <div className="style-profile-setup__generate-row">
                 <button
                   className="secondary-button"
@@ -394,4 +498,53 @@ export function StyleProfileSetup({
       ) : null}
     </section>
   );
+}
+
+function shouldConsumeStyleGenerationStream(mode: GenerationMode, response: Response) {
+  if (!response.body) return false;
+  if (response.headers.get("Content-Type")?.includes("application/x-ndjson")) return true;
+  return mode === "samples" && response.ok;
+}
+
+function isStyleGenerationStreamEvent(value: unknown): value is StyleGenerationStreamEvent {
+  if (!isRecord(value) || typeof value.type !== "string") return false;
+
+  switch (value.type) {
+    case "progress":
+      return typeof value.message === "string";
+    case "draft":
+    case "done":
+      return "skillDraft" in value;
+    case "error":
+      return typeof value.error === "string";
+    default:
+      return false;
+  }
+}
+
+function styleDraftPreviewFrom(value: unknown): StyleDraftPreview | null {
+  if (!isRecord(value)) return null;
+  const preview: StyleDraftPreview = {};
+
+  if (typeof value.title === "string" && value.title.trim()) {
+    preview.title = withPersonalStyleTitlePrefix(value.title);
+  }
+  if (typeof value.description === "string" && value.description.trim()) {
+    preview.description = value.description.trim();
+  }
+  if (typeof value.prompt === "string" && value.prompt.trim()) {
+    preview.prompt = value.prompt.trim();
+  }
+
+  return Object.keys(preview).length ? preview : null;
+}
+
+function withPersonalStyleTitlePrefix(value: string) {
+  const trimmed = value.trim();
+  if (trimmed.startsWith(MY_STYLE_TITLE_PREFIX)) return trimmed;
+  return `${MY_STYLE_TITLE_PREFIX}${trimmed}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

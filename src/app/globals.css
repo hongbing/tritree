@@ -817,6 +817,28 @@ button:disabled {
   padding: 10px 12px;
 }
 
+.style-profile-title-field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.style-profile-review label .style-profile-title-field__prefix {
+  align-items: center;
+  background: rgba(241, 245, 249, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  border-radius: 8px 0 0 8px;
+  border-right: 0;
+  color: #475569;
+  display: inline-flex;
+  font-size: 1rem;
+  font-weight: 700;
+  padding: 10px 0 10px 12px;
+}
+
+.style-profile-review .style-profile-title-field input:not([type="radio"]) {
+  border-radius: 0 8px 8px 0;
+}
+
 .style-profile-stream-preview {
   background: rgba(240, 253, 250, 0.72);
   border: 1px solid rgba(20, 184, 166, 0.24);

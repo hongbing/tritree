@@ -30,7 +30,7 @@ const generatedDraft = {
   category: "风格",
   description: "更自然的短句表达。",
   prompt: "使用自然短句，减少抽象形容。",
-  appliesTo: "writer",
+  appliesTo: "both",
   defaultEnabled: false,
   isArchived: false
 } as const;
@@ -256,7 +256,7 @@ describe("StyleProfileSetup", () => {
         body: JSON.stringify({ samples: ["第一段代表作。\n\n第二段代表作。"] })
       })
     );
-    expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：自然短句");
+    expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("自然短句");
 
     await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
@@ -298,7 +298,7 @@ describe("StyleProfileSetup", () => {
       stream.close();
     });
 
-    expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：自然短句");
+    expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("自然短句");
   });
 
   it("consumes sample generation streams even when the response content type is missing", async () => {
@@ -313,7 +313,7 @@ describe("StyleProfileSetup", () => {
     await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。");
     await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
 
-    expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：自然短句");
+    expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("自然短句");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -402,7 +402,7 @@ describe("StyleProfileSetup", () => {
     );
 
     await waitFor(() => expect(screen.getByRole("combobox", { name: "选择要更新的风格" })).toHaveValue("style-2"));
-    expect(screen.getByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：自然短句");
+    expect(screen.getByRole("textbox", { name: "风格名称" })).toHaveValue("自然短句");
 
     await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
@@ -525,7 +525,7 @@ describe("StyleProfileSetup", () => {
     expect(screen.queryByRole("button", { name: "手动填写" })).not.toBeInTheDocument();
 
     generation.resolve({ ok: true, json: async () => ({ skillDraft: generatedDraft }) });
-    expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：自然短句");
+    expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("自然短句");
 
     const save = deferred<Skill | null>();
     const onCreateSkill = vi.fn(() => save.promise);
@@ -578,6 +578,8 @@ describe("StyleProfileSetup", () => {
     await userEvent.click(screen.getByRole("button", { name: "设置" }));
     await userEvent.click(screen.getByRole("button", { name: "手动填写" }));
 
+    expect(screen.getByText("我的风格：")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "风格名称" })).toHaveValue("");
     expect(screen.getByRole("radio", { name: "创建新版本" })).toBeChecked();
     expect(screen.getByRole("radio", { name: "更新已有风格" })).not.toBeChecked();
     expect(screen.queryByRole("combobox", { name: "选择要更新的风格" })).not.toBeInTheDocument();
@@ -595,6 +597,7 @@ describe("StyleProfileSetup", () => {
     expect(onCreateSkill).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "我的风格：产品观察",
+        appliesTo: "both",
         prompt: "写作时具体、克制。"
       })
     );

@@ -59,7 +59,7 @@ export function normalizeGeneratedStyleDraft(value: unknown): SkillUpsert {
     category: "风格",
     description: parsed.data.description,
     prompt: parsed.data.prompt,
-    appliesTo: "writer",
+    appliesTo: "both",
     defaultEnabled: false,
     isArchived: false
   });

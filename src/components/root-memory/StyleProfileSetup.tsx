@@ -25,7 +25,7 @@ const emptyStyleDraft: SkillUpsert = {
   category: "风格",
   description: "",
   prompt: "",
-  appliesTo: "writer",
+  appliesTo: "both",
   defaultEnabled: false,
   isArchived: false
 };
@@ -407,15 +407,22 @@ export function StyleProfileSetup({
             <section aria-label="风格草稿" className="style-profile-review">
               <label>
                 <span>风格名称</span>
-                <input
-                  aria-label="风格名称"
-                  disabled={isBusy}
-                  maxLength={40}
-                  onChange={(event) =>
-                    setDraft((current) => (current ? { ...current, title: event.target.value } : current))
-                  }
-                  value={draft.title}
-                />
+                <div className="style-profile-title-field">
+                  <span aria-hidden="true" className="style-profile-title-field__prefix">
+                    {MY_STYLE_TITLE_PREFIX}
+                  </span>
+                  <input
+                    aria-label="风格名称"
+                    disabled={isBusy}
+                    maxLength={40 - MY_STYLE_TITLE_PREFIX.length}
+                    onChange={(event) =>
+                      setDraft((current) =>
+                        current ? { ...current, title: personalStyleTitleFromEditableValue(event.target.value) } : current
+                      )
+                    }
+                    value={editablePersonalStyleTitle(draft.title)}
+                  />
+                </div>
               </label>
               <label>
                 <span>风格说明</span>
@@ -486,7 +493,7 @@ export function StyleProfileSetup({
 
               <button
                 className="primary-action"
-                disabled={isBusy || !draft.title.trim() || !draft.prompt.trim()}
+                disabled={isBusy || !editablePersonalStyleTitle(draft.title).trim() || !draft.prompt.trim()}
                 onClick={() => void saveDraft()}
                 type="button"
               >
@@ -498,6 +505,20 @@ export function StyleProfileSetup({
       ) : null}
     </section>
   );
+}
+
+function editablePersonalStyleTitle(title: string) {
+  const trimmed = title.trim();
+  return trimmed.startsWith(MY_STYLE_TITLE_PREFIX) ? trimmed.slice(MY_STYLE_TITLE_PREFIX.length) : trimmed;
+}
+
+function personalStyleTitleFromEditableValue(value: string) {
+  const trimmed = value.replace(new RegExp(`^${escapeRegExp(MY_STYLE_TITLE_PREFIX)}\\s*`), "");
+  return `${MY_STYLE_TITLE_PREFIX}${trimmed}`;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function shouldConsumeStyleGenerationStream(mode: GenerationMode, response: Response) {

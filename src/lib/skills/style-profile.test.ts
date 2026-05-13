@@ -18,7 +18,7 @@ const styleSkill: Skill = {
   category: "风格",
   description: "克制、具体。",
   prompt: "写作时保持克制、具体。",
-  appliesTo: "writer",
+  appliesTo: "both",
   isSystem: false,
   defaultEnabled: false,
   isArchived: false,
@@ -55,7 +55,7 @@ describe("style profile helpers", () => {
       category: "风格",
       description: "偏克制、具体。",
       prompt: "使用短句，少形容词。",
-      appliesTo: "writer",
+      appliesTo: "both",
       defaultEnabled: false,
       isArchived: false
     });
@@ -152,7 +152,7 @@ describe("fetchExternalStyleProfile", () => {
     );
     expect(draft.title).toBe("我的风格：克制产品随笔");
     expect(draft.category).toBe("风格");
-    expect(draft.appliesTo).toBe("writer");
+    expect(draft.appliesTo).toBe("both");
   });
 
   it("returns a curated public error when the provider rejects authentication", async () => {

@@ -474,7 +474,7 @@ export async function createMcpRuntimeTools(options: McpRuntimeOptions = {}): Pr
   } catch (error) {
     const diagnostic = redactMcpDiagnostic(`MCP tools unavailable：${errorMessage(error)}`);
     logDiagnostic(diagnostic);
-    await disconnectMcpClient(client);
+    await disconnectMcpClient(client, logDiagnostic);
     return emptyMcpRuntimeTools(diagnostics);
   }
 
@@ -529,14 +529,25 @@ function emptyMcpRuntimeTools(diagnostics: string[] = []): McpRuntimeTools {
   };
 }
 
-async function disconnectMcpClient(client: McpClientLike) {
-  await client.disconnect?.();
+async function disconnectMcpClient(client: McpClientLike, logDiagnostic?: (message: string) => void) {
+  try {
+    await client.disconnect?.();
+  } catch (error) {
+    const diagnostic = redactMcpDiagnostic(`MCP disconnect failed：${errorMessage(error)}`);
+    if (!logDiagnostic) throw new Error(diagnostic);
+    logDiagnostic(diagnostic);
+  }
 }
 
 function formatMcpToolSummary(toolName: string, tool: ToolsInput[string]) {
-  const description =
-    isRecord(tool) && typeof tool.description === "string" && tool.description.trim()
-      ? `（${redactMcpDiagnostic(tool.description.trim())}）`
-      : "";
+  const description = isRecord(tool) && typeof tool.description === "string" ? sanitizeToolDescription(tool.description) : "";
   return `${toolName}${description}`;
+}
+
+function sanitizeToolDescription(description: string) {
+  const sanitized = redactMcpDiagnostic(description).replace(/\s+/g, " ").trim();
+  if (!sanitized) return "";
+  const maxLength = 120;
+  const bounded = sanitized.length > maxLength ? `${sanitized.slice(0, maxLength).trimEnd()}...` : sanitized;
+  return `（${bounded}）`;
 }

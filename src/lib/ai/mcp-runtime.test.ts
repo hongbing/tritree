@@ -442,6 +442,101 @@ describe("MCP runtime tool loading", () => {
     expect(result.toolSummaries.join("\n")).not.toContain("remote-secret");
   });
 
+  it("returns no tools and reports cleanup failures when listing and disconnect both fail", async () => {
+    const dir = makeTempDir();
+    const configPath = writeJsonConfig(dir, {
+      mcpServers: {
+        search: {
+          url: "https://mcp.example.com/mcp"
+        }
+      }
+    });
+    const log = vi.fn();
+    const result = await createMcpRuntimeTools({
+      configPath,
+      createClient: () => ({
+        disconnect: async () => {
+          throw new Error("disconnect failed TOKEN=disconnect-secret");
+        },
+        listToolsetsWithErrors: async () => {
+          throw new Error("Authorization: Bearer list-secret failed");
+        }
+      }),
+      env: {},
+      log
+    });
+
+    const summaries = result.toolSummaries.join("\n");
+    expect(result.tools).toEqual({});
+    expect(summaries).toContain("MCP tools unavailable");
+    expect(summaries).toContain("Authorization: Bearer [redacted]");
+    expect(summaries).toContain("MCP disconnect failed");
+    expect(summaries).toContain("TOKEN=[redacted]");
+    expect(summaries).not.toContain("list-secret");
+    expect(summaries).not.toContain("disconnect-secret");
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("[tritree:mcp] MCP tools unavailable"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("[tritree:mcp] MCP disconnect failed"));
+  });
+
+  it("sanitizes and bounds MCP tool descriptions in summaries", async () => {
+    const dir = makeTempDir();
+    const configPath = writeJsonConfig(dir, {
+      mcpServers: {
+        search: {
+          url: "https://mcp.example.com/mcp"
+        }
+      }
+    });
+    const repeatedTail = "tail ".repeat(80);
+    const lookup = {
+      id: "lookup",
+      description: `Lookup\n\nAuthorization: Bearer summary-secret with    extra whitespace ${repeatedTail}`,
+      execute: async () => ({})
+    };
+    const result = await createMcpRuntimeTools({
+      configPath,
+      createClient: () => ({
+        disconnect: async () => undefined,
+        listToolsetsWithErrors: async () => ({
+          errors: {},
+          toolsets: { search: { lookup } }
+        })
+      }),
+      env: {}
+    });
+
+    const summary = result.toolSummaries.join("\n");
+    expect(summary).toContain("Lookup Authorization: Bearer [redacted] with extra whitespace");
+    expect(summary).toContain("...");
+    expect(summary).not.toContain("\n\n");
+    expect(summary).not.toContain("summary-secret");
+    expect(summary).not.toContain(repeatedTail.trim());
+  });
+
+  it("falls back to listTools with the generic mcp namespace", async () => {
+    const dir = makeTempDir();
+    const configPath = writeJsonConfig(dir, {
+      mcpServers: {
+        local: {
+          command: "node",
+          args: ["server.js"]
+        }
+      }
+    });
+    const lookup = { id: "lookup", description: "Lookup records.", execute: async () => ({}) };
+    const result = await createMcpRuntimeTools({
+      configPath,
+      createClient: () => ({
+        disconnect: async () => undefined,
+        listTools: async () => ({ lookup })
+      }),
+      env: {}
+    });
+
+    expect(result.tools).toEqual({ mcp_lookup: lookup });
+    expect(result.toolSummaries.join("\n")).toContain("mcp_lookup");
+  });
+
   it("returns no tools when config path is relative or config is invalid", async () => {
     const log = vi.fn();
     const result = await createMcpRuntimeTools({

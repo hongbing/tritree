@@ -15,8 +15,23 @@ export type McpRuntimeTools = {
 
 type McpRuntimeOptions = {
   configPath?: string;
+  createClient?: (options: {
+    id: string;
+    servers: Record<string, MastraMCPServerDefinition>;
+  }) => McpClientLike;
   cwd?: string;
   env?: StringEnv;
+  existingTools?: ToolsInput;
+  log?: (message: string) => void;
+};
+
+export type McpClientLike = {
+  disconnect?: () => Promise<void> | void;
+  listTools?: () => Promise<ToolsInput>;
+  listToolsetsWithErrors?: () => Promise<{
+    errors: Record<string, string>;
+    toolsets: Record<string, ToolsInput>;
+  }>;
 };
 
 type LoadServerDefinitionsOptions = {
@@ -389,13 +404,134 @@ export function redactMcpDiagnostic(message: string) {
     .replace(/\b(api[_-]?key|token|password|secret)=([^\s,}]+)/gi, "$1=[redacted]");
 }
 
-export async function createMcpRuntimeTools(_options: McpRuntimeOptions = {}): Promise<McpRuntimeTools> {
-  void MCPClient;
+export async function createMcpRuntimeTools(options: McpRuntimeOptions = {}): Promise<McpRuntimeTools> {
+  const diagnostics: string[] = [];
+  const logDiagnostic = (message: string) => {
+    diagnostics.push(message);
+    options.log?.(`[tritree:mcp] ${message}`);
+  };
+
+  let configPath: string;
+  try {
+    configPath =
+      options.configPath ??
+      resolveMcpConfigPath({
+        cwd: options.cwd,
+        env: options.env
+      });
+  } catch (error) {
+    const diagnostic = redactMcpDiagnostic(errorMessage(error));
+    logDiagnostic(diagnostic);
+    return emptyMcpRuntimeTools(diagnostics);
+  }
+
+  const loaded = loadMcpServerDefinitions({
+    configPath,
+    env: options.env
+  });
+  for (const diagnostic of loaded.diagnostics) logDiagnostic(diagnostic);
+
+  if (Object.keys(loaded.servers).length === 0) {
+    return emptyMcpRuntimeTools(diagnostics);
+  }
+
+  let client: McpClientLike;
+  try {
+    client = (options.createClient ?? createDefaultMcpClient)({
+      id: `tritree-mcp-${loaded.configHash}`,
+      servers: loaded.servers
+    });
+  } catch (error) {
+    const diagnostic = redactMcpDiagnostic(`MCP client could not be created: ${errorMessage(error)}`);
+    logDiagnostic(diagnostic);
+    return emptyMcpRuntimeTools(diagnostics);
+  }
+
+  let toolsets: Record<string, ToolsInput>;
+  try {
+    if (client.listToolsetsWithErrors) {
+      const listed = await client.listToolsetsWithErrors();
+      toolsets = listed.toolsets;
+      for (const [serverName, listError] of Object.entries(listed.errors)) {
+        logDiagnostic(`MCP ${serverName} unavailable：${redactMcpDiagnostic(listError)}`);
+      }
+    } else if (client.listTools) {
+      toolsets = { mcp: await client.listTools() };
+    } else {
+      logDiagnostic("MCP client cannot list tools.");
+      return {
+        diagnostics,
+        disconnect: () => disconnectMcpClient(client),
+        toolSummaries: diagnostics,
+        tools: {}
+      };
+    }
+  } catch (error) {
+    const diagnostic = redactMcpDiagnostic(`MCP tools unavailable：${errorMessage(error)}`);
+    logDiagnostic(diagnostic);
+    await disconnectMcpClient(client);
+    return emptyMcpRuntimeTools(diagnostics);
+  }
+
+  const tools: ToolsInput = {};
+  const toolSummaries = [...diagnostics];
+  const existingTools = options.existingTools ?? {};
+
+  for (const [serverName, serverTools] of Object.entries(toolsets)) {
+    const loadedToolSummaries: string[] = [];
+    for (const [toolName, tool] of Object.entries(serverTools)) {
+      const namespacedName = `${serverName}_${toolName}`;
+      if (namespacedName in existingTools || namespacedName in tools) {
+        const diagnostic = `MCP ${serverName} skipped ${namespacedName} because a tool with that name already exists.`;
+        diagnostics.push(diagnostic);
+        toolSummaries.push(diagnostic);
+        options.log?.(`[tritree:mcp] ${diagnostic}`);
+        continue;
+      }
+
+      tools[namespacedName] = tool;
+      loadedToolSummaries.push(formatMcpToolSummary(namespacedName, tool));
+    }
+
+    if (loadedToolSummaries.length > 0) {
+      toolSummaries.push(
+        `MCP ${serverName}：可用工具 ${loadedToolSummaries.join("、")}。仅当本轮任务需要该 MCP 服务能力时调用。`
+      );
+    }
+  }
 
   return {
-    diagnostics: [],
+    diagnostics,
+    disconnect: () => disconnectMcpClient(client),
+    toolSummaries,
+    tools
+  };
+}
+
+function createDefaultMcpClient(options: {
+  id: string;
+  servers: Record<string, MastraMCPServerDefinition>;
+}): McpClientLike {
+  return new MCPClient(options);
+}
+
+function emptyMcpRuntimeTools(diagnostics: string[] = []): McpRuntimeTools {
+  return {
+    diagnostics,
     disconnect: async () => undefined,
-    toolSummaries: [],
+    toolSummaries: diagnostics,
     tools: {}
   };
+}
+
+async function disconnectMcpClient(client: McpClientLike) {
+  await client.disconnect?.();
+}
+
+function formatMcpToolSummary(toolName: string, tool: ToolsInput[string]) {
+  const description =
+    isRecord(tool) && typeof tool.description === "string" && tool.description.trim()
+      ? `（${redactMcpDiagnostic(tool.description.trim())}）`
+      : "";
+  return `${toolName}${description}`;
 }

@@ -1,8 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createMcpRuntimeTools,
   defaultMcpConfigPath,
   loadMcpServerDefinitions,
   redactMcpDiagnostic,
@@ -322,5 +323,135 @@ describe("MCP runtime config parsing", () => {
         "Authorization: Bearer real-token API_KEY=abc123 password=hunter2 secret=topsecret"
       )
     ).toBe("Authorization: Bearer [redacted] API_KEY=[redacted] password=[redacted] secret=[redacted]");
+  });
+});
+
+describe("MCP runtime tool loading", () => {
+  it("loads toolsets, namespaces tools by server, and summarizes safe tool names", async () => {
+    const dir = makeTempDir();
+    const configPath = writeJsonConfig(dir, {
+      mcpServers: {
+        filesystem: {
+          command: "npx",
+          args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/allowed"]
+        },
+        search: {
+          url: "https://mcp.example.com/mcp"
+        }
+      }
+    });
+    const readFile = { id: "read_file", description: "Read an allowed file.", execute: async () => ({}) };
+    const searchWeb = { id: "search_web", description: "Search public web results.", execute: async () => ({}) };
+    const disconnect = vi.fn(async () => undefined);
+    const createClient = vi.fn(() => ({
+      disconnect,
+      listToolsetsWithErrors: vi.fn(async () => ({
+        errors: {},
+        toolsets: {
+          filesystem: { read_file: readFile },
+          search: { search_web: searchWeb }
+        }
+      }))
+    }));
+
+    const result = await createMcpRuntimeTools({
+      configPath,
+      createClient,
+      env: {}
+    });
+
+    expect(createClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: expect.stringMatching(/^tritree-mcp-/),
+        servers: expect.objectContaining({
+          filesystem: expect.objectContaining({ command: "npx" }),
+          search: expect.objectContaining({ url: expect.any(URL) })
+        })
+      })
+    );
+    expect(result.tools).toEqual({
+      filesystem_read_file: readFile,
+      search_search_web: searchWeb
+    });
+    expect(result.toolSummaries.join("\n")).toContain("MCP filesystem");
+    expect(result.toolSummaries.join("\n")).toContain("filesystem_read_file");
+    expect(result.toolSummaries.join("\n")).toContain("MCP search");
+    expect(result.toolSummaries.join("\n")).toContain("search_search_web");
+    await result.disconnect();
+    expect(disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps existing tools when a namespaced MCP tool collides", async () => {
+    const dir = makeTempDir();
+    const configPath = writeJsonConfig(dir, {
+      mcpServers: {
+        filesystem: {
+          command: "node",
+          args: ["server.js"]
+        }
+      }
+    });
+    const localTool = { id: "filesystem_read_file", description: "Local tool", execute: async () => ({}) };
+    const mcpTool = { id: "read_file", description: "MCP tool", execute: async () => ({}) };
+    const result = await createMcpRuntimeTools({
+      configPath,
+      createClient: () => ({
+        disconnect: async () => undefined,
+        listToolsetsWithErrors: async () => ({
+          errors: {},
+          toolsets: { filesystem: { read_file: mcpTool } }
+        })
+      }),
+      env: {},
+      existingTools: { filesystem_read_file: localTool }
+    });
+
+    expect(result.tools).toEqual({});
+    expect(result.toolSummaries.join("\n")).toContain("skipped filesystem_read_file");
+  });
+
+  it("reports per-server list errors without exposing configured secrets", async () => {
+    const dir = makeTempDir();
+    const configPath = writeJsonConfig(dir, {
+      mcpServers: {
+        search: {
+          url: "https://mcp.example.com/mcp",
+          requestInit: {
+            headers: {
+              Authorization: "Bearer ${REMOTE_SEARCH_MCP_TOKEN}"
+            }
+          }
+        }
+      }
+    });
+    const result = await createMcpRuntimeTools({
+      configPath,
+      createClient: () => ({
+        disconnect: async () => undefined,
+        listToolsetsWithErrors: async () => ({
+          errors: { search: "Authorization: Bearer remote-secret failed" },
+          toolsets: {}
+        })
+      }),
+      env: { REMOTE_SEARCH_MCP_TOKEN: "remote-secret" }
+    });
+
+    expect(result.tools).toEqual({});
+    expect(result.toolSummaries.join("\n")).toContain("MCP search unavailable");
+    expect(result.toolSummaries.join("\n")).toContain("Bearer [redacted]");
+    expect(result.toolSummaries.join("\n")).not.toContain("remote-secret");
+  });
+
+  it("returns no tools when config path is relative or config is invalid", async () => {
+    const log = vi.fn();
+    const result = await createMcpRuntimeTools({
+      cwd: "/workspace/tritree",
+      env: { TRITREE_MCP_CONFIG_PATH: "relative/mcp.json" },
+      log
+    });
+
+    expect(result.tools).toEqual({});
+    expect(result.toolSummaries.join("\n")).toContain("TRITREE_MCP_CONFIG_PATH must be an absolute path");
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("TRITREE_MCP_CONFIG_PATH must be an absolute path"));
   });
 });

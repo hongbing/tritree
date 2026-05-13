@@ -50,8 +50,9 @@ export function StyleProfileSetup({
   const [draft, setDraft] = useState<SkillUpsert | null>(null);
   const [saveMode, setSaveMode] = useState<SaveMode>(selectedPersonalStyle ? "update" : "create");
   const [updateSkillId, setUpdateSkillId] = useState(selectedPersonalStyle?.id ?? personalStyleSkills[0]?.id ?? "");
+  const [hasUserExpanded, setHasUserExpanded] = useState(false);
   const isBusy = disabled || isGenerating || isSaving;
-  const hasActiveWork = Boolean(draft) || isGenerating || isSaving;
+  const hasActiveWork = Boolean(draft) || samplesText.trim().length > 0 || hasUserExpanded || isGenerating || isSaving;
 
   useEffect(() => {
     const fallbackUpdateSkillId = selectedPersonalStyle?.id ?? personalStyleSkills[0]?.id ?? "";
@@ -67,6 +68,7 @@ export function StyleProfileSetup({
 
     if (selectedPersonalStyle) {
       setIsExpanded(false);
+      setHasUserExpanded(false);
       setSaveMode("update");
     } else {
       setSaveMode("create");
@@ -127,6 +129,7 @@ export function StyleProfileSetup({
       if (!savedSkill) throw new Error("技能保存失败。");
       onSavedSkill(savedSkill);
       setIsExpanded(false);
+      setHasUserExpanded(false);
     } catch (error) {
       setError(error instanceof Error ? error.message : "技能保存失败。");
     } finally {
@@ -164,7 +167,13 @@ export function StyleProfileSetup({
           aria-expanded={isExpanded}
           className="secondary-button"
           disabled={isBusy}
-          onClick={() => setIsExpanded((expanded) => !expanded)}
+          onClick={() => {
+            setIsExpanded((expanded) => {
+              const nextExpanded = !expanded;
+              setHasUserExpanded(nextExpanded);
+              return nextExpanded;
+            });
+          }}
           type="button"
         >
           {isExpanded ? "收起我的风格设置" : "展开我的风格设置"}

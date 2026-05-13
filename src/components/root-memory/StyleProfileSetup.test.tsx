@@ -116,6 +116,28 @@ describe("StyleProfileSetup", () => {
     expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();
   });
 
+  it("keeps a manually expanded sample editor open across parent skills refreshes", async () => {
+    const { rerender } = renderSetup({ selectedSkillIds: ["style-1"], skills: [baseSkill] });
+
+    await userEvent.click(screen.getByRole("button", { name: "展开我的风格设置" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "这一段代表我的表达习惯。");
+
+    rerender(
+      <StyleProfileSetup
+        disabled={false}
+        externalStyleGenerationAvailable={false}
+        onCreateSkill={vi.fn(async () => null)}
+        onSavedSkill={vi.fn()}
+        onUpdateSkill={vi.fn(async () => null)}
+        selectedSkillIds={["style-1"]}
+        skills={[{ ...baseSkill, updatedAt: "2026-05-13T01:00:00.000Z" }]}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "收起我的风格设置" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "代表作样本" })).toHaveValue("这一段代表我的表达习惯。");
+  });
+
   it("generates from pasted samples and saves a new skill", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

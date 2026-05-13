@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MAX_SKILL_PROMPT_LENGTH, type Skill, type SkillUpsert } from "@/lib/domain";
 import {
   MY_STYLE_TITLE_PREFIX,
@@ -51,6 +51,27 @@ export function StyleProfileSetup({
   const [saveMode, setSaveMode] = useState<SaveMode>(selectedPersonalStyle ? "update" : "create");
   const [updateSkillId, setUpdateSkillId] = useState(selectedPersonalStyle?.id ?? personalStyleSkills[0]?.id ?? "");
   const isBusy = disabled || isGenerating || isSaving;
+  const hasActiveWork = Boolean(draft) || isGenerating || isSaving;
+
+  useEffect(() => {
+    const fallbackUpdateSkillId = selectedPersonalStyle?.id ?? personalStyleSkills[0]?.id ?? "";
+
+    setUpdateSkillId((current) => {
+      if (!fallbackUpdateSkillId) return "";
+      if (selectedPersonalStyle?.id && current !== selectedPersonalStyle.id) return selectedPersonalStyle.id;
+      if (current && personalStyleSkills.some((skill) => skill.id === current)) return current;
+      return fallbackUpdateSkillId;
+    });
+
+    if (hasActiveWork) return;
+
+    if (selectedPersonalStyle) {
+      setIsExpanded(false);
+      setSaveMode("update");
+    } else {
+      setSaveMode("create");
+    }
+  }, [hasActiveWork, personalStyleSkills, selectedPersonalStyle]);
 
   async function generateFromSamples() {
     const samples = splitRepresentativeSamples(samplesText);
@@ -120,6 +141,11 @@ export function StyleProfileSetup({
     setUpdateSkillId(selectedPersonalStyle?.id ?? personalStyleSkills[0]?.id ?? "");
   }
 
+  function switchToSampleGeneration() {
+    setError("");
+    setGenerationMode("samples");
+  }
+
   return (
     <section
       aria-label="我的风格"
@@ -166,7 +192,7 @@ export function StyleProfileSetup({
             <button
               className="secondary-button"
               disabled={isBusy}
-              onClick={() => setGenerationMode("samples")}
+              onClick={switchToSampleGeneration}
               type="button"
             >
               粘贴代表作生成

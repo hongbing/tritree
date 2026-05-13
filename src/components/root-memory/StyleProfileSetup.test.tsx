@@ -19,6 +19,12 @@ const baseSkill: Skill = {
   updatedAt: "2026-05-13T00:00:00.000Z"
 };
 
+const alternateSkill: Skill = {
+  ...baseSkill,
+  id: "style-2",
+  title: "我的风格：产品观察"
+};
+
 const generatedDraft = {
   title: "我的风格：自然短句",
   category: "风格",
@@ -87,6 +93,27 @@ describe("StyleProfileSetup", () => {
     renderSetup({ externalStyleGenerationAvailable: true });
 
     expect(screen.getByRole("button", { name: "一键生成我的风格" })).toBeInTheDocument();
+  });
+
+  it("collapses to the selected style summary when parent selects a personal style without active work", async () => {
+    const { rerender } = renderSetup();
+
+    expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
+
+    rerender(
+      <StyleProfileSetup
+        disabled={false}
+        externalStyleGenerationAvailable={false}
+        onCreateSkill={vi.fn(async () => null)}
+        onSavedSkill={vi.fn()}
+        onUpdateSkill={vi.fn(async () => null)}
+        selectedSkillIds={["style-1"]}
+        skills={[baseSkill]}
+      />
+    );
+
+    expect(await screen.findByText("正在使用：我的风格：克制产品随笔")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();
   });
 
   it("generates from pasted samples and saves a new skill", async () => {
@@ -169,6 +196,57 @@ describe("StyleProfileSetup", () => {
     expect(onSavedSkill).toHaveBeenCalledWith(expect.objectContaining({ id: "style-1" }));
   });
 
+  it("updates the save target when the selected personal style changes after generation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ skillDraft: generatedDraft })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onCreateSkill = vi.fn(async () => ({
+      ...generatedDraft,
+      id: "style-new",
+      isSystem: false,
+      createdAt: "",
+      updatedAt: ""
+    }));
+    const onUpdateSkill = vi.fn(async () => ({ ...alternateSkill, ...generatedDraft }));
+    const onSavedSkill = vi.fn();
+
+    const { rerender } = renderSetup({
+      externalStyleGenerationAvailable: true,
+      onCreateSkill,
+      onSavedSkill,
+      onUpdateSkill,
+      selectedSkillIds: ["style-1"],
+      skills: [baseSkill, alternateSkill]
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "展开我的风格设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "一键生成我的风格" }));
+    await screen.findByRole("textbox", { name: "风格名称" });
+
+    rerender(
+      <StyleProfileSetup
+        disabled={false}
+        externalStyleGenerationAvailable={true}
+        onCreateSkill={onCreateSkill}
+        onSavedSkill={onSavedSkill}
+        onUpdateSkill={onUpdateSkill}
+        selectedSkillIds={["style-2"]}
+        skills={[alternateSkill]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "选择要更新的风格" })).toHaveValue("style-2"));
+    expect(screen.getByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：自然短句");
+
+    await userEvent.click(screen.getByRole("button", { name: "保存并用于本作品" }));
+
+    expect(onUpdateSkill).toHaveBeenCalledWith("style-2", generatedDraft);
+    expect(onCreateSkill).not.toHaveBeenCalled();
+    expect(onSavedSkill).toHaveBeenCalledWith(expect.objectContaining({ id: "style-2" }));
+  });
+
   it("preserves external generation failure recovery and retries the external request", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
@@ -192,6 +270,42 @@ describe("StyleProfileSetup", () => {
       "/api/skills/style/generate-external",
       expect.objectContaining({ method: "POST" })
     );
+  });
+
+  it("clears stale external errors when switching to sample generation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: "外部风格服务暂时不可用。" })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSetup({ externalStyleGenerationAvailable: true });
+
+    await userEvent.click(screen.getByRole("button", { name: "一键生成我的风格" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("外部风格服务暂时不可用。");
+    expect(screen.getByRole("button", { name: "重试生成" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "生成风格草稿" })).toBeInTheDocument();
+  });
+
+  it("shows an alert when generated draft normalization fails", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ skillDraft: { title: "缺提示词" } })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSetup();
+
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。");
+    await userEvent.click(screen.getByRole("button", { name: "生成风格草稿" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("生成的风格内容不完整。");
+    expect(screen.queryByRole("textbox", { name: "风格名称" })).not.toBeInTheDocument();
   });
 
   it("shows save failures in an alert without marking the skill saved", async () => {

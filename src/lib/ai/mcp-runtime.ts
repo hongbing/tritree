@@ -38,8 +38,6 @@ const MAX_TIMEOUT_MS = 120_000;
 const STDIO_KEYS = new Set(["args", "command", "cwd", "disabled", "env", "roots", "timeout"]);
 const HTTP_KEYS = new Set(["connectTimeout", "disabled", "requestInit", "roots", "timeout", "url"]);
 
-export const DEFAULT_TIMEOUT_MS = 30_000;
-
 export function defaultMcpConfigPath(cwd = process.cwd()) {
   return path.join(cwd, ".tritree", "mcp.json");
 }
@@ -69,7 +67,17 @@ export function loadMcpServerDefinitions({
     return { configHash: "", diagnostics: [], servers: {} };
   }
 
-  const configText = readFile(configPath);
+  let configText: string;
+  try {
+    configText = readFile(configPath);
+  } catch (error) {
+    return {
+      configHash: "",
+      diagnostics: [`MCP config ${configPath} could not be read: ${redactMcpDiagnostic(errorMessage(error))}`],
+      servers: {}
+    };
+  }
+
   let rawConfig: unknown;
   try {
     rawConfig = JSON.parse(configText);
@@ -291,11 +299,11 @@ function readOptionalAbsolutePath(value: unknown, label: string, env: StringEnv,
 
 function readOptionalTimeout(value: unknown, label: string, diagnostics: string[]) {
   if (value === undefined) return undefined;
-  if (!Number.isInteger(value) || value <= 0 || value > MAX_TIMEOUT_MS) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0 || value > MAX_TIMEOUT_MS) {
     diagnostics.push(`${label} must be an integer from 1 to ${MAX_TIMEOUT_MS}.`);
     return undefined;
   }
-  return value as number;
+  return value;
 }
 
 function readRoots(
@@ -318,7 +326,7 @@ function readRoots(
     }
     const uri = expandString(root.uri, env);
     diagnostics.push(...uri.diagnostics.map((message) => `${label}[${index}].uri: ${message}`));
-    if (!uri.value.startsWith("file://")) {
+    if (!isValidFileUri(uri.value)) {
       diagnostics.push(`${label}[${index}].uri must be a file:// URI.`);
       continue;
     }
@@ -332,6 +340,15 @@ function readRoots(
     roots.push({ uri: uri.value, ...(name?.value ? { name: name.value } : {}) });
   }
   return roots;
+}
+
+function isValidFileUri(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "file:" && Boolean(url.pathname) && url.pathname !== "/";
+  } catch {
+    return false;
+  }
 }
 
 function expandString(value: string, env: StringEnv) {

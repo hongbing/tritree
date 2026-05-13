@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   defaultMcpConfigPath,
   loadMcpServerDefinitions,
@@ -46,6 +46,15 @@ describe("MCP runtime config parsing", () => {
     ).toBe("/secure/tritree/mcp.json");
   });
 
+  it("rejects relative TRITREE_MCP_CONFIG_PATH values", () => {
+    expect(() =>
+      resolveMcpConfigPath({
+        env: { TRITREE_MCP_CONFIG_PATH: "relative/mcp.json" },
+        cwd: "/workspace/tritree"
+      })
+    ).toThrow("TRITREE_MCP_CONFIG_PATH must be an absolute path");
+  });
+
   it("returns no servers when the config file does not exist", () => {
     const dir = makeTempDir();
     const result = loadMcpServerDefinitions({
@@ -55,6 +64,31 @@ describe("MCP runtime config parsing", () => {
 
     expect(result.servers).toEqual({});
     expect(result.diagnostics).toEqual([]);
+  });
+
+  it("returns redacted diagnostics when the config cannot be read or parsed", () => {
+    const readErrorResult = loadMcpServerDefinitions({
+      configPath: "/secure/mcp.json",
+      env: {},
+      exists: () => true,
+      readFile: () => {
+        throw new Error("permission denied TOKEN=real-token");
+      }
+    });
+
+    expect(readErrorResult.servers).toEqual({});
+    expect(readErrorResult.diagnostics.join("\n")).toContain("permission denied TOKEN=[redacted]");
+    expect(readErrorResult.diagnostics.join("\n")).not.toContain("real-token");
+
+    const invalidJsonResult = loadMcpServerDefinitions({
+      configPath: "/secure/mcp.json",
+      env: {},
+      exists: () => true,
+      readFile: () => "{ invalid"
+    });
+
+    expect(invalidJsonResult.servers).toEqual({});
+    expect(invalidJsonResult.diagnostics.join("\n")).toContain("not valid JSON");
   });
 
   it("converts stdio and HTTP server configs into Mastra MCP definitions", () => {
@@ -175,6 +209,70 @@ describe("MCP runtime config parsing", () => {
     expect(result.diagnostics.join("\n")).not.toContain("SECRET_ROOT_NAME=");
   });
 
+  it("skips invalid server option shapes with diagnostics", () => {
+    const dir = makeTempDir();
+    const configPath = writeJsonConfig(dir, {
+      mcpServers: {
+        lowTimeout: {
+          command: "node",
+          timeout: 0
+        },
+        highConnectTimeout: {
+          url: "https://mcp.example.com/mcp",
+          connectTimeout: 120001
+        },
+        unsupportedRequestInit: {
+          url: "https://mcp.example.com/mcp",
+          requestInit: {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer token"
+            }
+          }
+        },
+        nonStringEnv: {
+          command: "node",
+          env: {
+            API_KEY: 123
+          }
+        },
+        nonStringHeaders: {
+          url: "https://mcp.example.com/mcp",
+          requestInit: {
+            headers: {
+              Authorization: 123
+            }
+          }
+        },
+        nonArrayArgs: {
+          command: "node",
+          args: "server.js"
+        },
+        nonStringArgs: {
+          command: "node",
+          args: ["server.js", 123]
+        },
+        malformedRoot: {
+          command: "node",
+          roots: [{ uri: "file://bad host/allowed" }]
+        }
+      }
+    });
+
+    const result = loadMcpServerDefinitions({ configPath, env: {} });
+
+    expect(result.servers).toEqual({});
+    expect(result.diagnostics.join("\n")).toContain("lowTimeout");
+    expect(result.diagnostics.join("\n")).toContain("highConnectTimeout");
+    expect(result.diagnostics.join("\n")).toContain("unsupported key method");
+    expect(result.diagnostics.join("\n")).toContain("nonStringEnv env must be a string map");
+    expect(result.diagnostics.join("\n")).toContain("nonStringHeaders requestInit.headers must be a string map");
+    expect(result.diagnostics.join("\n")).toContain("nonArrayArgs args must be an array of strings");
+    expect(result.diagnostics.join("\n")).toContain("nonStringArgs args must be an array of strings");
+    expect(result.diagnostics.join("\n")).toContain("malformedRoot");
+    expect(result.diagnostics.join("\n")).toContain("file:// URI");
+  });
+
   it("skips invalid servers with redacted diagnostics", () => {
     const dir = makeTempDir();
     const configPath = writeJsonConfig(dir, {
@@ -226,5 +324,3 @@ describe("MCP runtime config parsing", () => {
     ).toBe("Authorization: Bearer [redacted] API_KEY=[redacted] password=[redacted] secret=[redacted]");
   });
 });
-
-void vi;

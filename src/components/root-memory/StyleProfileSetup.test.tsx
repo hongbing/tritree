@@ -144,7 +144,7 @@ describe("StyleProfileSetup", () => {
     expect(screen.getByText("你还没有配置个人风格。建议先设置，让 Tritree 优先按你的表达习惯生成内容。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "手动填写" })).toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "代表作 1" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "一键生成我的风格" })).not.toBeInTheDocument();
   });
 
@@ -152,13 +152,13 @@ describe("StyleProfileSetup", () => {
     renderSetup({ selectedSkillIds: ["style-1"], skills: [baseSkill] });
 
     expect(screen.getByText("正在使用：我的风格：克制产品随笔")).toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "代表作 1" })).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "设置" }));
 
     expect(screen.getByText("选择一种方式更新或创建个人风格。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "代表作 1" })).not.toBeInTheDocument();
   });
 
   it("renders collapsed when a personal style exists but is not selected", async () => {
@@ -183,7 +183,7 @@ describe("StyleProfileSetup", () => {
     const { rerender } = renderSetup();
 
     expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "代表作 1" })).not.toBeInTheDocument();
 
     rerender(
       <StyleProfileSetup
@@ -198,7 +198,7 @@ describe("StyleProfileSetup", () => {
     );
 
     expect(await screen.findByText("正在使用：我的风格：克制产品随笔")).toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "代表作 1" })).not.toBeInTheDocument();
   });
 
   it("keeps a manually expanded sample editor open across parent skills refreshes", async () => {
@@ -206,7 +206,7 @@ describe("StyleProfileSetup", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "设置" }));
     await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "这一段代表我的表达习惯。");
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作 1" }), "这一段代表我的表达习惯。");
 
     rerender(
       <StyleProfileSetup
@@ -221,7 +221,7 @@ describe("StyleProfileSetup", () => {
     );
 
     expect(screen.getByRole("button", { name: "暂不设置" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "代表作样本" })).toHaveValue("这一段代表我的表达习惯。");
+    expect(screen.getByRole("textbox", { name: "代表作 1" })).toHaveValue("这一段代表我的表达习惯。");
   });
 
   it("generates from pasted samples and saves a new skill", async () => {
@@ -244,8 +244,8 @@ describe("StyleProfileSetup", () => {
     renderSetup({ onCreateSkill, onSavedSkill });
 
     await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
-    expect(screen.getByPlaceholderText("粘贴你觉得最像自己的作品内容。内容越多，AI 越能准确分析你的创作方式。")).toBeInTheDocument();
-    await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。\n\n第二段代表作。");
+    expect(screen.getByPlaceholderText("粘贴一篇或一条你觉得最像自己的内容。")).toBeInTheDocument();
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作 1" }), "第一段代表作。\n\n第二段代表作。");
     await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -264,6 +264,78 @@ describe("StyleProfileSetup", () => {
     expect(onSavedSkill).toHaveBeenCalledWith(expect.objectContaining({ id: "style-new" }));
   });
 
+  it("lets users add separate representative works while preserving blank lines inside each work", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(styleStreamResponse([{ type: "done", skillDraft: generatedDraft }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSetup();
+
+    await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
+    expect(screen.getByText("建议添加 2-5 段代表作，每段 200-1000 字；一格贴一篇或一条。")).toBeInTheDocument();
+
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作 1" }), "第一段开头。\n\n第一段内部空行。");
+    expect(screen.getByText("已添加 1 段，共 14 字。你可以继续添加代表段落。")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "添加一段代表作" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作 2" }), "第二段代表作。");
+
+    expect(screen.getByText("14 字")).toBeInTheDocument();
+    expect(screen.getByText("7 字")).toBeInTheDocument();
+    expect(screen.getByText("已添加 2 段，共 21 字。你可以继续添加代表段落。")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/skills/style/generate-from-samples",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ samples: ["第一段开头。\n\n第一段内部空行。", "第二段代表作。"] })
+      })
+    );
+    expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("自然短句");
+  });
+
+  it("caps representative works at five items", async () => {
+    renderSetup();
+
+    await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "添加一段代表作" }));
+    await userEvent.click(screen.getByRole("button", { name: "添加一段代表作" }));
+    await userEvent.click(screen.getByRole("button", { name: "添加一段代表作" }));
+    await userEvent.click(screen.getByRole("button", { name: "添加一段代表作" }));
+
+    expect(screen.getByRole("textbox", { name: "代表作 5" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "代表作 6" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "最多 5 段" })).toBeDisabled();
+    expect(screen.getByText("已添加 0 段，共 0 字。最多添加 5 段代表作。")).toBeInTheDocument();
+  });
+
+  it("lets users remove an extra representative work before generation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(styleStreamResponse([{ type: "done", skillDraft: generatedDraft }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSetup();
+
+    await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作 1" }), "保留下来的代表作。");
+    await userEvent.click(screen.getByRole("button", { name: "添加一段代表作" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作 2" }), "临时贴错的内容。");
+    await userEvent.click(screen.getByRole("button", { name: "删除代表作 2" }));
+
+    expect(screen.queryByRole("textbox", { name: "代表作 2" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/skills/style/generate-from-samples",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ samples: ["保留下来的代表作。"] })
+      })
+    );
+  });
+
   it("shows streamed style draft content while sample generation is running", async () => {
     const stream = deferredStyleStreamResponse();
     const fetchMock = vi.fn().mockResolvedValue(stream.response);
@@ -272,7 +344,7 @@ describe("StyleProfileSetup", () => {
     renderSetup();
 
     await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。\n\n第二段代表作。");
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作 1" }), "第一段代表作。\n\n第二段代表作。");
     await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
 
     await act(async () => {
@@ -301,6 +373,24 @@ describe("StyleProfileSetup", () => {
     expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("自然短句");
   });
 
+  it("shows the review form as soon as a done stream event arrives", async () => {
+    const stream = deferredStyleStreamResponse();
+    const fetchMock = vi.fn().mockResolvedValue(stream.response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSetup();
+
+    await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作 1" }), "第一段代表作。");
+    await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
+
+    await act(async () => {
+      stream.enqueue({ type: "done", skillDraft: generatedDraft });
+    });
+
+    expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("自然短句");
+  });
+
   it("consumes sample generation streams even when the response content type is missing", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       styleStreamResponseWithoutContentType([{ type: "done", skillDraft: generatedDraft }])
@@ -310,7 +400,7 @@ describe("StyleProfileSetup", () => {
     renderSetup();
 
     await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。");
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作 1" }), "第一段代表作。");
     await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
 
     expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("自然短句");
@@ -467,7 +557,7 @@ describe("StyleProfileSetup", () => {
     renderSetup();
 
     await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。");
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作 1" }), "第一段代表作。");
     await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("生成的风格内容不完整。");
@@ -503,7 +593,7 @@ describe("StyleProfileSetup", () => {
     expect(screen.getByRole("button", { name: "一键生成我的风格" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "手动填写" })).toBeDisabled();
-    expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "代表作 1" })).not.toBeInTheDocument();
 
     rerender(
       <StyleProfileSetup
@@ -614,11 +704,11 @@ describe("StyleProfileSetup", () => {
     renderSetup();
 
     await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "只有一句。");
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作 1" }), "只有一句。");
     await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("样本太少，请再贴一段。");
-    expect(screen.getByRole("textbox", { name: "代表作样本" })).toHaveValue("只有一句。");
+    expect(screen.getByRole("textbox", { name: "代表作 1" })).toHaveValue("只有一句。");
     expect(screen.getByRole("button", { name: "重试生成" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "返回选择方式" })).toBeInTheDocument();
   });

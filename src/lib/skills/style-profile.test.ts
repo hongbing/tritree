@@ -103,6 +103,8 @@ describe("style profile helpers", () => {
     expect(prompt).toContain("样本 2");
     expect(prompt).toContain("第二段");
     expect(prompt).toContain("不把样本主题当成作者长期兴趣");
+    expect(prompt).toContain("作者人设");
+    expect(prompt).toContain("表达站位");
   });
 });
 

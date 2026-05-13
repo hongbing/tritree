@@ -395,7 +395,9 @@ describe("RootMemorySetup", () => {
     });
 
     await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。\n\n第二段代表作。");
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作 1" }), "第一段代表作。\n\n内部空行。");
+    await userEvent.click(screen.getByRole("button", { name: "添加一段代表作" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作 2" }), "第二段代表作。");
     await userEvent.click(screen.getByRole("button", { name: "生成我的风格" }));
     expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("克制产品随笔");
 
@@ -407,7 +409,7 @@ describe("RootMemorySetup", () => {
       "/api/skills/style/generate-from-samples",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ samples: ["第一段代表作。\n\n第二段代表作。"] })
+        body: JSON.stringify({ samples: ["第一段代表作。\n\n内部空行。", "第二段代表作。"] })
       })
     );
     expect(onCreateSkill).toHaveBeenCalledWith(

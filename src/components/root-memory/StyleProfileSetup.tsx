@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { MAX_SKILL_PROMPT_LENGTH, type Skill, type SkillUpsert } from "@/lib/domain";
 import {
   MY_STYLE_TITLE_PREFIX,
   isPersonalStyleSkill,
-  normalizeGeneratedStyleDraft,
-  splitRepresentativeSamples
+  normalizeGeneratedStyleDraft
 } from "@/lib/skills/style-profile";
 import { createNdjsonParser } from "@/lib/stream/ndjson";
 
@@ -29,6 +28,8 @@ const emptyStyleDraft: SkillUpsert = {
   defaultEnabled: false,
   isArchived: false
 };
+const initialSampleTexts = [""];
+const MAX_REPRESENTATIVE_SAMPLE_COUNT = 5;
 
 export function StyleProfileSetup({
   disabled,
@@ -51,9 +52,10 @@ export function StyleProfileSetup({
   const hasPersonalStyles = personalStyleSkills.length > 0;
   const selectedPersonalStyle = personalStyleSkills.find((skill) => selectedSkillIds.includes(skill.id)) ?? null;
   const collapsedPersonalStyle = selectedPersonalStyle ?? personalStyleSkills[0] ?? null;
+  const sampleFieldIdPrefix = useId();
   const [isExpanded, setIsExpanded] = useState(!hasPersonalStyles);
   const [step, setStep] = useState<SetupStep>("choose");
-  const [samplesText, setSamplesText] = useState("");
+  const [sampleTexts, setSampleTexts] = useState<string[]>(initialSampleTexts);
   const [generationMode, setGenerationMode] = useState<GenerationMode>("samples");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -66,7 +68,12 @@ export function StyleProfileSetup({
   const [hasUserExpanded, setHasUserExpanded] = useState(false);
   const isBusy = disabled || isGenerating || isSaving;
   const hasActiveWork =
-    Boolean(draft) || samplesText.trim().length > 0 || step !== "choose" || hasUserExpanded || isGenerating || isSaving;
+    Boolean(draft) ||
+    sampleTexts.some((sample) => sample.trim().length > 0) ||
+    step !== "choose" ||
+    hasUserExpanded ||
+    isGenerating ||
+    isSaving;
 
   useEffect(() => {
     const fallbackUpdateSkillId = selectedPersonalStyle?.id ?? personalStyleSkills[0]?.id ?? "";
@@ -90,7 +97,7 @@ export function StyleProfileSetup({
   }, [hasActiveWork, hasPersonalStyles, personalStyleSkills, selectedPersonalStyle]);
 
   async function generateFromSamples() {
-    const samples = splitRepresentativeSamples(samplesText);
+    const samples = normalizedSampleTexts(sampleTexts);
     if (samples.length === 0) {
       setError("请先粘贴至少一段代表作。");
       return;
@@ -178,8 +185,27 @@ export function StyleProfileSetup({
     setGenerationMessage("");
     setStreamingDraft(null);
     setDraft(null);
+    setSampleTexts((current) => (current.length > 0 ? current : [...initialSampleTexts]));
     setGenerationMode("samples");
     setStep("samples");
+  }
+
+  function addSampleText() {
+    setSampleTexts((current) => {
+      if (current.length >= MAX_REPRESENTATIVE_SAMPLE_COUNT) return current;
+      return [...current, ""];
+    });
+  }
+
+  function removeSampleText(index: number) {
+    setSampleTexts((current) => {
+      if (current.length <= 1) return [...initialSampleTexts];
+      return current.filter((_, sampleIndex) => sampleIndex !== index);
+    });
+  }
+
+  function updateSampleText(index: number, value: string) {
+    setSampleTexts((current) => current.map((sample, sampleIndex) => (sampleIndex === index ? value : sample)));
   }
 
   function returnToMethodSelection() {
@@ -197,6 +223,7 @@ export function StyleProfileSetup({
     const reader = response.body.getReader();
     let finalDraft: SkillUpsert | null = null;
     let streamError = "";
+    let stoppedAfterTerminalEvent = false;
     const parser = createNdjsonParser((value) => {
       if (!isStyleGenerationStreamEvent(value)) return;
 
@@ -226,9 +253,16 @@ export function StyleProfileSetup({
         const { done, value } = await reader.read();
         if (done) break;
         parser.push(decoder.decode(value, { stream: true }));
+        if (finalDraft || streamError) {
+          stoppedAfterTerminalEvent = true;
+          await reader.cancel().catch(() => undefined);
+          break;
+        }
       }
-      parser.push(decoder.decode());
-      parser.flush();
+      if (!stoppedAfterTerminalEvent) {
+        parser.push(decoder.decode());
+        parser.flush();
+      }
     } finally {
       reader.releaseLock();
     }
@@ -350,17 +384,67 @@ export function StyleProfileSetup({
 
           {step === "samples" ? (
             <>
-              <label className="style-profile-setup__samples">
-                <span>代表作样本</span>
-                <textarea
-                  aria-label="代表作样本"
-                  disabled={isBusy}
-                  onChange={(event) => setSamplesText(event.target.value)}
-                  placeholder="粘贴你觉得最像自己的作品内容。内容越多，AI 越能准确分析你的创作方式。"
-                  rows={5}
-                  value={samplesText}
-                />
-              </label>
+              <div className="style-profile-sample-guidance">
+                <p>建议添加 2-5 段代表作，每段 200-1000 字；一格贴一篇或一条。</p>
+              </div>
+              <div className="style-profile-sample-list">
+                {sampleTexts.map((sampleText, index) => {
+                  const label = `代表作 ${index + 1}`;
+                  const sampleFieldId = `${sampleFieldIdPrefix}-sample-${index}`;
+
+                  return (
+                    <div className="style-profile-sample-item" key={index}>
+                      <div className="style-profile-sample-item__header">
+                        <label htmlFor={sampleFieldId}>{label}</label>
+                        <div className="style-profile-sample-item__meta">
+                          <span>{sampleCharCount(sampleText)} 字</span>
+                          {sampleTexts.length > 1 ? (
+                            <button
+                              aria-label={`删除${label}`}
+                              className="style-profile-sample-item__remove"
+                              disabled={isBusy}
+                              onClick={() => removeSampleText(index)}
+                              type="button"
+                            >
+                              删除
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                      <textarea
+                        aria-label={label}
+                        disabled={isBusy}
+                        id={sampleFieldId}
+                        onChange={(event) => updateSampleText(index, event.target.value)}
+                        placeholder="粘贴一篇或一条你觉得最像自己的内容。"
+                        rows={5}
+                        value={sampleText}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="style-profile-sample-actions">
+                <p className="style-profile-sample-summary">{sampleSummaryText(sampleTexts)}</p>
+                <div className="style-profile-sample-actions__buttons">
+                  <button
+                    className="secondary-button"
+                    disabled={isBusy || sampleTexts.length >= MAX_REPRESENTATIVE_SAMPLE_COUNT}
+                    onClick={addSampleText}
+                    type="button"
+                  >
+                    {sampleTexts.length >= MAX_REPRESENTATIVE_SAMPLE_COUNT ? "最多 5 段" : "添加一段代表作"}
+                  </button>
+                  <button
+                    className="primary-action"
+                    disabled={isBusy}
+                    onClick={() => void generateFromSamples()}
+                    type="button"
+                  >
+                    {isGenerating && generationMode === "samples" ? "正在生成..." : error ? "重试生成" : "生成我的风格"}
+                  </button>
+                </div>
+              </div>
               {isGenerating || streamingDraft ? (
                 <section aria-label="生成中的风格草稿" className="style-profile-stream-preview">
                   <p className="style-profile-stream-preview__status" role="status">
@@ -390,16 +474,6 @@ export function StyleProfileSetup({
                   ) : null}
                 </section>
               ) : null}
-              <div className="style-profile-setup__generate-row">
-                <button
-                  className="secondary-button"
-                  disabled={isBusy}
-                  onClick={() => void generateFromSamples()}
-                  type="button"
-                >
-                  {isGenerating && generationMode === "samples" ? "正在生成..." : error ? "重试生成" : "生成我的风格"}
-                </button>
-              </div>
             </>
           ) : null}
 
@@ -515,6 +589,29 @@ function editablePersonalStyleTitle(title: string) {
 function personalStyleTitleFromEditableValue(value: string) {
   const trimmed = value.replace(new RegExp(`^${escapeRegExp(MY_STYLE_TITLE_PREFIX)}\\s*`), "");
   return `${MY_STYLE_TITLE_PREFIX}${trimmed}`;
+}
+
+function normalizedSampleTexts(sampleTexts: string[]) {
+  return sampleTexts.map((sample) => sample.trim()).filter(Boolean);
+}
+
+function sampleCharCount(sampleText: string) {
+  return sampleText.replace(/\s/g, "").length;
+}
+
+function sampleSummaryText(sampleTexts: string[]) {
+  const samples = normalizedSampleTexts(sampleTexts);
+  const totalChars = samples.reduce((sum, sample) => sum + sampleCharCount(sample), 0);
+
+  if (sampleTexts.length >= MAX_REPRESENTATIVE_SAMPLE_COUNT && samples.length === 0) {
+    return "已添加 0 段，共 0 字。最多添加 5 段代表作。";
+  }
+  if (samples.length === 0) return "已添加 0 段，共 0 字。先贴一段代表作开始。";
+  if (sampleTexts.length >= MAX_REPRESENTATIVE_SAMPLE_COUNT) {
+    return `已添加 ${samples.length} 段，共 ${totalChars} 字。最多添加 5 段代表作。`;
+  }
+
+  return `已添加 ${samples.length} 段，共 ${totalChars} 字。你可以继续添加代表段落。`;
 }
 
 function escapeRegExp(value: string) {

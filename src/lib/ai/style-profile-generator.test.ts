@@ -53,6 +53,11 @@ describe("generateStyleFromSamples", () => {
         instructions: expect.stringContaining("归纳用户写作风格")
       })
     );
+    expect(mocks.agentConstructor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: expect.stringContaining("人设")
+      })
+    );
     const agentInstance = mocks.agentConstructor.mock.results[0].value as { generate: ReturnType<typeof vi.fn> };
     expect(agentInstance.generate).toHaveBeenCalledWith(
       [expect.objectContaining({ role: "user", content: expect.stringContaining("样本 1") })],

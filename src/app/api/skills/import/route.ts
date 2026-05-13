@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { badRequestResponse, isBadRequestError } from "@/lib/api/errors";
-import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
+import { authErrorResponse, requireAdminUser } from "@/lib/auth/current-user";
 import { getRepository } from "@/lib/db/repository";
 import { installSkillFromGitHub, UnsupportedSkillSourceError } from "@/lib/skills/skill-installer";
 
@@ -13,7 +13,7 @@ const ImportSkillsBodySchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    await requireCurrentUser();
+    await requireAdminUser();
     const body = ImportSkillsBodySchema.parse(await request.json());
     const installed = await installSkillFromGitHub(body.sourceUrl);
     const skills = getRepository().importSkills(installed.skills);

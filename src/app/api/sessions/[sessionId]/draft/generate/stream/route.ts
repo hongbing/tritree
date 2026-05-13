@@ -10,7 +10,7 @@ import { badRequestResponse, isBadRequestError, publicServerErrorMessage } from 
 import { focusSessionStateForNode, summarizeSessionForDirector } from "@/lib/app-state";
 import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
 import { getRepository } from "@/lib/db/repository";
-import { OptionGenerationModeSchema, type BranchOption, type SessionState, type TreeNode } from "@/lib/domain";
+import { OptionGenerationModeSchema, type AgentMessage, type BranchOption, type SessionState, type TreeNode } from "@/lib/domain";
 import { encodeNdjson } from "@/lib/stream/ndjson";
 
 export const runtime = "nodejs";
@@ -110,7 +110,14 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
             output: {
               roundIntent: nextStep.roundIntent,
               options: nextStep.options
-            }
+            },
+            ...(nextStep.agentMessages?.length ? { agentMessages: nextStep.agentMessages } : {})
+          });
+          send({
+            type: "options",
+            nodeId: targetNode.id,
+            roundIntent: nextStep.roundIntent,
+            options: nextStep.options
           });
           send({ type: "done", state: nextState });
           return;
@@ -123,7 +130,8 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
             nodeId: targetNode.id,
             output: {
               roundIntent: nextStep.roundIntent
-            }
+            },
+            ...(nextStep.agentMessages?.length ? { agentMessages: nextStep.agentMessages } : {})
           });
           send({ type: "done", state: nextState });
           return;
@@ -156,7 +164,11 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
           userId: user.id,
           sessionId,
           nodeId: targetNode.id,
-          output
+          output: {
+            roundIntent: output.roundIntent,
+            draft: output.draft
+          },
+          ...agentMessagesArgument(nextStep.agentMessages, output.agentMessages)
         });
         send({ type: "done", state: nextState });
       } catch (error) {
@@ -183,4 +195,9 @@ function parentStateForDraftNode(state: SessionState, node: TreeNode) {
 function selectedOptionForDraftNode(state: SessionState | null, node: TreeNode): BranchOption | null {
   if (!state || !node.parentOptionId) return null;
   return state.currentNode?.options.find((option) => option.id === node.parentOptionId) ?? null;
+}
+
+function agentMessagesArgument(...messageGroups: Array<AgentMessage[] | undefined>) {
+  const agentMessages = messageGroups.flatMap((messages) => messages ?? []);
+  return agentMessages.length > 0 ? { agentMessages } : {};
 }

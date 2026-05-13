@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
+import { apiPath, appPath } from "@/lib/web-base-path";
 
 export function SetupAdminForm() {
   const [username, setUsername] = useState("");
@@ -21,7 +22,7 @@ export function SetupAdminForm() {
 
     setIsSubmitting(true);
     try {
-      const response = await fetch("/api/setup-admin", {
+      const response = await fetch(apiPath("/api/setup-admin"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, displayName, password, passwordConfirmation })
@@ -33,7 +34,7 @@ export function SetupAdminForm() {
         return;
       }
 
-      window.location.assign("/login");
+      window.location.assign(appPath("/login"));
     } catch {
       setMessage("无法初始化管理员，请稍后再试。");
     } finally {

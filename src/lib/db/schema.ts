@@ -83,7 +83,6 @@ export const sessions = sqliteTable(
     status: text("status").notNull(),
     currentNodeId: text("current_node_id"),
     isArchived: integer("is_archived").notNull().default(0),
-    toolMemory: text("tool_memory").notNull().default(""),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`)
   },
@@ -116,6 +115,7 @@ export const treeNodes = sqliteTable("tree_nodes", {
   optionsJson: text("options_json").notNull(),
   selectedOptionId: text("selected_option_id"),
   foldedOptionsJson: text("folded_options_json").notNull(),
+  agentMessagesJson: text("agent_messages_json").notNull().default("[]"),
   isTerminal: integer("is_terminal").notNull().default(0),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`)
 });

@@ -1,7 +1,18 @@
 import type { BranchOption, DirectorDraftOutput, DirectorNextStepOutput, DirectorOptionsOutput, Draft } from "@/lib/domain";
 import { logTritreeAiDebug } from "./debug-log";
-import { generateTreeNextStep, streamTreeDraft, streamTreeNextStep, streamTreeOptions, type MemoryScope } from "./mastra-executor";
+import {
+  generateTreeNextStep,
+  streamTreeDraft,
+  streamTreeNextStep,
+  streamTreeOptions,
+  type DirectorAgentTrace,
+  type MemoryScope
+} from "./mastra-executor";
 import type { DirectorInputParts } from "./prompts";
+
+export type DirectorNextStepStreamResult = DirectorNextStepOutput & DirectorAgentTrace;
+export type DirectorDraftStreamResult = DirectorDraftOutput & DirectorAgentTrace;
+export type DirectorOptionsStreamResult = DirectorOptionsOutput & DirectorAgentTrace;
 
 export type DirectorDraftField = "title" | "body" | "hashtags" | "imagePrompt";
 
@@ -65,7 +76,7 @@ export async function decideDirectorNextStep(
 export async function streamDirectorNextStep(
   parts: DirectorInputParts,
   options: DirectorNextStepOptions = {}
-): Promise<DirectorNextStepOutput> {
+): Promise<DirectorNextStepStreamResult> {
   let accumulatedText = "";
   const emit = (value: unknown) => {
     const text = JSON.stringify(value);
@@ -107,14 +118,14 @@ export async function streamDirectorNextStep(
     roundIntent: output.roundIntent,
     optionCount: output.action === "options" ? output.options.length : 0
   });
-  emit(output);
+  emit(withoutAgentTrace(output));
   return output;
 }
 
 export async function streamDirectorDraft(
   parts: DirectorInputParts,
   options: DirectorDraftStreamOptions = {}
-): Promise<DirectorDraftOutput> {
+): Promise<DirectorDraftStreamResult> {
   let accumulatedText = "";
   const emit = (value: unknown) => {
     const text = JSON.stringify(value);
@@ -151,14 +162,14 @@ export async function streamDirectorDraft(
     title: output.draft.title,
     bodyChars: output.draft.body.length
   });
-  emit(output);
+  emit(withoutAgentTrace(output));
   return output;
 }
 
 export async function streamDirectorOptions(
   parts: DirectorInputParts,
   options: DirectorOptionsStreamOptions = {}
-): Promise<DirectorOptionsOutput> {
+): Promise<DirectorOptionsStreamResult> {
   let accumulatedText = "";
   const emit = (value: unknown) => {
     const text = JSON.stringify(value);
@@ -199,8 +210,13 @@ export async function streamDirectorOptions(
     optionCount: output.options.length,
     optionLabels: output.options.map((option) => option.label)
   });
-  emit(output);
+  emit(withoutAgentTrace(output));
   return output;
+}
+
+function withoutAgentTrace<T extends object>(value: T): T {
+  const { agentMessages: _agentMessages, ...rest } = value as T & DirectorAgentTrace;
+  return rest as T;
 }
 
 export function extractPartialDirectorDraft(text: string): Draft | null {

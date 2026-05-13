@@ -52,6 +52,7 @@ const parentNode = {
   options: [{ id: "a", label: "扩写", description: "扩写", impact: "更完整", kind: "deepen" }],
   selectedOptionId: "a",
   foldedOptions: [],
+  agentMessages: [],
   createdAt: "2026-04-27T00:00:00.000Z"
 };
 
@@ -65,6 +66,7 @@ const childNode = {
   options: [],
   selectedOptionId: null,
   foldedOptions: [],
+  agentMessages: [],
   createdAt: "2026-04-27T00:00:00.000Z"
 };
 
@@ -142,7 +144,31 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
       roundIntent: "扩写",
       draft: { title: "新", body: "新正文", hashtags: ["#新"], imagePrompt: "新图" },
       finishAvailable: false,
-      publishPackage: null
+      publishPackage: null,
+      agentMessages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call-1",
+              toolName: "statusServer_getStatus",
+              input: { id: "123" }
+            }
+          ]
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call-1",
+              toolName: "statusServer_getStatus",
+              output: { type: "json", value: { text: "原始微博" } }
+            }
+          ]
+        }
+      ]
     };
     const finalState = {
       ...state,
@@ -183,7 +209,11 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
       userId: "user-1",
       sessionId: "session-1",
       nodeId: "node-2",
-      output: finalOutput
+      output: {
+        roundIntent: finalOutput.roundIntent,
+        draft: finalOutput.draft
+      },
+      agentMessages: finalOutput.agentMessages
     });
   });
 
@@ -196,6 +226,30 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
         { id: "b", label: "补目标风格", description: "说明希望改成什么视觉方向。", impact: "让需求更明确。", kind: "reframe" },
         { id: "c", label: "补验收标准", description: "说明如何判断样式改好了。", impact: "让后续草稿可执行。", kind: "finish" }
       ],
+      agentMessages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call-2",
+              toolName: "statusServer_getUserTimeline",
+              input: { screenName: "来去之间" }
+            }
+          ]
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call-2",
+              toolName: "statusServer_getUserTimeline",
+              output: { type: "json", value: { statuses: [{ text: "转发微博内容" }] } }
+            }
+          ]
+        }
+      ]
     };
     const routedState = {
       ...state,
@@ -228,12 +282,6 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
     });
     streamDirectorNextStepMock.mockImplementation(async (_parts, options) => {
       options.onReasoningText({ delta: "先判断。", accumulatedText: "先判断。" });
-      options.onText({
-        delta: "partial",
-        accumulatedText: "partial",
-        partialRoundIntent: nextStepOutput.roundIntent,
-        partialOptions: [nextStepOutput.options[0]]
-      });
       return nextStepOutput;
     });
 
@@ -254,10 +302,11 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
       output: {
         roundIntent: nextStepOutput.roundIntent,
         options: nextStepOutput.options,
-      }
+      },
+      agentMessages: nextStepOutput.agentMessages
     });
-    expect(text).toContain('"type":"options"');
     expect(text).toContain('"text":"先判断。"');
+    expect(text).toContain('"type":"options"');
     expect(text).toContain('"roundIntent":"先澄清样式修改范围"');
     expect(text).toContain('"label":"补系统范围"');
     expect(text).toContain('"type":"done"');

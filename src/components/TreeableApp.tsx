@@ -32,6 +32,7 @@ import { SkillLibraryPanel } from "@/components/skills/SkillLibraryPanel";
 import { SkillPicker } from "@/components/skills/SkillPicker";
 import { TreeCanvas } from "@/components/tree/TreeCanvas";
 import { createNdjsonParser } from "@/lib/stream/ndjson";
+import { apiPath, appPath } from "@/lib/web-base-path";
 
 type LoadState = "loading" | "root" | "ready" | "error";
 type MobilePanel = "tree" | "draft";
@@ -90,7 +91,6 @@ type DraftStreamEvent =
   | { type: "error"; error: string }
   | { type: "text"; text: string };
 type OptionsStreamEvent =
-  | { type: "state"; state: SessionState }
   | { type: "options"; nodeId: string; options: BranchOption[]; roundIntent?: string | null }
   | { type: "thinking"; nodeId?: string | null; text: string }
   | { type: "done"; state: SessionState }
@@ -211,7 +211,6 @@ function isOptionsStreamEvent(value: unknown): value is OptionsStreamEvent {
   if (!isRecord(value) || typeof value.type !== "string") return false;
 
   switch (value.type) {
-    case "state":
     case "done":
       return SessionStateSchema.safeParse(value.state).success;
     case "options":
@@ -463,6 +462,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   const isMobileLayoutRef = useRef(false);
   const mobileGenerationPanelOverrideRef = useRef(false);
   const loadRequestIdRef = useRef(0);
+  const canImportSkills = currentUser?.isAdmin === true;
 
   useEffect(() => {
     const requestId = loadRequestIdRef.current + 1;
@@ -575,7 +575,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setMessage("");
     setRootSetupDefaults(null);
     try {
-      const skillsResponse = await fetch("/api/skills");
+      const skillsResponse = await fetch(apiPath("/api/skills"));
       const skillsData = (await skillsResponse.json()) as {
         creationRequestOptions?: CreationRequestOption[];
         error?: string;
@@ -588,7 +588,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       setCreationRequestOptions(skillsData.creationRequestOptions ?? defaultCreationRequestOptions());
       setIsExternalStyleGenerationAvailable(Boolean(skillsData.styleProfile?.externalStyleGenerationAvailable));
 
-      const response = await fetch("/api/root-memory");
+      const response = await fetch(apiPath("/api/root-memory"));
       if (!isCurrentLoadRequest(requestId)) return;
       if (!response.ok) throw new Error("Seed 加载失败。");
       const data = (await response.json()) as { rootMemory: RootMemory | null };
@@ -603,7 +603,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
 
       if (initialSessionId) {
         try {
-          const sessionResponse = await fetch(`/api/sessions/${encodeURIComponent(initialSessionId)}`);
+          const sessionResponse = await fetch(apiPath(`/api/sessions/${encodeURIComponent(initialSessionId)}`));
           const sessionData = (await sessionResponse.json()) as { state?: SessionState | null; error?: string };
           if (!isCurrentLoadRequest(requestId)) return;
           if (!sessionResponse.ok || !sessionData.state) throw new Error(sessionData.error ?? "草稿不存在或已归档。");
@@ -628,7 +628,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
         return;
       }
 
-      const sessionResponse = await fetch("/api/sessions");
+      const sessionResponse = await fetch(apiPath("/api/sessions"));
       const sessionData = (await sessionResponse.json()) as { state?: SessionState | null; error?: string };
       if (!isCurrentLoadRequest(requestId)) return;
       if (!sessionResponse.ok) throw new Error(sessionData.error ?? "创作树加载失败。");
@@ -650,7 +650,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsBusy(true);
     setMessage("");
     try {
-      const response = await fetch("/api/root-memory", {
+      const response = await fetch(apiPath("/api/root-memory"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload.preferences)
@@ -669,7 +669,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
 
   async function requestNewSession(enabledSkillIds?: string[]) {
     const response = await fetch(
-      "/api/sessions",
+      apiPath("/api/sessions"),
       enabledSkillIds
         ? {
             method: "POST",
@@ -682,12 +682,16 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       const data = (await response.json().catch(() => null)) as { error?: string } | null;
       throw new Error(data?.error ?? "启动创作失败。");
     }
-    if (!response.body) throw new Error("启动创作失败。");
+    const data = (await response.json()) as { state?: SessionState; error?: string };
+    if (!data.state?.currentNode) throw new Error(data.error ?? "启动创作失败。");
 
-    const state = await readOptionsStream(response);
-    if (!state) throw new Error("启动创作失败。");
-
+    const nodeId = data.state.currentNode.id;
+    setSessionState(data.state);
+    setViewNodeId(nodeId);
+    setLoadState("ready");
+    const state = await ensureNodeOptions(data.state, nodeId);
     setSessionState(state);
+    setViewNodeId(state.currentNode?.id ?? nodeId);
     setStreamingOptions(null);
     setStreamingThinking(null);
     setGeneratedDiffNodeId(null);
@@ -700,7 +704,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsBusy(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/sessions/${sessionState.session.id}/skills`, {
+      const response = await fetch(apiPath(`/api/sessions/${sessionState.session.id}/skills`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabledSkillIds: skillIds })
@@ -719,7 +723,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsBusy(true);
     setSkillLibraryMessage("");
     try {
-      const response = await fetch("/api/skills", {
+      const response = await fetch(apiPath("/api/skills"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input)
@@ -740,7 +744,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsBusy(true);
     setSkillLibraryMessage("");
     try {
-      const response = await fetch("/api/skills/import", {
+      const response = await fetch(apiPath("/api/skills/import"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sourceUrl })
@@ -761,7 +765,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsBusy(true);
     setSkillLibraryMessage("");
     try {
-      const response = await fetch(`/api/skills/${skillId}`, {
+      const response = await fetch(apiPath(`/api/skills/${skillId}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input)
@@ -833,7 +837,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsBusy(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/sessions/${sessionState.session.id}/choose`, {
+      const response = await fetch(apiPath(`/api/sessions/${sessionState.session.id}/choose`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -884,7 +888,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsBusy(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/sessions/${sessionState.session.id}/branch`, {
+      const response = await fetch(apiPath(`/api/sessions/${sessionState.session.id}/branch`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -938,7 +942,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       })
     };
 
-    const streamResponse = await fetch(`/api/sessions/${state.session.id}/draft/generate/stream`, requestOptions);
+    const streamResponse = await fetch(apiPath(`/api/sessions/${state.session.id}/draft/generate/stream`), requestOptions);
     if (!streamResponse.ok) {
       const data = (await streamResponse.json().catch(() => null)) as { error?: string } | null;
       throw new Error(data?.error ?? "生成下一版草稿失败。");
@@ -948,6 +952,46 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     const streamedState = await readDraftStream(streamResponse, nodeId);
     if (!streamedState) throw new Error("生成下一版草稿失败。");
     return streamedState;
+  }
+
+  function applyStreamingOptionsPreview(
+    value: { nodeId: string; options: BranchOption[]; roundIntent?: string | null },
+    completeOptionPreviewNodeIds: Set<string>
+  ) {
+    if (completeOptionPreviewNodeIds.has(value.nodeId) && value.options.length < 3) {
+      return false;
+    }
+
+    if (value.options.length >= 3) {
+      completeOptionPreviewNodeIds.add(value.nodeId);
+      setStreamingThinking((current) =>
+        current?.stage === "options" && (!current.nodeId || current.nodeId === value.nodeId) ? null : current
+      );
+    }
+
+    setGenerationStage({ nodeId: value.nodeId, stage: "options" });
+    setStreamingOptions({ nodeId: value.nodeId, roundIntent: value.roundIntent ?? null, options: value.options });
+    markMobilePanelUnread("tree");
+    return true;
+  }
+
+  function applyStreamingOptionsThinking(
+    value: { nodeId?: string | null; text: string },
+    fallbackNodeId: string | null | undefined,
+    completeOptionPreviewNodeIds: Set<string>
+  ) {
+    const thinkingNodeId = value.nodeId ?? fallbackNodeId ?? null;
+    if (thinkingNodeId && completeOptionPreviewNodeIds.has(thinkingNodeId)) {
+      return false;
+    }
+
+    setStreamingThinking({
+      nodeId: thinkingNodeId,
+      stage: "options",
+      text: value.text
+    });
+    markMobilePanelUnread("tree");
+    return true;
   }
 
   async function readDraftStream(response: Response, nodeId: string) {
@@ -960,6 +1004,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     let receivedDone = false;
     let streamRoutedToOptions = false;
     let streamError: string | null = null;
+    const completeOptionPreviewNodeIds = new Set<string>();
     const decoder = new TextDecoder();
     const reader = response.body.getReader();
     const throwStreamError = () => {
@@ -979,11 +1024,10 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       }
 
       if (value.type === "options") {
-        setGenerationStage({ nodeId: value.nodeId, stage: "options" });
-        setStreamingOptions({ nodeId: value.nodeId, roundIntent: value.roundIntent ?? null, options: value.options });
+        const didApplyOptions = applyStreamingOptionsPreview(value, completeOptionPreviewNodeIds);
         setStreamingThinking(null);
         showMobileTreeForOptionsGeneration();
-        receivedOptions = true;
+        receivedOptions = didApplyOptions;
         streamRoutedToOptions = true;
         return;
       }
@@ -1045,7 +1089,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setStreamingOptions({ nodeId, options: [] });
     setStreamingThinking(null);
     markMobilePanelUnread("tree");
-    const response = await fetch(`/api/sessions/${state.session.id}/options`, {
+    const response = await fetch(apiPath(`/api/sessions/${state.session.id}/options`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1085,50 +1129,13 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     const parser = createNdjsonParser((value) => {
       if (!isOptionsStreamEvent(value)) return;
 
-      if (value.type === "state") {
-        const nodeId = value.state.currentNode?.id ?? fallbackNodeId ?? null;
-        setSessionState(value.state);
-        setViewNodeId(nodeId);
-        if (nodeId && needsNodeOptions(value.state, nodeId)) {
-          setGenerationStage({ nodeId, stage: "options" });
-          setStreamingOptions({ nodeId, options: [] });
-        }
-        markMobilePanelUnread("tree");
-        setLoadState("ready");
-        return;
-      }
-
       if (value.type === "options") {
-        if (completeOptionPreviewNodeIds.has(value.nodeId) && value.options.length < 3) {
-          return;
-        }
-
-        if (value.options.length >= 3) {
-          completeOptionPreviewNodeIds.add(value.nodeId);
-          setStreamingThinking((current) =>
-            current?.stage === "options" && (!current.nodeId || current.nodeId === value.nodeId) ? null : current
-          );
-        }
-
-        setStreamingOptions({ nodeId: value.nodeId, roundIntent: value.roundIntent ?? null, options: value.options });
-        markMobilePanelUnread("tree");
-        receivedOptions = true;
+        receivedOptions = applyStreamingOptionsPreview(value, completeOptionPreviewNodeIds);
         return;
       }
 
       if (value.type === "thinking") {
-        const thinkingNodeId = value.nodeId ?? fallbackNodeId ?? null;
-        if (thinkingNodeId && completeOptionPreviewNodeIds.has(thinkingNodeId)) {
-          return;
-        }
-
-        setStreamingThinking({
-          nodeId: thinkingNodeId,
-          stage: "options",
-          text: value.text
-        });
-        markMobilePanelUnread("tree");
-        receivedThinking = true;
+        receivedThinking = applyStreamingOptionsThinking(value, fallbackNodeId, completeOptionPreviewNodeIds);
         return;
       }
 
@@ -1322,7 +1329,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   }
 
   async function saveDraftForNode(draft: Draft, draftParentNodeId: string) {
-    const response = await fetch(`/api/sessions/${sessionState!.session.id}/draft`, {
+    const response = await fetch(apiPath(`/api/sessions/${sessionState!.session.id}/draft`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nodeId: draftParentNodeId, draft })
@@ -1402,7 +1409,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
             onArchive={(skillId) => void archiveLibrarySkill(skillId)}
             onClose={() => setIsSkillLibraryOpen(false)}
             onCreate={async (input) => Boolean(await createLibrarySkill(input))}
-            onImport={importLibrarySkills}
+            onImport={canImportSkills ? importLibrarySkills : undefined}
             onUpdate={async (skillId, input) => Boolean(await updateLibrarySkill(skillId, input))}
             skills={skills}
           />
@@ -1578,7 +1585,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
                   <span>用户管理</span>
                 </Link>
               ) : null}
-              <button onClick={() => signOut({ callbackUrl: "/login" })} type="button">
+              <button onClick={() => signOut({ callbackUrl: appPath("/login") })} type="button">
                 <LogOut aria-hidden="true" size={15} strokeWidth={2.25} />
                 <span>退出登录</span>
               </button>
@@ -1644,7 +1651,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           onArchive={(skillId) => void archiveLibrarySkill(skillId)}
           onClose={() => setIsSkillLibraryOpen(false)}
           onCreate={async (input) => Boolean(await createLibrarySkill(input))}
-          onImport={importLibrarySkills}
+          onImport={canImportSkills ? importLibrarySkills : undefined}
           onUpdate={async (skillId, input) => Boolean(await updateLibrarySkill(skillId, input))}
           skills={skills}
         />

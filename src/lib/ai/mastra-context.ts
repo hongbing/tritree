@@ -10,6 +10,7 @@ export type SharedAgentContextInput = {
 };
 
 const SUBMIT_TREE_DRAFT_TOOL_NAME = "submit_tree_draft";
+const SUBMIT_TREE_NEXT_STEP_TOOL_NAME = "submit_tree_next_step";
 const SUBMIT_TREE_OPTIONS_TOOL_NAME = "submit_tree_options";
 
 export function buildSharedAgentContext(input: SharedAgentContextInput) {
@@ -114,6 +115,8 @@ export function buildTreeNextStepInstructions(input: SharedAgentContextInput) {
     "action=draft 时，只说明本轮写作意图，不要提供三个答案。",
     "action=complete 时，只说明完成判断，不要提供三个答案，也不要生成草稿。",
     "必须遵守已启用 Skills；它们是本轮任务指令，不是可选参考资料。",
+    "如果本轮列出了可用工具和 MCP 能力，可以按需调用；未列出时不要假设可以查询外部信息。",
+    ...finalSubmitExecutionRules(input, "next-step"),
     "# 输出要求",
     "只返回结构化结果。",
     "action 只能是 options、draft 或 complete。",
@@ -126,14 +129,19 @@ export function buildTreeNextStepInstructions(input: SharedAgentContextInput) {
     .join("\n\n");
 }
 
-function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "draft" | "options") {
-  const toolName = target === "draft" ? SUBMIT_TREE_DRAFT_TOOL_NAME : SUBMIT_TREE_OPTIONS_TOOL_NAME;
+function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "draft" | "next-step" | "options") {
+  const toolName =
+    target === "draft"
+      ? SUBMIT_TREE_DRAFT_TOOL_NAME
+      : target === "next-step"
+        ? SUBMIT_TREE_NEXT_STEP_TOOL_NAME
+        : SUBMIT_TREE_OPTIONS_TOOL_NAME;
   const hasFinalSubmitTool = input.toolSummaries?.some(
     (summary) => summary.includes(`${toolName}：`) || summary.includes(`${toolName}:`)
   );
   if (!hasFinalSubmitTool) return [];
 
-  const taskName = target === "draft" ? "写作" : "澄清选项";
+  const taskName = target === "draft" ? "写作" : target === "next-step" ? "路由决策" : "澄清选项";
   return [
     `本轮可用工具里包含 ${toolName} 时，最终目标就是调用 ${toolName} 完成本轮${taskName}任务；不要把最终结果写成普通文本。`,
     `调用 ${toolName} 前可以按需调用其他工具收集信息；一旦结果足够，直接把结构化字段作为 ${toolName} 的参数提交。`

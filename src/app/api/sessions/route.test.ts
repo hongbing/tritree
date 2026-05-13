@@ -3,7 +3,6 @@ import { AuthApiError } from "@/lib/auth/current-user";
 import { createSeedDraft } from "@/lib/seed-draft";
 import { GET, POST } from "./route";
 
-const streamDirectorOptionsMock = vi.hoisted(() => vi.fn());
 const getRepositoryMock = vi.hoisted(() => vi.fn());
 const requireCurrentUserMock = vi.hoisted(() => vi.fn());
 
@@ -16,10 +15,6 @@ const currentUser = {
   createdAt: "2026-05-06T00:00:00.000Z",
   updatedAt: "2026-05-06T00:00:00.000Z"
 };
-
-vi.mock("@/lib/ai/director-stream", () => ({
-  streamDirectorOptions: streamDirectorOptionsMock
-}));
 
 vi.mock("server-only", () => ({}));
 
@@ -52,7 +47,6 @@ const resolvedSkills = [
 ];
 
 beforeEach(() => {
-  streamDirectorOptionsMock.mockReset();
   getRepositoryMock.mockReset();
   requireCurrentUserMock.mockReset();
   requireCurrentUserMock.mockResolvedValue(currentUser);
@@ -141,7 +135,7 @@ describe("POST /api/sessions", () => {
     expect(await response.json()).toEqual({ error: "请先登录。" });
   });
 
-  it("streams first-round options through the same option stream used by existing nodes", async () => {
+  it("creates a session draft without generating options", async () => {
     const draftState = {
       rootMemory: {
         id: "root",
@@ -175,6 +169,7 @@ describe("POST /api/sessions", () => {
         options: [],
         selectedOptionId: null,
         foldedOptions: [],
+        agentMessages: [],
         createdAt: "2026-04-26T00:00:00.000Z"
       },
       currentDraft: createSeedDraft("写一篇解释为什么要写作的文章"),
@@ -186,37 +181,7 @@ describe("POST /api/sessions", () => {
       foldedBranches: [],
       publishPackage: null
     };
-    const finalState = {
-      ...draftState,
-      currentNode: {
-        ...draftState.currentNode,
-        options: [
-          {
-            id: "a",
-            label: "拆清楚为什么写",
-            description: "先拆清楚写作动机。",
-            impact: "让文章更有方向。",
-            kind: "explore"
-          },
-          {
-            id: "b",
-            label: "先写一版完整草稿",
-            description: "先把文章写完整。",
-            impact: "让内容先成形。",
-            kind: "deepen"
-          },
-          {
-            id: "c",
-            label: "把开头改得更勾人",
-            description: "先优化文章开头。",
-            impact: "让开头更吸引人。",
-            kind: "reframe"
-          }
-        ]
-      }
-    };
     const createSessionDraft = vi.fn().mockReturnValue(draftState);
-    const updateNodeOptions = vi.fn().mockReturnValue(finalState);
     getRepositoryMock.mockReturnValue({
       getRootMemory: () => ({
         id: "root",
@@ -233,57 +198,13 @@ describe("POST /api/sessions", () => {
         updatedAt: "2026-04-26T00:00:00.000Z"
       }),
       defaultEnabledSkillIds: vi.fn(() => ["system-analysis"]),
-      resolveSkillsByIds: vi.fn(() => resolvedSkills),
-      createSessionDraft,
-      updateNodeOptions
-    });
-    const output = {
-      roundIntent: "选择起始方式",
-      options: [
-        {
-          id: "a",
-          label: "拆清楚为什么写",
-          description: "先拆清楚写作动机。",
-          impact: "让文章更有方向。",
-          kind: "explore"
-        },
-        {
-          id: "b",
-          label: "先写一版完整草稿",
-          description: "先把文章写完整。",
-          impact: "让内容先成形。",
-          kind: "deepen"
-        },
-        {
-          id: "c",
-          label: "把开头改得更勾人",
-          description: "先优化文章开头。",
-          impact: "让开头更吸引人。",
-          kind: "reframe"
-        }
-      ],
-    };
-    streamDirectorOptionsMock.mockImplementation(async (_parts, options) => {
-      options.onReasoningText({ delta: "先判断 seed。", accumulatedText: "先判断 seed。" });
-      options.onText({
-        delta: "拆清楚为什么写",
-        accumulatedText: "",
-        partialOptions: [
-          { id: "a", label: "拆清楚为什么写", description: "正在生成方向说明", impact: "正在生成影响说明", kind: "explore" }
-        ]
-      });
-      return output;
+      createSessionDraft
     });
 
     const response = await POST(new Request("http://test.local/api/sessions", { method: "POST" }));
-    const text = await response.text();
+    const data = await response.json();
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("Content-Type")).toContain("application/x-ndjson");
-    expect(streamDirectorOptionsMock).toHaveBeenCalledWith(
-      expect.objectContaining({ enabledSkills: resolvedSkills }),
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
-    );
     expect(createSessionDraft).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-1",
@@ -291,20 +212,10 @@ describe("POST /api/sessions", () => {
         draft: expect.objectContaining({ body: "写一篇解释为什么要写作的文章" })
       })
     );
-    expect(updateNodeOptions).toHaveBeenCalledWith({ userId: "user-1", sessionId: "session-1", nodeId: "node-1", output });
-    expect(text).toContain('"type":"state"');
-    expect(text).toContain('"type":"thinking"');
-    expect(text).toContain('"text":"先判断 seed。"');
-    expect(text).toContain('"type":"options"');
-    expect(text).toContain('"label":"拆清楚为什么写"');
-    expect(text).not.toContain('"label":"生成中"');
-    expect(text).toContain('"type":"done"');
-    expect(text.indexOf('"type":"state"')).toBeLessThan(text.indexOf('"type":"thinking"'));
-    expect(text.indexOf('"type":"thinking"')).toBeLessThan(text.indexOf('"type":"options"'));
-    expect(text.indexOf('"type":"options"')).toBeLessThan(text.indexOf('"type":"done"'));
+    expect(data.state).toEqual(draftState);
   });
 
-  it("keeps the seed draft body raw while passing creation request context through root summary", async () => {
+  it("keeps the seed draft body raw when creating the session", async () => {
     const rootMemoryWithRequest = {
       id: "root",
       preferences: {
@@ -343,6 +254,7 @@ describe("POST /api/sessions", () => {
         options: [],
         selectedOptionId: null,
         foldedOptions: [],
+        agentMessages: [],
         createdAt: "2026-04-26T00:00:00.000Z"
       },
       currentDraft: createSeedDraft("写一篇解释为什么要写作的文章"),
@@ -355,34 +267,14 @@ describe("POST /api/sessions", () => {
       publishPackage: null
     };
     const createSessionDraft = vi.fn().mockReturnValue(draftState);
-    const updateNodeOptions = vi.fn().mockReturnValue({
-      ...draftState,
-      currentNode: {
-        ...draftState.currentNode,
-        options: [
-          { id: "a", label: "分析", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "扩写", description: "B", impact: "B", kind: "deepen" },
-          { id: "c", label: "润色", description: "C", impact: "C", kind: "reframe" }
-        ]
-      }
-    });
     getRepositoryMock.mockReturnValue({
       getRootMemory: () => rootMemoryWithRequest,
       defaultEnabledSkillIds: vi.fn(() => ["system-analysis"]),
-      resolveSkillsByIds: vi.fn(() => resolvedSkills),
-      createSessionDraft,
-      updateNodeOptions
-    });
-    streamDirectorOptionsMock.mockResolvedValue({
-      roundIntent: "选择起始方式",
-      options: [
-        { id: "a", label: "分析", description: "A", impact: "A", kind: "explore" },
-        { id: "b", label: "扩写", description: "B", impact: "B", kind: "deepen" },
-        { id: "c", label: "润色", description: "C", impact: "C", kind: "reframe" }
-      ],
+      createSessionDraft
     });
 
     const response = await POST(new Request("http://test.local/api/sessions", { method: "POST" }));
+    const data = await response.json();
 
     expect(response.status).toBe(200);
     expect(createSessionDraft).toHaveBeenCalledWith(
@@ -393,12 +285,7 @@ describe("POST /api/sessions", () => {
         })
       })
     );
-    expect(streamDirectorOptionsMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        rootSummary: expect.stringContaining("本次创作要求：改成英文的，保留口语感")
-      }),
-      expect.anything()
-    );
+    expect(data.state.rootMemory.summary).toContain("本次创作要求：改成英文的，保留口语感");
   });
 
   it("starts a session with selected enabled skill ids", async () => {
@@ -435,6 +322,7 @@ describe("POST /api/sessions", () => {
         options: [],
         selectedOptionId: null,
         foldedOptions: [],
+        agentMessages: [],
         createdAt: "2026-04-26T00:00:00.000Z"
       },
       currentDraft: createSeedDraft("写一篇解释为什么要写作的文章"),
@@ -447,18 +335,6 @@ describe("POST /api/sessions", () => {
       publishPackage: null
     };
     const createSessionDraft = vi.fn().mockReturnValue(draftState);
-    const updateNodeOptions = vi.fn().mockReturnValue({
-      ...draftState,
-      currentNode: {
-        ...draftState.currentNode,
-        options: [
-          { id: "a", label: "分析", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "扩写", description: "B", impact: "B", kind: "deepen" },
-          { id: "c", label: "润色", description: "C", impact: "C", kind: "reframe" }
-        ]
-      }
-    });
-    const resolveSkillsByIds = vi.fn(() => resolvedSkills);
     getRepositoryMock.mockReturnValue({
       getRootMemory: () => ({
         id: "root",
@@ -475,17 +351,7 @@ describe("POST /api/sessions", () => {
         updatedAt: "2026-04-26T00:00:00.000Z"
       }),
       defaultEnabledSkillIds: vi.fn(() => ["system-analysis"]),
-      resolveSkillsByIds,
-      createSessionDraft,
-      updateNodeOptions
-    });
-    streamDirectorOptionsMock.mockResolvedValue({
-      roundIntent: "选择起始方式",
-      options: [
-        { id: "a", label: "分析", description: "A", impact: "A", kind: "explore" },
-        { id: "b", label: "扩写", description: "B", impact: "B", kind: "deepen" },
-        { id: "c", label: "润色", description: "C", impact: "C", kind: "reframe" }
-      ],
+      createSessionDraft
     });
 
     const response = await POST(
@@ -496,11 +362,6 @@ describe("POST /api/sessions", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(resolveSkillsByIds).toHaveBeenCalledWith(["system-analysis", "system-no-hype-title"], "user-1");
-    expect(streamDirectorOptionsMock).toHaveBeenCalledWith(
-      expect.objectContaining({ enabledSkills: resolvedSkills }),
-      expect.anything()
-    );
     expect(createSessionDraft).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-1",
@@ -509,51 +370,7 @@ describe("POST /api/sessions", () => {
     );
   });
 
-  it("streams generic upstream error details to the frontend", async () => {
-    const draftState = {
-      rootMemory: {
-        id: "root",
-        preferences: {
-          seed: "写一篇青岛旅游攻略",
-          domains: ["旅行"],
-          tones: ["轻松"],
-          styles: ["攻略"],
-          personas: ["旅行者"]
-        },
-        summary: "Seed：写一篇青岛旅游攻略",
-        learnedSummary: "",
-        createdAt: "2026-04-26T00:00:00.000Z",
-        updatedAt: "2026-04-26T00:00:00.000Z"
-      },
-      session: {
-        id: "session-1",
-        title: "Draft",
-        status: "active",
-        currentNodeId: "node-1",
-        createdAt: "2026-04-26T00:00:00.000Z",
-        updatedAt: "2026-04-26T00:00:00.000Z"
-      },
-      currentNode: {
-        id: "node-1",
-        sessionId: "session-1",
-        parentId: null,
-        parentOptionId: null,
-        roundIndex: 1,
-        roundIntent: "选择起始方式",
-        options: [],
-        selectedOptionId: null,
-        foldedOptions: [],
-        createdAt: "2026-04-26T00:00:00.000Z"
-      },
-      currentDraft: createSeedDraft("写一篇青岛旅游攻略"),
-      nodeDrafts: [{ nodeId: "node-1", draft: createSeedDraft("写一篇青岛旅游攻略") }],
-      selectedPath: [],
-      treeNodes: [],
-      enabledSkillIds: ["system-analysis"],
-      enabledSkills: resolvedSkills,
-      foldedBranches: [],
-      publishPackage: null
-    };
+  it("returns a server error if creating the session draft fails", async () => {
     getRepositoryMock.mockReturnValue({
       getRootMemory: () => ({
         id: "root",
@@ -570,32 +387,16 @@ describe("POST /api/sessions", () => {
         updatedAt: "2026-04-26T00:00:00.000Z"
       }),
       defaultEnabledSkillIds: vi.fn(() => ["system-analysis"]),
-      resolveSkillsByIds: vi.fn(() => resolvedSkills),
-      createSessionDraft: vi.fn().mockReturnValue(draftState),
-      updateNodeOptions: vi.fn()
-    });
-    streamDirectorOptionsMock.mockRejectedValue({
-      name: "AI_APICallError",
-      statusCode: 429,
-      responseHeaders: { "retry-after": "60" },
-      data: {
-        type: "error",
-        error: {
-          type: "engine_overloaded_error",
-          message: "The engine is currently overloaded, please try again later"
-        }
-      },
-      message: "The engine is currently overloaded, please try again later"
+      createSessionDraft: vi.fn(() => {
+        throw new Error("database unavailable");
+      })
     });
 
     const response = await POST(new Request("http://test.local/api/sessions", { method: "POST" }));
-    const text = await response.text();
+    const data = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(text).toContain('"type":"state"');
-    expect(text).toContain('"type":"error"');
-    expect(text).toContain("无法启动创作：上游服务返回 429，可在 60 秒后重试：The engine is currently overloaded, please try again later");
-    expect(text).not.toContain('"error":"无法启动创作。"');
+    expect(response.status).toBe(500);
+    expect(data.error).toBe("无法启动创作。");
   });
 
   it("rejects malformed session start JSON", async () => {
@@ -610,6 +411,5 @@ describe("POST /api/sessions", () => {
     expect(response.status).toBe(400);
     expect(data.error).toBe("请求不是有效的 JSON。");
     expect(getRepositoryMock).not.toHaveBeenCalled();
-    expect(streamDirectorOptionsMock).not.toHaveBeenCalled();
   });
 });

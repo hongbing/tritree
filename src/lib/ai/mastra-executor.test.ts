@@ -4,8 +4,8 @@ import { createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-a
 import {
   generateTreeDraft,
   generateTreeNextStep,
-  generateTreeOptions,
   streamTreeDraft,
+  streamTreeNextStep,
   streamTreeOptions
 } from "./mastra-executor";
 import type { DirectorInputParts } from "./prompts";
@@ -13,6 +13,7 @@ import type { DirectorInputParts } from "./prompts";
 const mocks = vi.hoisted(() => ({
   agentConstructor: vi.fn(),
   createAnthropic: vi.fn(),
+  createMcpRuntimeTools: vi.fn(),
   createSkillRuntimeTools: vi.fn()
 }));
 
@@ -26,6 +27,10 @@ vi.mock("@mastra/core/agent", () => ({
 
 vi.mock("@/lib/skills/skill-runtime", () => ({
   createSkillRuntimeTools: mocks.createSkillRuntimeTools
+}));
+
+vi.mock("./mcp-runtime", () => ({
+  createMcpRuntimeTools: mocks.createMcpRuntimeTools
 }));
 
 const modelFactory = vi.fn((modelId: string) => ({ modelId }));
@@ -81,6 +86,7 @@ beforeEach(() => {
   modelFactory.mockClear();
   mocks.createAnthropic.mockReturnValue(modelFactory);
   mocks.createSkillRuntimeTools.mockResolvedValue({ toolSummaries: [], tools: {} });
+  mocks.createMcpRuntimeTools.mockResolvedValue({ disconnect: vi.fn(), toolSummaries: [], tools: {} });
   mocks.agentConstructor.mockImplementation(function Agent(options) {
     return {
       options,
@@ -203,25 +209,27 @@ describe("tree director compatibility generators", () => {
   });
 
   it("passes editor and shared skills to the options agent", async () => {
+    const finalObject = {
+      roundIntent: "选择下一步",
+      options: [
+        { id: "a", label: "补因果链", description: "第二段跳得太快。", impact: "让读者更容易理解。", kind: "deepen" },
+        { id: "b", label: "收紧标题", description: "标题承诺偏大。", impact: "让表达更可信。", kind: "reframe" },
+        { id: "c", label: "整理结尾", description: "结尾还没有收束。", impact: "让文章接近发布。", kind: "finish" }
+      ],
+    };
     const fakeAgent = {
-      generate: vi.fn(async () => ({
-        object: {
-          roundIntent: "选择下一步",
-          options: [
-            { id: "a", label: "补因果链", description: "第二段跳得太快。", impact: "让读者更容易理解。", kind: "deepen" },
-            { id: "b", label: "收紧标题", description: "标题承诺偏大。", impact: "让表达更可信。", kind: "reframe" },
-            { id: "c", label: "整理结尾", description: "结尾还没有收束。", impact: "让文章接近发布。", kind: "finish" }
-          ],
-        }
+      generate: vi.fn(),
+      stream: vi.fn(async () => ({
+        object: Promise.resolve(finalObject)
       }))
     };
 
-    await generateTreeOptions({
+    await streamTreeOptions({
       parts: directorParts,
       treeOptionsAgent: fakeAgent
     });
 
-    expect(fakeAgent.generate).toHaveBeenCalled();
+    expect(fakeAgent.stream).toHaveBeenCalled();
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:options]",
       expect.stringContaining("逻辑链审查")
@@ -298,8 +306,10 @@ describe("tree director compatibility generators", () => {
     mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
       return {
         options,
-        generate: vi.fn(async () => ({ object: generatedObject })),
-        stream: vi.fn()
+        generate: vi.fn(),
+        stream: vi.fn(async () => ({
+          object: Promise.resolve(generatedObject)
+        }))
       };
     });
     mocks.createSkillRuntimeTools.mockResolvedValueOnce({
@@ -309,7 +319,7 @@ describe("tree director compatibility generators", () => {
       tools: {}
     });
 
-    await generateTreeOptions({
+    await streamTreeOptions({
       parts: directorParts
     });
 
@@ -325,6 +335,217 @@ describe("tree director compatibility generators", () => {
       "[treeable:mastra-prompt:options]",
       expect.not.stringContaining("标题和正文都要克制。")
     );
+  });
+
+  it("merges configured MCP tools with Skill runtime tools for real agents", async () => {
+    const runSkillCommand = {
+      id: "run_skill_command",
+      description: "Run an installed skill command.",
+      execute: vi.fn()
+    };
+    const readFile = {
+      id: "filesystem_read_file",
+      description: "Read a configured file.",
+      execute: vi.fn()
+    };
+    const finalObject = {
+      roundIntent: "选择下一步",
+      options: [
+        { id: "a", label: "补具体场景", description: "加入真实场景。", impact: "让文章更具体。", kind: "explore" },
+        { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
+        { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
+      ],
+    };
+
+    mocks.createSkillRuntimeTools.mockResolvedValueOnce({
+      availableSkillSummaries: [],
+      enabledSkills,
+      toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
+      tools: { run_skill_command: runSkillCommand }
+    });
+    mocks.createMcpRuntimeTools.mockResolvedValueOnce({
+      disconnect: vi.fn(),
+      toolSummaries: ["MCP filesystem：可用工具 filesystem_read_file。"],
+      tools: { filesystem_read_file: readFile }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        generate: vi.fn(),
+        stream: vi.fn(async () => ({
+          object: Promise.resolve(finalObject)
+        }))
+      };
+    });
+
+    await streamTreeOptions({
+      parts: directorParts,
+      env: { KIMI_API_KEY: "token" }
+    });
+
+    expect(mocks.createMcpRuntimeTools).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingTools: { run_skill_command: runSkillCommand }
+      })
+    );
+    expect(mocks.agentConstructor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools: expect.objectContaining({
+          run_skill_command: runSkillCommand,
+          filesystem_read_file: readFile
+        })
+      })
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[treeable:mastra-prompt:options]",
+      expect.stringContaining("MCP filesystem")
+    );
+  });
+
+  it("disconnects MCP runtime tools after a successful real-agent run", async () => {
+    const disconnect = vi.fn(async () => undefined);
+    const finalObject = {
+      roundIntent: "继续完善",
+      draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+    };
+
+    mocks.createMcpRuntimeTools.mockResolvedValueOnce({
+      disconnect,
+      toolSummaries: ["MCP filesystem：可用工具 filesystem_read_file。"],
+      tools: {
+        filesystem_read_file: { id: "filesystem_read_file", description: "Read file", execute: vi.fn() }
+      }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        generate: vi.fn(async () => ({ object: finalObject })),
+        stream: vi.fn()
+      };
+    });
+
+    await generateTreeDraft({
+      parts: directorParts,
+      env: { KIMI_API_KEY: "token" }
+    });
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("disconnects MCP runtime tools when real-agent generation fails", async () => {
+    const disconnect = vi.fn(async () => undefined);
+    mocks.createMcpRuntimeTools.mockResolvedValueOnce({
+      disconnect,
+      toolSummaries: ["MCP filesystem：可用工具 filesystem_read_file。"],
+      tools: {
+        filesystem_read_file: { id: "filesystem_read_file", description: "Read file", execute: vi.fn() }
+      }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        generate: vi.fn(async () => {
+          throw new Error("model failed");
+        }),
+        stream: vi.fn()
+      };
+    });
+
+    await expect(
+      generateTreeDraft({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" }
+      })
+    ).rejects.toThrow("model failed");
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("swallows and logs MCP disconnect failures after successful real-agent generation", async () => {
+    vi.stubEnv("TRITREE_DEBUG_STREAM", "1");
+    const disconnectError = new Error("disconnect failed");
+    const disconnect = vi.fn(async () => {
+      throw disconnectError;
+    });
+    const finalObject = {
+      roundIntent: "继续完善",
+      draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+    };
+
+    mocks.createMcpRuntimeTools.mockResolvedValueOnce({
+      disconnect,
+      toolSummaries: ["MCP filesystem：可用工具 filesystem_read_file。"],
+      tools: {
+        filesystem_read_file: { id: "filesystem_read_file", description: "Read file", execute: vi.fn() }
+      }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        generate: vi.fn(async () => ({ object: finalObject })),
+        stream: vi.fn()
+      };
+    });
+
+    await expect(
+      generateTreeDraft({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" }
+      })
+    ).resolves.toEqual(finalObject);
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[tritree:mcp-runtime:disconnect-failed]",
+      expect.objectContaining({
+        error: expect.objectContaining({
+          message: "disconnect failed"
+        })
+      })
+    );
+  });
+
+  it("does not load MCP runtime tools for injected fake agents", async () => {
+    const fakeAgent = {
+      generate: vi.fn(async () => ({
+        object: {
+          roundIntent: "继续完善",
+          draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+        }
+      }))
+    };
+
+    await generateTreeDraft({
+      parts: directorParts,
+      treeDraftAgent: fakeAgent
+    });
+
+    expect(mocks.createMcpRuntimeTools).not.toHaveBeenCalled();
+  });
+
+  it("does not load MCP runtime tools when an injected stream agent falls back to generate", async () => {
+    const finalObject = {
+      action: "options",
+      roundIntent: "先澄清背景",
+      options: [
+        { id: "a", label: "补系统范围", description: "先确认哪些模块要改。", impact: "避免 PRD 编造范围。", kind: "deepen" },
+        { id: "b", label: "补目标风格", description: "先确认要改成什么风格。", impact: "让需求更明确。", kind: "reframe" },
+        { id: "c", label: "补验收标准", description: "先确认怎么算改好。", impact: "让后续草稿可执行。", kind: "finish" }
+      ],
+    };
+    const fakeAgent = {
+      generate: vi.fn(async () => ({ object: finalObject }))
+    };
+
+    await expect(
+      streamTreeNextStep({
+        parts: directorParts,
+        treeNextStepAgent: fakeAgent
+      })
+    ).resolves.toEqual(finalObject);
+
+    expect(fakeAgent.generate).toHaveBeenCalled();
+    expect(mocks.createMcpRuntimeTools).not.toHaveBeenCalled();
   });
 
   it("generates old UI draft output through a Mastra-compatible structured agent", async () => {
@@ -489,22 +710,24 @@ describe("tree director compatibility generators", () => {
     expect(streamLogs[1]?.[1]).toContain("最终 C");
   });
 
-  it("generates old UI branch options through a Mastra-compatible structured agent", async () => {
+  it("streams old UI branch options through a Mastra-compatible structured agent", async () => {
+    const finalObject = {
+      roundIntent: "选择下一步",
+      options: [
+        { id: "a", label: "补具体场景", description: "加入真实场景。", impact: "让文章更具体。", kind: "explore" },
+        { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
+        { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
+      ],
+    };
     const fakeAgent = {
-      generate: vi.fn(async () => ({
-        output: {
-          roundIntent: "选择下一步",
-          options: [
-            { id: "a", label: "补具体场景", description: "加入真实场景。", impact: "让文章更具体。", kind: "explore" },
-            { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
-            { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
-          ],
-        }
+      generate: vi.fn(),
+      stream: vi.fn(async () => ({
+        output: Promise.resolve(finalObject)
       }))
     };
 
     await expect(
-      generateTreeOptions({
+      streamTreeOptions({
         parts: directorParts,
         memory: { resource: "root", thread: "session-1" },
         treeOptionsAgent: fakeAgent
@@ -514,11 +737,10 @@ describe("tree director compatibility generators", () => {
       options: [{ id: "a", label: "补具体场景" }, { id: "b", label: "压缩表达" }, { id: "c", label: "检查发布" }]
     });
 
-    expect(fakeAgent.generate).toHaveBeenCalledWith(
+    expect(fakeAgent.stream).toHaveBeenCalledWith(
       directorParts.messages,
       expect.objectContaining({
-        memory: { resource: "root", thread: "session-1" },
-        structuredOutput: expect.objectContaining({ schema: expect.anything() })
+        memory: { resource: "root", thread: "session-1" }
       })
     );
   });
@@ -533,7 +755,8 @@ describe("tree director compatibility generators", () => {
       ],
     };
     const fakeAgent = {
-      generate: vi
+      generate: vi.fn(),
+      stream: vi
         .fn()
         .mockResolvedValueOnce({
           object: {
@@ -545,14 +768,14 @@ describe("tree director compatibility generators", () => {
     };
 
     await expect(
-      generateTreeOptions({
+      streamTreeOptions({
         parts: directorParts,
         treeOptionsAgent: fakeAgent
       })
     ).resolves.toEqual(finalObject);
 
-    expect(fakeAgent.generate).toHaveBeenCalledTimes(2);
-    const retryMessages = fakeAgent.generate.mock.calls[1]?.[0] as Array<{ content: string; role: string }>;
+    expect(fakeAgent.stream).toHaveBeenCalledTimes(2);
+    const retryMessages = fakeAgent.stream.mock.calls[1]?.[0] as Array<{ content: string; role: string }>;
     expect(retryMessages.at(-1)).toEqual(
       expect.objectContaining({
         role: "user",
@@ -752,19 +975,21 @@ describe("tree director compatibility generators", () => {
     expect(progressEvents).toEqual([
       { delta: "先找外部参考。", accumulatedText: "先找外部参考。" },
       {
-        delta: "\n[工具] 调用 run_skill_command：xiaohongshu-skills search-feeds --keyword 青岛旅游攻略",
-        accumulatedText:
-          "先找外部参考。\n[工具] 调用 run_skill_command：xiaohongshu-skills search-feeds --keyword 青岛旅游攻略"
+        delta: "\n[工具] 调用 run_skill_command",
+        accumulatedText: "先找外部参考。\n[工具] 调用 run_skill_command"
       },
       {
-        delta: "\n[工具] run_skill_command 完成：ok=true, exitCode=0, 找到 3 篇青岛旅行攻略。",
-        accumulatedText:
-          "先找外部参考。\n[工具] 调用 run_skill_command：xiaohongshu-skills search-feeds --keyword 青岛旅游攻略\n[工具] run_skill_command 完成：ok=true, exitCode=0, 找到 3 篇青岛旅行攻略。"
+        delta: "\n[工具] run_skill_command 完成",
+        accumulatedText: "先找外部参考。\n[工具] 调用 run_skill_command\n[工具] run_skill_command 完成"
       }
     ]);
+    const visibleProgress = progressEvents.map((event) => event.accumulatedText).join("\n");
+    expect(visibleProgress).not.toContain("青岛旅游攻略");
+    expect(visibleProgress).not.toContain("找到 3 篇");
+    expect(visibleProgress).not.toContain("xiaohongshu-skills");
   });
 
-  it("streams tool-call argument deltas while the model is preparing a skill command", async () => {
+  it("hides tool-call argument deltas while the model is preparing a skill command", async () => {
     const runSkillCommand = {
       id: "run_skill_command",
       description: "Run an installed skill command.",
@@ -829,11 +1054,13 @@ describe("tree director compatibility generators", () => {
     ).resolves.toMatchObject({ options: finalObject.options });
 
     expect(progressEvents.map((event) => event.delta)).toEqual([
-      "\n[工具] 准备调用 run_skill_command：",
-      '{"skillName":"xiaohongshu-skills",',
-      '"subcommand":"search-feeds"}',
-      "\n[工具] 调用 run_skill_command：xiaohongshu-skills search-feeds --keyword 青岛旅游攻略"
+      "\n[工具] 准备调用 run_skill_command",
+      "\n[工具] 调用 run_skill_command"
     ]);
+    const visibleProgress = progressEvents.map((event) => event.accumulatedText).join("\n");
+    expect(visibleProgress).not.toContain("xiaohongshu-skills");
+    expect(visibleProgress).not.toContain("search-feeds");
+    expect(visibleProgress).not.toContain("青岛旅游攻略");
   });
 
   it("streams tool-phase text deltas as visible thinking progress", async () => {
@@ -898,16 +1125,16 @@ describe("tree director compatibility generators", () => {
     expect(progressEvents).toEqual([
       { delta: "先看已有搜索结果是否够用。", accumulatedText: "先看已有搜索结果是否够用。" },
       {
-        delta: "\n[工具] 调用 run_skill_command：xiaohongshu-skills search-feeds --keyword 青岛旅游攻略",
-        accumulatedText:
-          "先看已有搜索结果是否够用。\n[工具] 调用 run_skill_command：xiaohongshu-skills search-feeds --keyword 青岛旅游攻略"
+        delta: "\n[工具] 调用 run_skill_command",
+        accumulatedText: "先看已有搜索结果是否够用。\n[工具] 调用 run_skill_command"
       },
       {
         delta: "\n搜索后开始避开常见角度。",
-        accumulatedText:
-          "先看已有搜索结果是否够用。\n[工具] 调用 run_skill_command：xiaohongshu-skills search-feeds --keyword 青岛旅游攻略\n搜索后开始避开常见角度。"
+        accumulatedText: "先看已有搜索结果是否够用。\n[工具] 调用 run_skill_command\n搜索后开始避开常见角度。"
       }
     ]);
+    const visibleProgress = progressEvents.map((event) => event.accumulatedText).join("\n");
+    expect(visibleProgress).not.toContain("青岛旅游攻略");
     expect(stream).toHaveBeenCalledTimes(1);
     expect(generate).not.toHaveBeenCalled();
   });
@@ -1111,7 +1338,7 @@ describe("tree director compatibility generators", () => {
     expect(visibleProgress).not.toContain("description");
   });
 
-  it("streams non-zero skill command output details even when stderr is empty", async () => {
+  it("hides non-zero skill command output details from visible progress", async () => {
     const finalObject = {
       roundIntent: "选择下一步",
       options: [
@@ -1154,11 +1381,13 @@ describe("tree director compatibility generators", () => {
 
     expect(progressEvents).toEqual([
       {
-        delta: "\n[工具] run_skill_command 失败：ok=false, exitCode=1, Browser gateway unavailable. Run login first.",
-        accumulatedText:
-          "\n[工具] run_skill_command 失败：ok=false, exitCode=1, Browser gateway unavailable. Run login first."
+        delta: "\n[工具] run_skill_command 失败",
+        accumulatedText: "\n[工具] run_skill_command 失败"
       }
     ]);
+    const visibleProgress = progressEvents.map((event) => event.accumulatedText).join("\n");
+    expect(visibleProgress).not.toContain("Browser gateway unavailable");
+    expect(visibleProgress).not.toContain("exitCode=1");
   });
 
   it("recovers DeepSeek Anthropic tool-input wrapped structured options from Mastra validation errors", async () => {
@@ -1282,6 +1511,44 @@ describe("tree director compatibility generators", () => {
     expect(fakeAgent.generate).not.toHaveBeenCalled();
   });
 
+  it("rejects runtime option generation when the agent cannot stream", async () => {
+    const runSkillCommand = {
+      id: "run_skill_command",
+      description: "Run an installed skill command.",
+      execute: vi.fn()
+    };
+    const generate = vi.fn(async () => ({
+      object: {
+        roundIntent: "选择下一步",
+        options: [
+          { id: "a", label: "补具体场景", description: "加入真实场景。", impact: "让文章更具体。", kind: "explore" },
+          { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
+          { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
+        ],
+      }
+    }));
+    mocks.createSkillRuntimeTools.mockResolvedValueOnce({
+      toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
+      tools: { run_skill_command: runSkillCommand }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream: vi.fn(),
+        generate
+      };
+    });
+
+    await expect(
+      streamTreeOptions({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" }
+      })
+    ).rejects.toThrow("Tree options generation requires a streaming agent.");
+
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   it("runs runtime tools and final structured output in one ReAct stream", async () => {
     const runSkillCommand = {
       id: "run_skill_command",
@@ -1336,6 +1603,24 @@ describe("tree director compatibility generators", () => {
       roundIntent: finalObject.roundIntent,
       options: finalObject.options
     });
+    expect(result).toHaveProperty(
+      "agentMessages",
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "tool",
+          content: expect.arrayContaining([
+            expect.objectContaining({
+              toolName: "run_skill_command",
+              output: expect.objectContaining({
+                value: expect.objectContaining({
+                  stdout: expect.stringContaining("青岛三天两晚攻略")
+                })
+              })
+            })
+          ])
+        })
+      ])
+    );
     expect(result).not.toHaveProperty("memoryObservation");
 
     expect(stream).toHaveBeenCalledWith(
@@ -1436,6 +1721,110 @@ describe("tree director compatibility generators", () => {
     expect(mocks.agentConstructor).toHaveBeenCalledWith(
       expect.objectContaining({
         instructions: expect.stringContaining("最终目标就是调用 submit_tree_options 完成本轮澄清选项任务")
+      })
+    );
+    const streamOptions = (stream.mock.calls as unknown as Array<[unknown, Record<string, unknown>]>)[0]?.[1];
+    expect(streamOptions).toEqual(
+      expect.not.objectContaining({
+        structuredOutput: expect.anything()
+      })
+    );
+    expect(partials).toContainEqual(finalObject);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("accepts runtime final next-step decisions only through the submit_tree_next_step tool", async () => {
+    const runSkillCommand = {
+      id: "run_skill_command",
+      description: "Run an installed skill command.",
+      execute: vi.fn()
+    };
+    const finalObject = {
+      action: "options",
+      roundIntent: "你想从哪个角度评价这几条微博？",
+      options: [
+        { label: "平台视角", description: "分析转发策略背后的平台表达边界。", impact: "后续判断更有结构。" },
+        { label: "用户视角", description: "写成一个普通用户刷到后的观察。", impact: "更轻、更像随手发。" },
+        { label: "信息流视角", description: "讨论只转发不原创的信息分发模式。", impact: "概念更完整。" }
+      ]
+    };
+    const stream = vi.fn(async () => ({
+      fullStream: async function* () {
+        yield {
+          type: "tool-result",
+          payload: {
+            toolCallId: "tool-1",
+            toolName: "run_skill_command",
+            result: {
+              exitCode: 0,
+              ok: true,
+              stdout: JSON.stringify({ statuses: [{ text: "转发微博内容" }] })
+            }
+          }
+        };
+        yield {
+          type: "tool-call-streaming-start",
+          payload: {
+            toolCallId: "submit-delta-1",
+            toolName: "submit_tree_next_step"
+          }
+        };
+        yield {
+          type: "tool-call-delta",
+          payload: {
+            toolCallId: "submit-delta-1",
+            toolName: "submit_tree_next_step",
+            argsTextDelta: '{"'
+          }
+        };
+        yield {
+          type: "tool-call",
+          payload: {
+            toolCallId: "submit-1",
+            toolName: "submit_tree_next_step",
+            args: finalObject
+          }
+        };
+      },
+      object: Promise.resolve(undefined)
+    }));
+    const generate = vi.fn();
+    mocks.createSkillRuntimeTools.mockResolvedValueOnce({
+      toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
+      tools: { run_skill_command: runSkillCommand }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate
+      };
+    });
+    const partials: unknown[] = [];
+
+    await expect(
+      streamTreeNextStep({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" },
+        onPartialObject: (partial) => partials.push(partial)
+      })
+    ).resolves.toMatchObject({
+      action: "options",
+      roundIntent: finalObject.roundIntent,
+      options: [
+        { id: "a", label: "平台视角", kind: "explore" },
+        { id: "b", label: "用户视角", kind: "deepen" },
+        { id: "c", label: "信息流视角", kind: "reframe" }
+      ]
+    });
+
+    expect(mocks.agentConstructor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: expect.stringContaining("submit_tree_next_step"),
+        tools: expect.objectContaining({
+          run_skill_command: runSkillCommand,
+          submit_tree_next_step: expect.anything()
+        })
       })
     );
     const streamOptions = (stream.mock.calls as unknown as Array<[unknown, Record<string, unknown>]>)[0]?.[1];

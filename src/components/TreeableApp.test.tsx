@@ -279,6 +279,7 @@ const finishedState = {
     ],
     selectedOptionId: null,
     foldedOptions: [],
+    agentMessages: [],
     createdAt: "2026-04-24T00:00:00.000Z"
   },
   currentDraft: { title: "Finished", body: "Ready", hashtags: ["#AI"], imagePrompt: "Tree" },
@@ -311,6 +312,13 @@ function ndjsonResponse(chunks: string[]) {
     json: async () => {
       throw new Error("stream response should not call json");
     }
+  };
+}
+
+function jsonResponse(data: unknown) {
+  return {
+    ok: true,
+    json: async () => data
   };
 }
 
@@ -777,6 +785,12 @@ describe("TreeableApp", () => {
   });
 
   it("starts the first generation immediately after the seed is saved", async () => {
+    const createdState = {
+      ...finishedState,
+      currentNode: { ...finishedState.currentNode, options: [] },
+      selectedPath: [],
+      treeNodes: []
+    };
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
@@ -797,6 +811,7 @@ describe("TreeableApp", () => {
           }
         })
       })
+      .mockResolvedValueOnce(jsonResponse({ state: createdState }))
       .mockResolvedValueOnce(optionsNdjsonResponse(finishedState));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -822,6 +837,7 @@ describe("TreeableApp", () => {
     expect(JSON.parse(fetchMock.mock.calls[2][1].body as string)).not.toHaveProperty("initialOptionMode");
     expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/sessions", expect.objectContaining({ method: "POST" }));
     expect(JSON.parse(fetchMock.mock.calls[3][1].body as string).enabledSkillIds).toEqual(["system-analysis"]);
+    expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/sessions/session-1/options", expect.objectContaining({ method: "POST" }));
   });
 
   it("lets the user start over with a new seed", async () => {
@@ -862,13 +878,20 @@ describe("TreeableApp", () => {
       enabledSkillIds: ["system-no-hype-title"],
       enabledSkills: [skills[1]]
     };
+    const createdState = {
+      ...currentSettingsState,
+      currentNode: { ...currentSettingsState.currentNode, options: [] },
+      selectedPath: [],
+      treeNodes: []
+    };
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory: rootMemoryWithRequest }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ state: currentSettingsState }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: currentSettingsState }) });
+      .mockResolvedValueOnce(jsonResponse({ state: createdState }))
+      .mockResolvedValueOnce(optionsNdjsonResponse(currentSettingsState));
     vi.stubGlobal("fetch", fetchMock);
 
     render(<TreeableApp />);
@@ -894,6 +917,7 @@ describe("TreeableApp", () => {
       );
       expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/sessions", expect.objectContaining({ method: "POST" }));
       expect(JSON.parse(fetchMock.mock.calls[4][1].body as string).enabledSkillIds).toEqual(["system-no-hype-title"]);
+      expect(fetchMock).toHaveBeenNthCalledWith(6, "/api/sessions/session-1/options", expect.objectContaining({ method: "POST" }));
     });
   });
 
@@ -1662,6 +1686,35 @@ describe("TreeableApp", () => {
     });
     expect(JSON.parse(fetchMock.mock.calls[3][1].body as string).appliesTo).toBe("both");
     expect(screen.getByRole("article", { name: "小红书风格" })).toBeInTheDocument();
+  });
+
+  it("hides skill repository import controls from member users", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: activeState }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <TreeableApp
+        currentUser={{
+          id: "user-2",
+          username: "xiaolin",
+          displayName: "Xiaolin",
+          role: "member",
+          isAdmin: false
+        }}
+      />
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "1 个技能" }));
+    const skillPanel = screen.getByRole("complementary", { name: "本作品技能" });
+    await userEvent.click(within(skillPanel).getByRole("button", { name: "管理技能库" }));
+
+    expect(screen.getByRole("complementary", { name: "技能库" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Skill GitHub URL" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "导入" })).not.toBeInTheDocument();
   });
 
   it("shows a generated branch draft before requesting missing next options", async () => {

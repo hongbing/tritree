@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
 import { type DraftSummary } from "@/lib/domain";
+import { apiPath } from "@/lib/web-base-path";
 
 type DraftsResponse = {
   drafts?: DraftSummary[];
@@ -40,7 +41,7 @@ export function DraftManagementPanel() {
     async function loadDrafts() {
       setIsLoading(true);
       try {
-        const response = await fetch("/api/sessions?view=active");
+        const response = await fetch(apiPath("/api/sessions?view=active"));
         const data = await readJson(response);
         if (!response.ok) {
           setMessage(data.error ?? "草稿加载失败。");
@@ -81,7 +82,7 @@ export function DraftManagementPanel() {
 
     setBusyDraftId(draftId);
     try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(draftId)}`, {
+      const response = await fetch(apiPath(`/api/sessions/${encodeURIComponent(draftId)}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title })
@@ -105,7 +106,7 @@ export function DraftManagementPanel() {
     setMessage("");
     setBusyDraftId(draftId);
     try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(draftId)}`, {
+      const response = await fetch(apiPath(`/api/sessions/${encodeURIComponent(draftId)}`), {
         method: "DELETE"
       });
       const data = await readJson(response);

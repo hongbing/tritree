@@ -8,6 +8,7 @@ import { POST as IMPORT_POST } from "./import/route";
 const mocks = vi.hoisted(() => ({
   getRepository: vi.fn(),
   installSkillFromGitHub: vi.fn(),
+  requireAdminUser: vi.fn(),
   requireCurrentUser: vi.fn()
 }));
 
@@ -29,6 +30,7 @@ vi.mock("@/lib/auth/current-user", async () => {
   const actual = await vi.importActual<typeof import("@/lib/auth/current-user")>("@/lib/auth/current-user");
   return {
     ...actual,
+    requireAdminUser: mocks.requireAdminUser,
     requireCurrentUser: mocks.requireCurrentUser
   };
 });
@@ -46,7 +48,9 @@ beforeEach(() => {
   delete process.env[STYLE_PROFILE_URL_ENV];
   mocks.getRepository.mockReset();
   mocks.installSkillFromGitHub.mockReset();
+  mocks.requireAdminUser.mockReset();
   mocks.requireCurrentUser.mockReset();
+  mocks.requireAdminUser.mockResolvedValue(currentUser);
   mocks.requireCurrentUser.mockResolvedValue(currentUser);
 });
 
@@ -207,5 +211,20 @@ describe("/api/skills", () => {
     expect(data.skills[0].title).toBe("xiaohongshu-skills");
     expect(data.installPath).toBe("/repo/.tritree/skills/xiaohongshu-skills");
     expect(data.installPaths).toEqual(["/repo/.tritree/skills/xiaohongshu-skills", "/repo/.tritree/skills/xhs-title"]);
+  });
+
+  it("requires an administrator to import skill repositories", async () => {
+    mocks.requireAdminUser.mockRejectedValue(new AuthApiError(403, "没有权限。"));
+
+    const response = await IMPORT_POST(
+      new Request("http://test.local/api/skills/import", {
+        method: "POST",
+        body: JSON.stringify({ sourceUrl: "https://github.com/autoclaw-cc/xiaohongshu-skills" })
+      })
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "没有权限。" });
+    expect(mocks.installSkillFromGitHub).not.toHaveBeenCalled();
   });
 });

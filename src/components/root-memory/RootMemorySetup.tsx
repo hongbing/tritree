@@ -15,6 +15,7 @@ import {
   type SkillUpsert
 } from "@/lib/domain";
 import { listArtifactTypes } from "@/lib/artifacts";
+import { apiPath } from "@/lib/web-base-path";
 
 const defaultPreferences = {
   domains: ["创作"],
@@ -137,7 +138,7 @@ export function RootMemorySetup({
     setRequestOptionMessage("");
 
     try {
-      const response = await fetch("/api/creation-request-options", {
+      const response = await fetch(apiPath("/api/creation-request-options"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ label })
@@ -163,7 +164,7 @@ export function RootMemorySetup({
     setRequestOptionMessage("");
 
     try {
-      const response = await fetch(`/api/creation-request-options/${option.id}`, {
+      const response = await fetch(apiPath(`/api/creation-request-options/${option.id}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ label })
@@ -184,7 +185,7 @@ export function RootMemorySetup({
     setRequestOptionMessage("");
 
     try {
-      const response = await fetch(`/api/creation-request-options/${option.id}`, { method: "DELETE" });
+      const response = await fetch(apiPath(`/api/creation-request-options/${option.id}`), { method: "DELETE" });
       const data = (await response.json().catch(() => null)) as { error?: string } | null;
       if (!response.ok) throw new Error(data?.error ?? "快捷要求删除失败。");
       setCreationRequestOptions((options) => {
@@ -207,7 +208,7 @@ export function RootMemorySetup({
     setRequestOptionMessage("");
 
     try {
-      const response = await fetch("/api/creation-request-options", {
+      const response = await fetch(apiPath("/api/creation-request-options"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderedIds: sortedOptions.map((option) => option.id) })
@@ -225,7 +226,7 @@ export function RootMemorySetup({
     setRequestOptionMessage("");
 
     try {
-      const response = await fetch("/api/creation-request-options/reset", { method: "POST" });
+      const response = await fetch(apiPath("/api/creation-request-options/reset"), { method: "POST" });
       const data = (await response.json()) as { options?: CreationRequestOption[]; error?: string };
       if (!response.ok || !data.options) throw new Error(data.error ?? "快捷要求重置失败。");
       setCreationRequestOptions(data.options);

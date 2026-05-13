@@ -468,62 +468,83 @@ describe("SkillSchema", () => {
     ]);
   });
 
-  it("assigns default system skills to writing, review, or shared effect groups", () => {
-    expect(DEFAULT_SYSTEM_SKILLS.find((skill) => skill.id === "system-content-workflow")?.appliesTo).toBe("both");
-    expect(DEFAULT_SYSTEM_SKILLS.find((skill) => skill.id === "system-analysis")?.appliesTo).toBe("editor");
-    expect(DEFAULT_SYSTEM_SKILLS.find((skill) => skill.id === "system-no-hype-title")?.appliesTo).toBe("both");
-    expect(DEFAULT_SYSTEM_SKILLS.find((skill) => skill.id === "system-logic-review")?.appliesTo).toBe("editor");
-    expect(DEFAULT_SYSTEM_SKILLS.find((skill) => skill.id === "system-natural-short-sentences")?.appliesTo).toBe(
-      "writer"
-    );
+  it("assigns the merged system skills to writing and review effect groups", () => {
+    expect(DEFAULT_SYSTEM_SKILLS.find((skill) => skill.id === "system-writer")?.appliesTo).toBe("writer");
+    expect(DEFAULT_SYSTEM_SKILLS.find((skill) => skill.id === "system-reviewer")?.appliesTo).toBe("editor");
   });
 
-  it("ships default enabled creator decision skills", () => {
-    expect(DEFAULT_SYSTEM_SKILLS.filter((skill) => skill.defaultEnabled).map((skill) => skill.title)).toEqual([
-      "内容创作流程",
-      "理清主线",
-      "组织素材",
-      "选择角度",
-      "发布准备",
-      "明确读者",
-      "逻辑链审查",
-      "读者进入感",
-      "发布前收口"
+  it("ships only the merged writer and reviewer skills as default enabled system skills", () => {
+    expect(DEFAULT_SYSTEM_SKILLS.filter((skill) => !skill.isArchived).map((skill) => skill.id)).toEqual([
+      "system-writer",
+      "system-reviewer"
     ]);
-    expect(
-      DEFAULT_SYSTEM_SKILLS.filter((skill) => skill.isArchived).map((skill) => skill.title)
-    ).toEqual(["换风格", "压缩", "重组结构", "定读者"]);
-    expect(DEFAULT_SYSTEM_SKILLS.find((skill) => skill.category === "约束")?.defaultEnabled).toBe(false);
+    expect(DEFAULT_SYSTEM_SKILLS.filter((skill) => skill.defaultEnabled).map((skill) => skill.id)).toEqual([
+      "system-writer",
+      "system-reviewer"
+    ]);
+
+    const archivedLegacySkills = DEFAULT_SYSTEM_SKILLS.filter((skill) =>
+      [
+        "system-content-workflow",
+        "system-analysis",
+        "system-expand",
+        "system-rewrite",
+        "system-polish",
+        "system-correct",
+        "system-style-shift",
+        "system-compress",
+        "system-restructure",
+        "system-audience",
+        "system-logic-review",
+        "system-reader-entry",
+        "system-final-pass",
+        "system-concrete-examples",
+        "system-no-hype-title",
+        "system-claim-risk",
+        "system-title-opening-promise",
+        "system-natural-short-sentences"
+      ].includes(skill.id)
+    ).map((skill) => ({ id: skill.id, defaultEnabled: skill.defaultEnabled, isArchived: skill.isArchived }));
+
+    expect(archivedLegacySkills).toHaveLength(18);
+    expect(archivedLegacySkills).toEqual(expect.arrayContaining([
+      { id: "system-content-workflow", defaultEnabled: false, isArchived: true },
+      { id: "system-analysis", defaultEnabled: false, isArchived: true },
+      { id: "system-expand", defaultEnabled: false, isArchived: true },
+      { id: "system-rewrite", defaultEnabled: false, isArchived: true },
+      { id: "system-polish", defaultEnabled: false, isArchived: true },
+      { id: "system-correct", defaultEnabled: false, isArchived: true },
+      { id: "system-style-shift", defaultEnabled: false, isArchived: true },
+      { id: "system-compress", defaultEnabled: false, isArchived: true },
+      { id: "system-restructure", defaultEnabled: false, isArchived: true },
+      { id: "system-audience", defaultEnabled: false, isArchived: true },
+      { id: "system-logic-review", defaultEnabled: false, isArchived: true },
+      { id: "system-reader-entry", defaultEnabled: false, isArchived: true },
+      { id: "system-final-pass", defaultEnabled: false, isArchived: true },
+      { id: "system-concrete-examples", defaultEnabled: false, isArchived: true },
+      { id: "system-no-hype-title", defaultEnabled: false, isArchived: true },
+      { id: "system-claim-risk", defaultEnabled: false, isArchived: true },
+      { id: "system-title-opening-promise", defaultEnabled: false, isArchived: true },
+      { id: "system-natural-short-sentences", defaultEnabled: false, isArchived: true }
+    ]));
   });
 
-  it("keeps default enabled skill prompts as creator decision guidance", () => {
-    DEFAULT_SYSTEM_SKILLS.filter((skill) => skill.defaultEnabled).forEach((skill) => {
-      expect(skill.prompt).toContain("帮助创作者判断");
-      expect(skill.prompt).not.toContain("用于三选一");
-      expect(skill.prompt).not.toContain("不是");
-    });
-  });
+  it("keeps merged system prompts as creator decision guidance", () => {
+    const writer = DEFAULT_SYSTEM_SKILLS.find((skill) => skill.id === "system-writer");
+    const reviewer = DEFAULT_SYSTEM_SKILLS.find((skill) => skill.id === "system-reviewer");
 
-  it("puts content workflow and change intensity in a default skill", () => {
-    const workflowSkill = DEFAULT_SYSTEM_SKILLS.find((skill) => skill.id === "system-content-workflow");
+    expect(writer?.prompt).toContain("写作者");
+    expect(writer?.prompt).toContain("种子或零散想法");
+    expect(writer?.prompt).toContain("组织材料");
+    expect(writer?.prompt).toContain("自然、清楚");
+    expect(writer?.prompt).toContain("保留用户已经确认过的表达");
 
-    expect(workflowSkill?.defaultEnabled).toBe(true);
-    expect(workflowSkill?.prompt).toContain("种子或零散想法");
-    expect(workflowSkill?.prompt).toContain("半成稿");
-    expect(workflowSkill?.prompt).toContain("结构成稿");
-    expect(workflowSkill?.prompt).toContain("基本成稿");
-    expect(workflowSkill?.prompt).toContain("发布前");
-    expect(workflowSkill?.prompt).toContain("草稿越完整，改动越克制");
-    expect(workflowSkill?.prompt).toContain("有清楚主题、完整叙述链路、关键解释和自然收束");
-    expect(workflowSkill?.prompt).toContain("当任务是设计澄清问题和答案时");
-    expect(workflowSkill?.prompt).toContain("按当前内容的问题程度和后续生成收益排序");
-    expect(workflowSkill?.prompt).toContain("文案表达、断句和分段整理不受发布前阶段限制");
-    expect(workflowSkill?.prompt).toContain("可以把保留原意的表达优化作为答案");
-    expect(workflowSkill?.prompt).toContain("避免默认把所有答案都给重构、换角度、重写、扩写这类大改方向");
-    expect(workflowSkill?.prompt).not.toContain("应至少包含");
-    expect(workflowSkill?.prompt).not.toContain("下一步选项");
-    expect(workflowSkill?.prompt).not.toContain("用户手动编辑后");
-    expect(workflowSkill?.prompt).not.toContain("三项");
+    expect(reviewer?.prompt).toContain("审核者");
+    expect(reviewer?.prompt).toContain("一个问题和三个答案");
+    expect(reviewer?.prompt).toContain("主线");
+    expect(reviewer?.prompt).toContain("读者");
+    expect(reviewer?.prompt).toContain("逻辑断点");
+    expect(reviewer?.prompt).toContain("发布前");
   });
 
   it("keeps every default system skill valid for runtime parsing", () => {
@@ -564,6 +585,7 @@ describe("SessionStateSchema", () => {
       options: [option],
       selectedOptionId: null,
       foldedOptions: [],
+      agentMessages: [],
       createdAt: "2026-04-24T00:00:00.000Z"
     };
 
@@ -626,6 +648,5 @@ describe("SessionStateSchema", () => {
 
     expect(parsed.session.status).toBe("active");
     expect(parsed.session.artifactTypeId).toBe("prd");
-    expect(parsed.toolMemory).toBe("");
   });
 });

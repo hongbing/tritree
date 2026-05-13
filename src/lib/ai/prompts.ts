@@ -1,4 +1,4 @@
-import type { Skill } from "@/lib/domain";
+import type { AgentMessage, Skill } from "@/lib/domain";
 
 const DIRECTOR_BASE_SYSTEM_PROMPT = `
 You are a creative thinking partner for creators.
@@ -41,10 +41,7 @@ Preserve valuable material and user-authored wording according to selected skill
 使用日常、清楚、有作品感的表达，避开抽象隐喻、玄学化前缀或未解释的行业黑话。
 `.trim();
 
-export type DirectorMessage = {
-  content: string;
-  role: "assistant" | "user";
-};
+export type DirectorMessage = AgentMessage;
 
 export type DirectorInputParts = {
   artifactContext?: string;

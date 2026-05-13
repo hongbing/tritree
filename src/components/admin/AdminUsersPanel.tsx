@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
+import { apiPath } from "@/lib/web-base-path";
 
 type AdminUserView = {
   id: string;
@@ -66,7 +67,7 @@ export function AdminUsersPanel() {
   async function loadUsers() {
     setIsLoading(true);
     try {
-      const response = await fetch("/api/admin/users");
+      const response = await fetch(apiPath("/api/admin/users"));
       const data = await readJson(response);
       if (!response.ok) {
         setMessage(data.error ?? "用户管理失败。");
@@ -90,7 +91,7 @@ export function AdminUsersPanel() {
     setBusyAction("create");
 
     try {
-      const response = await fetch("/api/admin/users", {
+      const response = await fetch(apiPath("/api/admin/users"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -119,7 +120,7 @@ export function AdminUsersPanel() {
     setMessage("");
     setBusyAction(`${userId}:patch`);
     try {
-      const response = await fetch(`/api/admin/users/${userId}`, {
+      const response = await fetch(apiPath(`/api/admin/users/${userId}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -142,7 +143,7 @@ export function AdminUsersPanel() {
     setMessage("");
     setBusyAction(`${userId}:reset-password`);
     try {
-      const response = await fetch(`/api/admin/users/${userId}/reset-password`, {
+      const response = await fetch(apiPath(`/api/admin/users/${userId}/reset-password`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password })
@@ -166,7 +167,7 @@ export function AdminUsersPanel() {
     setMessage("");
     setBusyAction(`${userId}:bind-oidc`);
     try {
-      const response = await fetch(`/api/admin/users/${userId}/oidc-identities`, {
+      const response = await fetch(apiPath(`/api/admin/users/${userId}/oidc-identities`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form)
@@ -189,7 +190,7 @@ export function AdminUsersPanel() {
     setMessage("");
     setBusyAction(`${userId}:unbind-oidc:${identityId}`);
     try {
-      const response = await fetch(`/api/admin/users/${userId}/oidc-identities/${identityId}`, {
+      const response = await fetch(apiPath(`/api/admin/users/${userId}/oidc-identities/${identityId}`), {
         method: "DELETE"
       });
       const data = await readJson(response);

@@ -16,6 +16,7 @@ function mockLocationAssign() {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   Object.defineProperty(window, "location", {
     configurable: true,
     value: originalLocation
@@ -69,6 +70,28 @@ describe("SetupAdminForm", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await screen.findByRole("alert")).toHaveTextContent("两次输入的密码不一致。");
+  });
+
+  it("uses the configured web base path for setup and login URLs", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TRITREE_WEB_BASE_PATH", "/tritree");
+    const assign = mockLocationAssign();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        user: { id: "user-1", username: "awei", displayName: "Awei", role: "admin", isActive: true }
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SetupAdminForm />);
+
+    await userEvent.type(screen.getByLabelText("用户名"), "awei");
+    await userEvent.type(screen.getByLabelText("显示名称"), "Awei");
+    await userEvent.type(screen.getByLabelText("密码"), "password-123");
+    await userEvent.type(screen.getByLabelText("确认密码"), "password-123");
+    await userEvent.click(screen.getByRole("button", { name: "初始化管理员" }));
+
+    expect(fetchMock).toHaveBeenCalledWith("/tritree/api/setup-admin", expect.objectContaining({ method: "POST" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/tritree/login"));
   });
 
   it("displays server errors without redirecting", async () => {

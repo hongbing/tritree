@@ -711,6 +711,100 @@ button:disabled {
   justify-content: flex-end;
 }
 
+.style-profile-setup {
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 16px;
+}
+
+.style-profile-setup--expanded {
+  border-color: rgba(37, 99, 235, 0.42);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+}
+
+.style-profile-setup__header,
+.style-profile-setup__actions,
+.style-profile-setup__generate-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.style-profile-setup__summary {
+  color: #64748b;
+  font-size: 0.9rem;
+  margin: 4px 0 0;
+}
+
+.style-profile-setup__body {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.style-profile-setup__actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.style-profile-setup__samples,
+.style-profile-review label {
+  display: grid;
+  gap: 7px;
+}
+
+.style-profile-setup__samples span,
+.style-profile-review label span,
+.style-profile-review__save-mode legend {
+  color: #334155;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.style-profile-setup__samples textarea,
+.style-profile-review input,
+.style-profile-review select,
+.style-profile-review textarea {
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  border-radius: 8px;
+  color: #0f172a;
+  font: inherit;
+  padding: 10px 12px;
+}
+
+.style-profile-review {
+  border-top: 1px solid rgba(148, 163, 184, 0.24);
+  display: grid;
+  gap: 12px;
+  padding-top: 14px;
+}
+
+.style-profile-review__save-mode {
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 8px;
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 12px;
+}
+
+.style-profile-review__save-mode label {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.style-profile-setup__error {
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-radius: 8px;
+  color: #be123c;
+  margin: 0;
+  padding: 10px 12px;
+}
+
 .root-setup__skill-summary {
   min-height: 34px;
   display: flex;
@@ -3649,6 +3743,13 @@ button:disabled {
 
   .root-setup__skills-actions {
     justify-content: flex-start;
+  }
+
+  .style-profile-setup__header,
+  .style-profile-setup__actions,
+  .style-profile-setup__generate-row {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .draft-skill-panel__header {

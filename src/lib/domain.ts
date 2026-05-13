@@ -8,6 +8,27 @@ export const ArtifactTypeIdSchema = z.enum(ARTIFACT_TYPE_IDS);
 export const SkillCategorySchema = z.enum(["方向", "约束", "风格", "平台", "检查"]);
 export const SkillAppliesToSchema = z.enum(["writer", "editor", "both"]);
 export const MAX_SKILL_PROMPT_LENGTH = 100000;
+export const MERGED_SYSTEM_SKILL_IDS = ["system-writer", "system-reviewer"] as const;
+export const LEGACY_SYSTEM_SKILL_IDS = [
+  "system-content-workflow",
+  "system-analysis",
+  "system-expand",
+  "system-rewrite",
+  "system-polish",
+  "system-correct",
+  "system-style-shift",
+  "system-compress",
+  "system-restructure",
+  "system-audience",
+  "system-concrete-examples",
+  "system-no-hype-title",
+  "system-logic-review",
+  "system-reader-entry",
+  "system-claim-risk",
+  "system-title-opening-promise",
+  "system-final-pass",
+  "system-natural-short-sentences"
+] as const;
 
 export const SkillUpsertSchema = z.object({
   title: z.string().trim().min(1).max(40),
@@ -53,6 +74,26 @@ export const CreationRequestOptionSchema = CreationRequestOptionUpsertSchema.ext
 
 export const DEFAULT_SYSTEM_SKILLS = [
   {
+    id: "system-writer",
+    title: "系统写作者",
+    category: "风格",
+    description: "负责生成和改写草稿，控制改动幅度并保留创作者原意。",
+    prompt:
+      "你是写作者。负责把 seed、当前草稿、用户选择和已启用技能写成下一版草稿。先判断当前内容所处阶段：种子或零散想法阶段，可以大幅组织材料、补上下文、生成初稿骨架；半成稿阶段，可以补主线、调顺序、增加过渡，但要保留主要素材和语气；结构成稿阶段，优先做局部调整和小范围补齐；基本成稿阶段，保留原有结构、段落和主要句子，只做必要优化；发布前阶段，只做标题、话题、配图提示、错别字、风险表达、结尾收束等轻量整理。写作时要组织材料、补足原因链路、安排例子和过渡，必要时调整表达角度和读者进入方式。使用自然、清楚、不过度修饰的短句，减少套话、长定语、抽象形容和重复铺垫。当前内容优先，保留用户已经确认过的表达；草稿越完整，改动越克制；只有用户明确要求重构、换角度或大改方向时，才允许明显重写。",
+    appliesTo: "writer",
+    defaultEnabled: true
+  },
+  {
+    id: "system-reviewer",
+    title: "系统审核者",
+    category: "检查",
+    description: "负责诊断主线、读者、逻辑和发布前风险，并提出下一步选择。",
+    prompt:
+      "你是审核者。负责判断当前作品最需要创作者澄清、选择或推进什么，并把判断转成一个问题和三个答案。按当前内容的问题程度和后续生成收益排序，不要预设必须询问某一类问题。检查作品真正要表达的主线、写作动机、素材取舍、展开顺序、表达角度、目标读者和读者为什么在意。检查观点、例子、原因和结论之间是否有逻辑断点，例如缺少原因、例子支撑不足、从现象跳到结论或前后判断不一致。检查读者能否快速进入作品：开头是否交代读者处境，第一屏是否让读者知道这件事和自己有什么关系，正文是否有对象感。识别事实不确定、证据不足、过度绝对、承诺过大或容易误导的表达。若主线、结构和关键解释基本成立，优先给标题、开头、结尾、话题、配图提示、错别字、风险表达和小范围节奏调整等发布前收口建议，避免继续给大改、重写或换角度建议。文案表达、断句和分段整理不受发布前阶段限制；如果表达本身已经承载主要信息，只是长段、口语散、层次不清或局部不顺，可以给保留原意的表达优化答案。",
+    appliesTo: "editor",
+    defaultEnabled: true
+  },
+  {
     id: "system-content-workflow",
     title: "内容创作流程",
     category: "方向",
@@ -60,7 +101,8 @@ export const DEFAULT_SYSTEM_SKILLS = [
     prompt:
       "帮助创作者判断当前内容处于哪种创作阶段，并据此控制 AI 介入强度。种子或零散想法阶段：只有概念、情绪、判断或材料清单，可以大幅组织材料、补上下文、生成初稿骨架。半成稿阶段：已有若干段落或素材，但主线、顺序、读者对象、开头结尾还不稳，可以中等调整，补主线、调顺序、增加过渡，但要保留主要素材和语气。结构成稿阶段：已经有开头、展开、解释或例子，但局部逻辑、转折、段落节奏仍可优化，优先做局部调整和小范围补齐。基本成稿阶段：有清楚主题、完整叙述链路、关键解释和自然收束，进入成稿保护，保留原有结构、段落和主要句子，只做必要的局部优化。当任务是设计澄清问题和答案时，按当前内容的问题程度和后续生成收益排序，不要预设必须询问某一类问题；文案表达、断句和分段整理不受发布前阶段限制，如果表达本身已经承载了主要信息，只是长段、口语散、层次不清或局部不顺，可以把保留原意的表达优化作为答案；如果主线、读者、事实或结构问题更严重，再优先给澄清、补信息、调整角度或重组方向；避免默认把所有答案都给重构、换角度、重写、扩写这类大改方向。发布前阶段：只做标题、话题、配图提示、错别字、风险表达、结尾收束等轻量整理。当前内容优先，保留用户已经确认过的表达。草稿越完整，改动越克制；用户表达越明确，保留越多；只有用户明确要求重构、换角度或大改方向时，才允许明显重写。",
     appliesTo: "both",
-    defaultEnabled: true
+    defaultEnabled: false,
+    isArchived: true
   },
   {
     id: "system-analysis",
@@ -69,7 +111,8 @@ export const DEFAULT_SYSTEM_SKILLS = [
     description: "判断作品真正要表达什么。",
     prompt: "帮助创作者判断这篇作品最重要的表达主线、写作动机和取舍边界。优先关注核心意思、内容重心和后续分叉方向。",
     appliesTo: "editor",
-    defaultEnabled: true
+    defaultEnabled: false,
+    isArchived: true
   },
   {
     id: "system-expand",
@@ -78,7 +121,8 @@ export const DEFAULT_SYSTEM_SKILLS = [
     description: "梳理可用材料和展开顺序。",
     prompt: "帮助创作者判断哪些素材应该保留、补足、合并或前置。优先关注例子、上下文、原因链路、对比关系和过渡位置。",
     appliesTo: "editor",
-    defaultEnabled: true
+    defaultEnabled: false,
+    isArchived: true
   },
   {
     id: "system-rewrite",
@@ -87,7 +131,8 @@ export const DEFAULT_SYSTEM_SKILLS = [
     description: "选择最适合当前作品的表达角度。",
     prompt: "帮助创作者判断这篇作品适合从故事、观点、产品理念、个人动机或读者问题中的哪个角度推进。优先关注表达目标和读者进入方式。",
     appliesTo: "editor",
-    defaultEnabled: true
+    defaultEnabled: false,
+    isArchived: true
   },
   {
     id: "system-polish",
@@ -96,7 +141,8 @@ export const DEFAULT_SYSTEM_SKILLS = [
     description: "判断作品是否接近发布，以及还缺什么包装。",
     prompt: "帮助创作者判断标题、开头、结尾、话题、配图提示和轻量校对是否已经足够支撑发布。优先关注作品进入发布前还需要补齐的关键一步。",
     appliesTo: "editor",
-    defaultEnabled: true
+    defaultEnabled: false,
+    isArchived: true
   },
   {
     id: "system-correct",
@@ -105,7 +151,8 @@ export const DEFAULT_SYSTEM_SKILLS = [
     description: "判断作品主要写给谁、读者为什么在意。",
     prompt: "帮助创作者判断目标读者、读者处境、读者关心的问题和表达边界。优先关注作品是否有对象感，以及读者为什么愿意继续看。",
     appliesTo: "editor",
-    defaultEnabled: true
+    defaultEnabled: false,
+    isArchived: true
   },
   {
     id: "system-style-shift",
@@ -154,7 +201,8 @@ export const DEFAULT_SYSTEM_SKILLS = [
     description: "要求输出优先使用具体场景和例子。",
     prompt: "帮助创作者判断当前作品是否需要更多可感知的场景、动作、细节或例子。所有输出都要尽量包含具体场景、真实动作、可感知细节或例子，避免只给抽象观点。",
     appliesTo: "writer",
-    defaultEnabled: false
+    defaultEnabled: false,
+    isArchived: true
   },
   {
     id: "system-no-hype-title",
@@ -163,7 +211,8 @@ export const DEFAULT_SYSTEM_SKILLS = [
     description: "避免夸张、惊悚、标题党表达。",
     prompt: "帮助创作者判断标题、开头或正文的表达边界。标题和正文都要保持可信、克制、清楚。",
     appliesTo: "both",
-    defaultEnabled: false
+    defaultEnabled: false,
+    isArchived: true
   },
   {
     id: "system-logic-review",
@@ -173,7 +222,8 @@ export const DEFAULT_SYSTEM_SKILLS = [
     prompt:
       "帮助创作者判断当前作品的观点、例子、原因和结论是否连得上。提出建议时，要指出最影响理解的逻辑断点，例如缺少原因、例子支撑不足、从现象跳到结论或前后判断不一致，并把它转成可选择的下一步写作方向。",
     appliesTo: "editor",
-    defaultEnabled: true
+    defaultEnabled: false,
+    isArchived: true
   },
   {
     id: "system-reader-entry",
@@ -183,7 +233,8 @@ export const DEFAULT_SYSTEM_SKILLS = [
     prompt:
       "帮助创作者判断目标读者能否快速进入作品：开头是否交代了读者处境，第一屏是否让读者知道这件事和自己有什么关系，正文是否有对象感。提出建议时，要把读者卡住的位置说清楚，并转成下一步可选方向。",
     appliesTo: "editor",
-    defaultEnabled: true
+    defaultEnabled: false,
+    isArchived: true
   },
   {
     id: "system-claim-risk",
@@ -193,7 +244,8 @@ export const DEFAULT_SYSTEM_SKILLS = [
     prompt:
       "帮助创作者识别事实不确定、证据不足、过度绝对、承诺过大或容易误导的表达。写作时应降低不确定内容的语气，必要时改成个人观察、条件判断或需要补充证据的说法；提出建议时应指出风险表达会造成什么误解。",
     appliesTo: "both",
-    defaultEnabled: false
+    defaultEnabled: false,
+    isArchived: true
   },
   {
     id: "system-title-opening-promise",
@@ -203,7 +255,8 @@ export const DEFAULT_SYSTEM_SKILLS = [
     prompt:
       "帮助创作者判断标题和开头是否承诺过大、过虚或和正文重心不一致。提出建议时，要说明标题、开头和正文之间的落差，并给出收紧承诺、补正文兑现或重写开头的方向。",
     appliesTo: "editor",
-    defaultEnabled: false
+    defaultEnabled: false,
+    isArchived: true
   },
   {
     id: "system-final-pass",
@@ -213,7 +266,8 @@ export const DEFAULT_SYSTEM_SKILLS = [
     prompt:
       "帮助创作者判断作品是否已经接近发布。若主线、结构和关键解释基本成立，提出建议时优先给标题、结尾、话题、配图提示、错别字、风险表达和小范围节奏调整等轻量收尾方向，避免继续给大改、重写或换角度建议。",
     appliesTo: "editor",
-    defaultEnabled: true
+    defaultEnabled: false,
+    isArchived: true
   },
   {
     id: "system-natural-short-sentences",
@@ -222,7 +276,8 @@ export const DEFAULT_SYSTEM_SKILLS = [
     description: "让草稿更自然、清楚、少修饰。",
     prompt: "写作时使用更自然、清楚、不过度修饰的短句。优先减少套话、长定语、抽象形容和重复铺垫，让句子更像真实的人在表达，但不要把内容改得幼稚或口水化。",
     appliesTo: "writer",
-    defaultEnabled: false
+    defaultEnabled: false,
+    isArchived: true
   }
 ] satisfies Array<z.input<typeof SkillUpsertSchema> & { id: string }>;
 

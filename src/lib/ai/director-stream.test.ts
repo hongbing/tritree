@@ -227,7 +227,6 @@ describe("streamDirectorNextStep", () => {
         { id: "b", label: "个人迭代", description: "讲审美变化。", impact: "更有人味。", kind: "deepen" },
         { id: "c", label: "设计哲学", description: "讲约束取舍。", impact: "更系统。", kind: "reframe" }
       ],
-      memoryObservation: "需要确认叙事角度。"
     };
     mastraMocks.streamTreeNextStep.mockImplementation(async ({ onPartialObject }) => {
       onPartialObject({
@@ -281,7 +280,6 @@ describe("streamDirectorDraft", () => {
     const output = {
       roundIntent: "扩写",
       draft: { title: "新标题", body: "新正文", hashtags: ["#AI"], imagePrompt: "新图" },
-      memoryObservation: "观察"
     };
     mastraMocks.streamTreeDraft.mockImplementation(async ({ onPartialObject }) => {
       onPartialObject({ roundIntent: "扩写", draft: { title: "新标题" } });
@@ -332,7 +330,6 @@ describe("streamDirectorOptions", () => {
         { id: "b", label: "深挖", description: "B", impact: "B", kind: "deepen" },
         { id: "c", label: "换角度", description: "C", impact: "C", kind: "reframe" }
       ],
-      memoryObservation: "偏好具体表达。"
     };
     mastraMocks.streamTreeOptions.mockImplementation(async ({ onPartialObject }) => {
       onPartialObject({ roundIntent: "下一步", options: [{ id: "a", label: "补场景" }] });
@@ -392,7 +389,6 @@ describe("streamDirectorOptions", () => {
         { id: "b", label: "深挖", description: "B", impact: "B", kind: "deepen" },
         { id: "c", label: "换角度", description: "C", impact: "C", kind: "reframe" }
       ],
-      memoryObservation: "偏好具体表达。"
     };
     mastraMocks.streamTreeOptions.mockImplementation(async ({ onReasoningText }) => {
       onReasoningText({ delta: "先看当前草稿。", accumulatedText: "先看当前草稿。" });

@@ -114,12 +114,10 @@ beforeEach(() => {
   decideDirectorNextStepMock.mockResolvedValue({
     action: "draft",
     roundIntent: "可以生成草稿",
-    memoryObservation: ""
   });
   streamDirectorNextStepMock.mockResolvedValue({
     action: "draft",
     roundIntent: "可以生成草稿",
-    memoryObservation: ""
   });
 });
 
@@ -143,7 +141,6 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
     const finalOutput = {
       roundIntent: "扩写",
       draft: { title: "新", body: "新正文", hashtags: ["#新"], imagePrompt: "新图" },
-      memoryObservation: "观察",
       finishAvailable: false,
       publishPackage: null
     };
@@ -199,7 +196,6 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
         { id: "b", label: "补目标风格", description: "说明希望改成什么视觉方向。", impact: "让需求更明确。", kind: "reframe" },
         { id: "c", label: "补验收标准", description: "说明如何判断样式改好了。", impact: "让后续草稿可执行。", kind: "finish" }
       ],
-      memoryObservation: "需要先澄清 PRD 事实。"
     };
     const routedState = {
       ...state,
@@ -258,7 +254,6 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
       output: {
         roundIntent: nextStepOutput.roundIntent,
         options: nextStepOutput.options,
-        memoryObservation: nextStepOutput.memoryObservation
       }
     });
     expect(text).toContain('"type":"options"');
@@ -274,7 +269,6 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
     const nextStepOutput = {
       action: "complete",
       roundIntent: "当前版本已经可以交付",
-      memoryObservation: "用户选择停在当前版本。"
     };
     const completedState = {
       ...state,
@@ -326,7 +320,6 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
       nodeId: "node-2",
       output: {
         roundIntent: nextStepOutput.roundIntent,
-        memoryObservation: nextStepOutput.memoryObservation
       }
     });
     expect(text).toContain('"type":"done"');
@@ -337,7 +330,6 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
     const finalOutput = {
       roundIntent: "扩写",
       draft: { title: "新", body: "新正文", hashtags: ["#新"], imagePrompt: "新图" },
-      memoryObservation: "观察",
       finishAvailable: false,
       publishPackage: null
     };
@@ -362,7 +354,6 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
     const finalOutput = {
       roundIntent: "扩写",
       draft: { title: "新", body: "新正文", hashtags: ["#新"], imagePrompt: "新图" },
-      memoryObservation: "观察",
       finishAvailable: false,
       publishPackage: null
     };

@@ -262,7 +262,6 @@ describe("POST /api/sessions", () => {
           kind: "reframe"
         }
       ],
-      memoryObservation: ""
     };
     streamDirectorOptionsMock.mockImplementation(async (_parts, options) => {
       options.onReasoningText({ delta: "先判断 seed。", accumulatedText: "先判断 seed。" });
@@ -381,7 +380,6 @@ describe("POST /api/sessions", () => {
         { id: "b", label: "扩写", description: "B", impact: "B", kind: "deepen" },
         { id: "c", label: "润色", description: "C", impact: "C", kind: "reframe" }
       ],
-      memoryObservation: ""
     });
 
     const response = await POST(new Request("http://test.local/api/sessions", { method: "POST" }));
@@ -488,7 +486,6 @@ describe("POST /api/sessions", () => {
         { id: "b", label: "扩写", description: "B", impact: "B", kind: "deepen" },
         { id: "c", label: "润色", description: "C", impact: "C", kind: "reframe" }
       ],
-      memoryObservation: ""
     });
 
     const response = await POST(

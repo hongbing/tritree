@@ -19,7 +19,6 @@ describe("parseDirectorOutput", () => {
         roundIntent: "Start",
         options: [],
         draft: { title: "", body: "", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       })
@@ -44,7 +43,6 @@ describe("parseDirectorOutput", () => {
           { ...option, label: "Reframe" }
         ],
         draft: { title: "", body: "", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       })
@@ -61,7 +59,6 @@ describe("parseDirectorOptionsOutput", () => {
         { id: "b", label: "深挖原因", description: "说清背后的原因。", impact: "让观点更可信。", kind: "deepen" },
         { id: "c", label: "换角度", description: "从反面重看问题。", impact: "让表达更有张力。", kind: "reframe" }
       ],
-      memoryObservation: "用户喜欢从真实工作困境切入。"
     });
 
     expect(parsed.roundIntent).toBe("生成下一步");
@@ -81,7 +78,6 @@ describe("parseDirectorOptionsOutput", () => {
       parseDirectorOptionsOutput({
         roundIntent: "生成下一步",
         options: [option, { ...option, label: "深挖原因" }, { ...option, label: "换角度" }],
-        memoryObservation: ""
       })
     ).toThrow("AI suggestions must include IDs a, b, and c exactly once.");
   });
@@ -97,7 +93,6 @@ describe("parseDirectorOptionsText", () => {
           { id: "b", label: "深挖", description: "B", impact: "B", kind: "deepen" },
           { id: "c", label: "换角度", description: "C", impact: "C", kind: "reframe" }
         ],
-        memoryObservation: "偏好具体表达。"
       })
     );
 
@@ -347,7 +342,6 @@ describe("parseDirectorDraftText", () => {
       JSON.stringify({
         roundIntent: "扩写",
         draft: { title: "新标题", body: "新正文", hashtags: ["#AI"], imagePrompt: "新图" },
-        memoryObservation: "用户偏好具体场景。"
       })
     );
 

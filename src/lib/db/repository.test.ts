@@ -90,7 +90,6 @@ function createSessionDraftWithOptions(
     output: {
       roundIntent: output.roundIntent,
       options: output.options,
-      memoryObservation: output.memoryObservation
     }
   });
   return optionsState;
@@ -136,7 +135,6 @@ function appendGeneratedChild(
     output: {
       roundIntent: output.roundIntent,
       draft: output.draft,
-      memoryObservation: output.memoryObservation
     }
   });
 
@@ -147,7 +145,6 @@ function appendGeneratedChild(
     output: {
       roundIntent: output.roundIntent,
       options: output.options,
-      memoryObservation: output.memoryObservation
     }
   });
 }
@@ -185,7 +182,6 @@ function createHistoricalGeneratedChild(
     output: {
       roundIntent: output.roundIntent,
       draft: output.draft,
-      memoryObservation: output.memoryObservation
     }
   });
 
@@ -196,7 +192,6 @@ function createHistoricalGeneratedChild(
     output: {
       roundIntent: output.roundIntent,
       options: output.options,
-      memoryObservation: output.memoryObservation
     }
   });
 }
@@ -406,7 +401,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Older draft", body: "Older body for the summary list.", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -422,7 +416,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Latest draft", body: "Latest body for the summary list.", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -438,7 +431,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Other user draft", body: "Other body.", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -488,7 +480,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Original archived title", body: "Archived body.", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -521,7 +512,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Archive once", body: "Archived body.", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -604,7 +594,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Finished draft", body: "A persisted finished summary.", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: true,
         publishPackage: null
       }
@@ -638,7 +627,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -656,7 +644,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "Old C", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Old", body: "Old route body", hashtags: ["#Old"], imagePrompt: "Old tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -674,7 +661,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "Current C", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Current", body: "Current route body", hashtags: ["#Current"], imagePrompt: "Current tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -704,7 +690,6 @@ describe("Treeable repository", () => {
         output: {
           roundIntent: "Archived draft update",
           draft: { title: "Mutated", body: "Should not save", hashtags: [], imagePrompt: "" },
-          memoryObservation: ""
         }
       })
     );
@@ -720,7 +705,6 @@ describe("Treeable repository", () => {
             { id: "b", label: "Archived B", description: "B", impact: "B", kind: "reframe" },
             { id: "c", label: "Archived C", description: "C", impact: "C", kind: "finish" }
           ],
-          memoryObservation: ""
         }
       })
     );
@@ -1033,7 +1017,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "reframe" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1046,7 +1029,7 @@ describe("Treeable repository", () => {
     });
   });
 
-  it("persists completed tool query memory on generated session outputs", async () => {
+  it("leaves session tool memory unchanged when generated outputs are saved", async () => {
     const repo = createTreeableRepository(testDbPath());
     const user = await createTestUser(repo, "writer");
     const root = repo.saveRootMemory(user.id, {
@@ -1062,12 +1045,6 @@ describe("Treeable repository", () => {
       draft: { title: "青岛攻略", body: "先起草。", hashtags: [], imagePrompt: "" },
       roundIntent: "种子念头"
     });
-    const toolObservation = [
-      "# 工具查询记忆",
-      "后续轮次优先复用这些结果；不要重复相同查询。",
-      "[工具结果:完成] run_skill_command: {\"feeds\":[{\"displayTitle\":\"青岛三天两晚攻略\"}]}"
-    ].join("\n");
-
     const state = repo.updateNodeOptions({
       userId: user.id,
       sessionId: draftState.session.id,
@@ -1079,13 +1056,11 @@ describe("Treeable repository", () => {
           { id: "b", label: "雨天路线", description: "按天气组织。", impact: "更实用。", kind: "explore" },
           { id: "c", label: "预算路线", description: "按花费拆分。", impact: "更易执行。", kind: "deepen" }
         ],
-        memoryObservation: toolObservation
       }
     });
 
-    expect((state as any).toolMemory).toContain("青岛三天两晚攻略");
-    expect((state as any).toolMemory).toContain("不要重复相同查询");
-    expect((repo.getSessionState(user.id, draftState.session.id) as any).toolMemory).toContain("青岛三天两晚攻略");
+    expect((state as any).toolMemory).toBe("");
+    expect((repo.getSessionState(user.id, draftState.session.id) as any).toolMemory).toBe("");
   });
 
   it("defaults legacy skill rows to shared applicability during migration", async () => {
@@ -1268,7 +1243,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "reframe" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1302,7 +1276,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "reframe" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1333,7 +1306,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "reframe" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1418,7 +1390,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "Start with AI", description: "AI angle", impact: "Topical", kind: "explore" }
         ],
         draft: { title: "", body: "Pick a starting point.", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1553,7 +1524,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "Ship", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Treeable", body: "A finished draft.", hashtags: ["#AI"], imagePrompt: "A bright tree" },
-        memoryObservation: "",
         finishAvailable: true,
         publishPackage: {
           title: "Treeable",
@@ -1591,7 +1561,6 @@ describe("Treeable repository", () => {
             { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
           ],
           draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
-          memoryObservation: "",
           finishAvailable: false,
           publishPackage: null
         }
@@ -1669,7 +1638,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1689,7 +1657,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "Finish", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Updated", body: "Updated body", hashtags: ["#AI"], imagePrompt: "Glowing tree" },
-        memoryObservation: "Prefers practical choices.",
         finishAvailable: true,
         publishPackage: null
       }
@@ -1722,7 +1689,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "First", body: "First body", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1738,7 +1704,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Latest", body: "Latest body", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1767,7 +1732,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1793,7 +1757,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "Next C", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Updated", body: "Updated body", hashtags: ["#AI"], imagePrompt: "Glowing tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1825,7 +1788,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1843,7 +1805,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "Old C", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Old", body: "Old route body", hashtags: ["#Old"], imagePrompt: "Old tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1893,7 +1854,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1961,7 +1921,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1979,7 +1938,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "Old C", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Old", body: "Old route body", hashtags: ["#Old"], imagePrompt: "Old tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -1998,7 +1956,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "New C", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "New", body: "New route body", hashtags: ["#New"], imagePrompt: "New tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -2036,7 +1993,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -2054,7 +2010,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "Old C", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Old", body: "Old route body", hashtags: ["#Old"], imagePrompt: "Old tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -2072,7 +2027,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "New C", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "New", body: "New route body", hashtags: ["#New"], imagePrompt: "New tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -2109,7 +2063,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -2128,7 +2081,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "新C", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Ignored", body: "Ignored", hashtags: [], imagePrompt: "" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -2165,7 +2117,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -2182,7 +2133,6 @@ describe("Treeable repository", () => {
           { id: "b", label: "选项B", description: "B", impact: "B", kind: "reframe" },
           { id: "c", label: "选项C", description: "C", impact: "C", kind: "finish" }
         ],
-        memoryObservation: ""
       }
     });
 
@@ -2211,7 +2161,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -2229,7 +2178,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "Next C", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Next", body: "Next body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -2246,7 +2194,6 @@ describe("Treeable repository", () => {
           { id: "b", label: "History B", description: "B", impact: "B", kind: "reframe" },
           { id: "c", label: "History C", description: "C", impact: "C", kind: "finish" }
         ],
-        memoryObservation: ""
       }
     });
 
@@ -2282,7 +2229,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -2301,7 +2247,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "Finish", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Updated", body: "Updated body", hashtags: ["#AI"], imagePrompt: "Glowing tree" },
-        memoryObservation: "Prefers practical choices.",
         finishAvailable: true,
         publishPackage: null
       }
@@ -2321,7 +2266,6 @@ describe("Treeable repository", () => {
             { id: "c", label: "Stale C", description: "C", impact: "C", kind: "finish" }
           ],
           draft: { title: "Stale", body: "Should not save", hashtags: ["#AI"], imagePrompt: "Old tree" },
-          memoryObservation: "",
           finishAvailable: true,
           publishPackage: null
         }
@@ -2349,7 +2293,6 @@ describe("Treeable repository", () => {
           { id: "a", label: "A3", description: "A", impact: "A", kind: "explore" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -2369,7 +2312,6 @@ describe("Treeable repository", () => {
             { id: "c", label: "Finish", description: "C", impact: "C", kind: "finish" }
           ],
           draft: { title: "Updated", body: "Updated body", hashtags: ["#AI"], imagePrompt: "Glowing tree" },
-          memoryObservation: "",
           finishAvailable: true,
           publishPackage: null
         }
@@ -2397,7 +2339,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }
@@ -2416,7 +2357,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Finished", body: "Ready", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: true,
         publishPackage: {
           title: "Finished",
@@ -2443,7 +2383,6 @@ describe("Treeable repository", () => {
           { id: "c", label: "C", description: "C", impact: "C", kind: "finish" }
         ],
         draft: { title: "Still draft", body: "Still editable.", hashtags: ["#AI"], imagePrompt: "Tree" },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       }

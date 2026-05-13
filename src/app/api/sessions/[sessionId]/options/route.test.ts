@@ -125,7 +125,6 @@ describe("POST /api/sessions/:sessionId/options", () => {
         { id: "b", label: "深挖", description: "B", impact: "B", kind: "deepen" },
         { id: "c", label: "换角度", description: "C", impact: "C", kind: "reframe" }
       ],
-      memoryObservation: "偏好具体表达。"
     };
     const finalState = {
       ...state,
@@ -177,7 +176,6 @@ describe("POST /api/sessions/:sessionId/options", () => {
         { id: "b", label: "换读者", description: "B", impact: "B", kind: "explore" },
         { id: "c", label: "换结构", description: "C", impact: "C", kind: "deepen" }
       ],
-      memoryObservation: "偏好具体表达。"
     };
     const updateNodeOptions = vi.fn().mockReturnValue(state);
     getRepositoryMock.mockReturnValue({
@@ -209,7 +207,6 @@ describe("POST /api/sessions/:sessionId/options", () => {
         { id: "b", label: "补关键场景", description: "B", impact: "B", kind: "explore" },
         { id: "c", label: "收束结尾", description: "C", impact: "C", kind: "finish" }
       ],
-      memoryObservation: "偏好具体表达。"
     };
     const finalState = {
       ...stateWithOptions,

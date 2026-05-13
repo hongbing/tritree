@@ -319,7 +319,6 @@ export const DirectorOutputSchema = z.object({
   roundIntent: z.string().min(1),
   options: z.array(BranchOptionSchema).length(3, "AI suggestions must include exactly three items."),
   draft: DraftSchema,
-  memoryObservation: z.string(),
   finishAvailable: z.boolean().optional(),
   publishPackage: PublishPackageSchema.nullable().optional()
 }).superRefine((output, context) => {
@@ -334,8 +333,7 @@ export const DirectorOutputSchema = z.object({
 
 export const DirectorOptionsOutputSchema = z.object({
   roundIntent: z.string().min(1),
-  options: z.array(BranchOptionSchema).length(3, "AI suggestions must include exactly three items."),
-  memoryObservation: z.string()
+  options: z.array(BranchOptionSchema).length(3, "AI suggestions must include exactly three items.")
 }).superRefine((output, context) => {
   if (!includesDirectorOptionIdsOnce(output.options)) {
     context.addIssue({
@@ -348,14 +346,12 @@ export const DirectorOptionsOutputSchema = z.object({
 
 const DirectorNextStepDraftSchema = z.object({
   action: z.literal("draft"),
-  roundIntent: z.string().min(1),
-  memoryObservation: z.string()
+  roundIntent: z.string().min(1)
 });
 
 const DirectorNextStepCompleteSchema = z.object({
   action: z.literal("complete"),
-  roundIntent: z.string().min(1),
-  memoryObservation: z.string()
+  roundIntent: z.string().min(1)
 });
 
 const DirectorNextStepOptionsSchema = z.object({
@@ -372,8 +368,7 @@ const DirectorNextStepOptionsSchema = z.object({
         mode: OptionGenerationModeSchema.optional()
       })
     )
-    .length(3, "AI suggestions must include exactly three items."),
-  memoryObservation: z.string()
+    .length(3, "AI suggestions must include exactly three items.")
 }).transform((output) => {
   const options = output.options.map((option, index) => ({
     id: option.id ?? PRIMARY_BRANCH_OPTION_IDS[index],
@@ -406,8 +401,7 @@ export const DirectorNextStepOutputSchema = z.union([
 
 export const DirectorDraftOutputSchema = z.object({
   roundIntent: z.string().min(1),
-  draft: DraftSchema,
-  memoryObservation: z.string()
+  draft: DraftSchema
 });
 
 export const SessionStatusSchema = z.enum(["active", "finished"]);

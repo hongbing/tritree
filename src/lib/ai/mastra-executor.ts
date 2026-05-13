@@ -14,7 +14,6 @@ import type { ToolsInput } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
 import { ZodError, type ZodIssue } from "zod";
 import { createSkillRuntimeTools } from "@/lib/skills/skill-runtime";
-import { appendToolQueryMemoryObservation } from "@/lib/tool-memory";
 import { createTreeDraftAgent, createTreeNextStepAgent, createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-agents";
 import {
   buildTreeDraftInstructions,
@@ -118,7 +117,6 @@ type TreeOptionsPartial = Partial<Omit<DirectorOptionsOutput, "options">> & {
 
 type TreeNextStepPartial = {
   action?: "draft" | "options";
-  memoryObservation?: string;
   options?: Array<Partial<BranchOption>>;
   roundIntent?: string;
 };
@@ -587,7 +585,7 @@ async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
   tools: ToolsInput;
 }): Promise<TOutput> {
   return withStructuredOutputRetries(messages, target, async (attemptMessages) => {
-    const { output, toolTranscript } = await streamRuntimeToolsOnce<TPartial, TOutput>({
+    const { output } = await streamRuntimeToolsOnce<TPartial, TOutput>({
       agent,
       attemptMessages,
       env,
@@ -599,7 +597,7 @@ async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
       target,
       tools
     });
-    return attachToolMemoryObservation(output, toolTranscript);
+    return output;
   });
 }
 
@@ -897,8 +895,7 @@ function parseRuntimeOptionsMarkdown(rawText: string) {
 
   return {
     roundIntent: markdownLineField(rawText, "roundIntent") || "选择下一步",
-    options,
-    memoryObservation: markdownLineField(rawText, "memoryObservation") || ""
+    options
   };
 }
 
@@ -911,14 +908,13 @@ function parseRuntimeDraftMarkdown(rawText: string) {
       body: markdownLineField(rawText, "body") || markdownLineField(rawText, "正文") || rawText.trim(),
       hashtags: hashtags ? hashtags.split(/[、,\s]+/).filter(Boolean) : [],
       imagePrompt: markdownLineField(rawText, "imagePrompt") || markdownLineField(rawText, "配图提示") || ""
-    },
-    memoryObservation: markdownLineField(rawText, "memoryObservation") || ""
+    }
   };
 }
 
 function runtimeOptionBlock(rawText: string, letter: "A" | "B" | "C") {
   const pattern = new RegExp(
-    `(?:^|\\n)\\s*(?:\\*\\*)?选项\\s*${letter}[\\s\\S]*?(?=(?:\\n\\s*(?:\\*\\*)?选项\\s*[ABC]|\\n\\s*(?:\\*\\*)?memoryObservation|$))`,
+    `(?:^|\\n)\\s*(?:\\*\\*)?选项\\s*${letter}[\\s\\S]*?(?=(?:\\n\\s*(?:\\*\\*)?选项\\s*[ABC]|$))`,
     "i"
   );
   return pattern.exec(rawText)?.[0] ?? "";
@@ -985,14 +981,6 @@ async function resolveLooseStreamOutput(stream: StructuredObjectStreamResult) {
     return stream.object instanceof Promise ? await stream.object : stream.object;
   }
   return undefined;
-}
-
-function attachToolMemoryObservation<TOutput>(output: TOutput, toolTranscript: string): TOutput {
-  if (!isObjectRecord(output) || typeof output.memoryObservation !== "string") return output;
-  return {
-    ...output,
-    memoryObservation: appendToolQueryMemoryObservation(output.memoryObservation, toolTranscript)
-  } as TOutput;
 }
 
 async function withStructuredOutputRetries<T>(
@@ -1102,14 +1090,14 @@ function summarizeInvalidStructuredValue(value: unknown) {
 
 function draftOutputShapeSummary() {
   return [
-    "必须返回对象：{ roundIntent, draft, memoryObservation }。",
+    "必须返回对象：{ roundIntent, draft }。",
     "draft 必须包含 { title, body, hashtags, imagePrompt }；title/body/imagePrompt 是字符串，hashtags 是字符串数组。"
   ].join("\n");
 }
 
 function optionsOutputShapeSummary() {
   return [
-    "必须返回对象：{ roundIntent, options, memoryObservation }。",
+    "必须返回对象：{ roundIntent, options }。",
     "options 必须正好 3 项，id 必须分别是 a、b、c 且只出现一次。",
     "每个 option 必须包含 { id, label, description, impact, kind }；kind 只能是 explore、deepen、reframe 或 finish。"
   ].join("\n");
@@ -1117,7 +1105,7 @@ function optionsOutputShapeSummary() {
 
 function nextStepOutputShapeSummary() {
   return [
-    "必须返回对象：{ action, roundIntent, memoryObservation }。",
+    "必须返回对象：{ action, roundIntent }。",
     "action 只能是 draft、options 或 complete。",
     "当 action=draft 时不要返回 options。",
     "当 action=complete 时不要返回 options。",
@@ -1364,8 +1352,8 @@ function looksLikeStructuredRuntimeText(text: string) {
   if (!trimmed) return false;
   if (trimmed.startsWith("```")) return true;
   if (trimmed.startsWith("{") || trimmed.startsWith("[") || trimmed.startsWith('"')) return true;
-  if (/"(roundIntent|options|draft|memoryObservation)"\s*:/.test(trimmed)) return true;
-  if (/(^|\n)\s*(?:\*\*)?(roundIntent|memoryObservation|description|impact|kind|选项\s*[a-cA-C])(?:\*\*)?\s*[：:]/.test(trimmed)) {
+  if (/"(roundIntent|options|draft)"\s*:/.test(trimmed)) return true;
+  if (/(^|\n)\s*(?:\*\*)?(roundIntent|description|impact|kind|选项\s*[a-cA-C])(?:\*\*)?\s*[：:]/.test(trimmed)) {
     return true;
   }
 
@@ -1550,9 +1538,7 @@ function partialSubmitToolOutputFromArgsText(toolName: string, argsText: string)
 function partialOptionsSubmitOutputFromArgsText(argsText: string) {
   const output: Record<string, unknown> = {};
   const roundIntent = extractVisibleJsonStringField(argsText, "roundIntent");
-  const memoryObservation = extractVisibleJsonStringField(argsText, "memoryObservation");
   if (roundIntent) output.roundIntent = roundIntent;
-  if (memoryObservation) output.memoryObservation = memoryObservation;
 
   const optionsMatch = /"options"\s*:\s*\[/.exec(argsText);
   if (optionsMatch) {
@@ -1582,9 +1568,7 @@ function partialOptionsSubmitOutputFromArgsText(argsText: string) {
 function partialDraftSubmitOutputFromArgsText(argsText: string) {
   const output: Record<string, unknown> = {};
   const roundIntent = extractVisibleJsonStringField(argsText, "roundIntent");
-  const memoryObservation = extractVisibleJsonStringField(argsText, "memoryObservation");
   if (roundIntent) output.roundIntent = roundIntent;
-  if (memoryObservation) output.memoryObservation = memoryObservation;
 
   const draftMatch = /"draft"\s*:\s*\{/.exec(argsText);
   if (draftMatch) {

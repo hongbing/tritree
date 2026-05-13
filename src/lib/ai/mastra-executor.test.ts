@@ -178,7 +178,6 @@ describe("tree director compatibility generators", () => {
         object: {
           roundIntent: "继续完善",
           draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
-          memoryObservation: "偏好观察"
         }
       }))
     };
@@ -213,7 +212,6 @@ describe("tree director compatibility generators", () => {
             { id: "b", label: "收紧标题", description: "标题承诺偏大。", impact: "让表达更可信。", kind: "reframe" },
             { id: "c", label: "整理结尾", description: "结尾还没有收束。", impact: "让文章接近发布。", kind: "finish" }
           ],
-          memoryObservation: "偏好观察"
         }
       }))
     };
@@ -249,7 +247,6 @@ describe("tree director compatibility generators", () => {
             { id: "b", label: "补目标风格", description: "先确认要改成什么风格。", impact: "让需求更明确。", kind: "reframe" },
             { id: "c", label: "补验收标准", description: "先确认怎么算改好。", impact: "让后续草稿可执行。", kind: "finish" }
           ],
-          memoryObservation: "需要先澄清事实。"
         }
       }))
     };
@@ -293,7 +290,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "收紧标题", description: "标题承诺偏大。", impact: "让表达更可信。", kind: "reframe" },
         { id: "c", label: "整理结尾", description: "结尾还没有收束。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "偏好观察"
     };
     const compactSkill = {
       ...enabledSkills[2],
@@ -337,7 +333,6 @@ describe("tree director compatibility generators", () => {
         object: {
           roundIntent: "继续完善",
           draft: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" },
-          memoryObservation: "用户喜欢具体表达。"
         }
       }))
     };
@@ -372,7 +367,6 @@ describe("tree director compatibility generators", () => {
         hashtags: ["#写作"],
         imagePrompt: "桌面上的笔记"
       },
-      memoryObservation: "用户喜欢具体表达。"
     };
     const fakeAgent = {
       generate: vi.fn(async () => ({ object: finalObject }))
@@ -393,7 +387,6 @@ describe("tree director compatibility generators", () => {
     const finalObject = {
       roundIntent: "继续完善",
       draft: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" },
-      memoryObservation: "用户喜欢具体表达。"
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({
@@ -439,7 +432,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "最终 B", description: "最终说明 B。", impact: "最终影响 B。", kind: "deepen" },
         { id: "c", label: "最终 C", description: "最终说明 C。", impact: "最终影响 C。", kind: "reframe" }
       ],
-      memoryObservation: "最终观察。"
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({
@@ -474,7 +466,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "最终 B", description: "最终说明 B。", impact: "最终影响 B。", kind: "deepen" },
         { id: "c", label: "最终 C", description: "最终说明 C。", impact: "最终影响 C。", kind: "reframe" }
       ],
-      memoryObservation: "最终观察。"
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({
@@ -508,7 +499,6 @@ describe("tree director compatibility generators", () => {
             { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
             { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
           ],
-          memoryObservation: "用户喜欢具体表达。"
         }
       }))
     };
@@ -541,7 +531,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const fakeAgent = {
       generate: vi
@@ -550,7 +539,6 @@ describe("tree director compatibility generators", () => {
           object: {
             roundIntent: "选择下一步",
             options: [{ id: "a", label: "补具体场景", description: "加入真实场景。", impact: "更具体。", kind: "explore" }],
-            memoryObservation: "用户喜欢具体表达。"
           }
         })
         .mockResolvedValueOnce({ object: finalObject })
@@ -583,7 +571,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const validationError = Object.assign(new Error("Structured output validation failed: - root: Required"), {
       id: "STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED",
@@ -621,7 +608,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({
@@ -678,7 +664,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({
@@ -719,7 +704,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({
@@ -793,7 +777,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const stream = vi.fn(async () => ({
       fullStream: async function* () {
@@ -866,7 +849,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const stream = vi.fn(async () => ({
       fullStream: async function* () {
@@ -943,7 +925,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const stream = vi.fn(async () => ({
       fullStream: async function* () {
@@ -1014,7 +995,6 @@ describe("tree director compatibility generators", () => {
       "**选项C（远——换维度竞争）**",
       "- **id**：c- **label**：切换内容形态- **description**：建议做一份青岛行程决策表或景点匹配测试。- **impact**：从信息提供者变成工具提供者，差异化壁垒更高。- **kind**：reframe",
       "",
-      "**memoryObservation**：用户明确想要差异化，但尚未确定自己的旅行经验、擅长领域或目标读者。"
     ].join("\n");
     const stream = vi.fn(async () => ({
       fullStream: async function* () {
@@ -1094,7 +1074,6 @@ describe("tree director compatibility generators", () => {
       "impact：让季节建议从文字提醒变成一眼可决策的视觉工具。",
       "kind：reframemode：balanced",
       "",
-      "**memoryObservation**：用户已接受反攻略结构和精简信息密度两个建议。"
     ].join("\n");
     const stream = vi.fn(async () => ({
       fullStream: async function* () {
@@ -1140,7 +1119,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({
@@ -1191,7 +1169,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const validationError = Object.assign(new Error("Structured output validation failed"), {
       id: "STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED",
@@ -1220,7 +1197,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const validationError = Object.assign(new Error("Structured output validation failed"), {
       id: "STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED",
@@ -1253,7 +1229,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({
@@ -1282,7 +1257,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({ object: Promise.resolve(finalObject) })),
@@ -1321,7 +1295,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const stream = vi.fn(async () => ({
       fullStream: async function* () {
@@ -1363,10 +1336,7 @@ describe("tree director compatibility generators", () => {
       roundIntent: finalObject.roundIntent,
       options: finalObject.options
     });
-    expect(result.memoryObservation).toContain("用户喜欢具体表达。");
-    expect(result.memoryObservation).toContain("# 工具查询记忆");
-    expect(result.memoryObservation).toContain("青岛三天两晚攻略");
-    expect(result.memoryObservation).toContain("不要重复相同查询");
+    expect(result).not.toHaveProperty("memoryObservation");
 
     expect(stream).toHaveBeenCalledWith(
       directorParts.messages,
@@ -1398,7 +1368,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "做反攻略", description: "把热门打卡点改成避坑判断。", impact: "和保姆级攻略拉开距离。", kind: "reframe" },
         { id: "c", label: "做实时决策表", description: "根据天气和拥挤度组织内容。", impact: "更像工具而不是普通长文。", kind: "deepen" }
       ],
-      memoryObservation: "用户想避开同质化青岛攻略。"
     };
     const stream = vi.fn(async () => ({
       fullStream: async function* () {
@@ -1492,7 +1461,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "做反攻略", description: "把热门打卡点改成避坑判断。", impact: "和保姆级攻略拉开距离。", kind: "reframe" },
         { id: "c", label: "做实时决策表", description: "根据天气和拥挤度组织内容。", impact: "更像工具而不是普通长文。", kind: "deepen" }
       ],
-      memoryObservation: "用户想避开同质化青岛攻略。"
     };
     const stream = vi.fn(async () => ({
       fullStream: async function* () {
@@ -1552,7 +1520,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "做反攻略", description: "把热门打卡点改成避坑判断。", impact: "和保姆级攻略拉开距离。", kind: "reframe" },
         { id: "c", label: "做实时决策表", description: "根据天气和拥挤度组织内容。", impact: "更像工具而不是普通长文。", kind: "deepen" }
       ],
-      memoryObservation: "用户想避开同质化青岛攻略。"
     };
     const stream = vi.fn(async () => ({
       fullStream: async function* () {
@@ -1618,7 +1585,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "做反攻略", description: "把热门打卡点改成避坑判断。", impact: "和保姆级攻略拉开距离。", kind: "reframe" },
         { id: "c", label: "做实时决策表", description: "根据天气和拥挤度组织内容。", impact: "更像工具而不是普通长文。", kind: "deepen" }
       ],
-      memoryObservation: "用户想避开同质化青岛攻略。"
     };
     let continuedAfterSubmit = false;
     const stream = vi.fn(async () => ({
@@ -1677,7 +1643,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "做反攻略", description: "把热门打卡点改成避坑判断。", impact: "和保姆级攻略拉开距离。", kind: "reframe" },
         { id: "c", label: "做实时决策表", description: "根据天气和拥挤度组织内容。", impact: "更像工具而不是普通长文。", kind: "deepen" }
       ],
-      memoryObservation: "用户想避开同质化青岛攻略。"
     };
     const stream = vi.fn(async () => ({
       fullStream: async function* () {
@@ -1763,7 +1728,6 @@ describe("tree director compatibility generators", () => {
         hashtags: ["#青岛"],
         imagePrompt: "青岛老城街道"
       },
-      memoryObservation: "用户想避开同质化青岛攻略。"
     };
     const stream = vi.fn(async () => ({
       fullStream: async function* () {
@@ -1854,7 +1818,6 @@ describe("tree director compatibility generators", () => {
         hashtags: ["#青岛"],
         imagePrompt: "青岛老城街道"
       },
-      memoryObservation: "用户想保留段落换行。"
     };
     const stream = vi.fn(async () => ({
       fullStream: async function* () {
@@ -1939,7 +1902,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "雨天路线", description: "按天气组织。", impact: "更实用。", kind: "explore" },
         { id: "c", label: "预算路线", description: "按花费拆分。", impact: "更易执行。", kind: "deepen" }
       ],
-      memoryObservation: "记住已参考热门攻略。"
     };
     const partialObject = {
       roundIntent: "选择下一步",
@@ -2012,7 +1974,6 @@ describe("tree director compatibility generators", () => {
     const finalObject = {
       roundIntent: "继续完善",
       draft: { title: "测试", body: "测试正文", hashtags: [], imagePrompt: "" },
-      memoryObservation: "用户喜欢具体表达。"
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({ object: Promise.resolve(finalObject) })),
@@ -2046,7 +2007,6 @@ describe("tree director compatibility generators", () => {
         { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
-      memoryObservation: "用户喜欢具体表达。"
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({ object: Promise.resolve(finalObject) })),

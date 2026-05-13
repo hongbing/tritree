@@ -109,8 +109,7 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
             nodeId: targetNode.id,
             output: {
               roundIntent: nextStep.roundIntent,
-              options: nextStep.options,
-              memoryObservation: nextStep.memoryObservation
+              options: nextStep.options
             }
           });
           send({ type: "done", state: nextState });
@@ -123,8 +122,7 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
             sessionId,
             nodeId: targetNode.id,
             output: {
-              roundIntent: nextStep.roundIntent,
-              memoryObservation: nextStep.memoryObservation
+              roundIntent: nextStep.roundIntent
             }
           });
           send({ type: "done", state: nextState });

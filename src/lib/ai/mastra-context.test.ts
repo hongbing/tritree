@@ -107,10 +107,10 @@ describe("agent instructions", () => {
     expect(draftInstructions).toContain("要求：种子或零散想法阶段可以大幅组织材料");
     expect(draftInstructions).toContain("如果本轮列出了可用工具和 MCP 能力，可以按需调用");
     expect(draftInstructions).toContain("未列出时不要假设可以查询外部信息");
-    expect(draftInstructions).toContain("本任务产出的用户可见字段包括：roundIntent、draft.title、draft.body、draft.hashtags、draft.imagePrompt 和 memoryObservation");
+    expect(draftInstructions).toContain("本任务产出的用户可见字段包括：roundIntent、draft.title、draft.body、draft.hashtags 和 draft.imagePrompt");
     expect(draftInstructions).toContain("如果 Skill 要求固定文本、格式、语气或其他可观察结果，最终返回字段里必须能直接看见对应结果");
     expect(draftInstructions).toContain("这里的输出要求指结构化结果或最终提交工具参数里的字段，不是额外自然语言消息");
-    expect(draftInstructions).toContain("最终结构化结果必须覆盖：本轮意图、标题、正文、话题、配图提示和偏好观察");
+    expect(draftInstructions).toContain("最终结构化结果必须覆盖：本轮意图、标题、正文、话题和配图提示");
     expect(draftInstructions).toContain("已启用 Skills 明确要求的非中文文本除外");
     expect(draftInstructions).toContain("确认每个已启用 Skill 的要求已落实");
     expect(draftInstructions.indexOf("# 已启用 Skills")).toBeGreaterThan(draftInstructions.indexOf("# 作者任务"));
@@ -152,10 +152,10 @@ describe("agent instructions", () => {
     expect(optionsInstructions).toContain("要求：种子或零散想法阶段可以大幅组织材料");
     expect(optionsInstructions).toContain("如果本轮列出了可用工具和 MCP 能力，可以按需调用");
     expect(optionsInstructions).toContain("未列出时不要假设可以查询外部信息");
-    expect(optionsInstructions).toContain("本任务产出的用户可见字段包括：roundIntent、options[].label、options[].description、options[].impact 和 memoryObservation");
+    expect(optionsInstructions).toContain("本任务产出的用户可见字段包括：roundIntent、options[].label、options[].description 和 options[].impact");
     expect(optionsInstructions).toContain("如果 Skill 要求固定文本、格式、语气或其他可观察结果，最终返回字段里必须能直接看见对应结果");
     expect(optionsInstructions).toContain("这里的输出要求指结构化结果或最终提交工具参数里的字段，不是额外自然语言消息");
-    expect(optionsInstructions).toContain("最终结构化结果还必须覆盖一句本轮问题判断和一句偏好观察");
+    expect(optionsInstructions).toContain("最终结构化结果还必须覆盖一句本轮问题判断");
     expect(optionsInstructions).toContain("已启用 Skills 明确要求的非中文文本除外");
     expect(optionsInstructions).toContain("确认每个已启用 Skill 的要求已落实");
     expect(optionsInstructions.indexOf("# 已启用 Skills")).toBeGreaterThan(optionsInstructions.indexOf("# 责任编辑任务"));

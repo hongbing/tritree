@@ -94,12 +94,12 @@ describe("DirectorOptionsOutputSchema", () => {
         { id: "a", label: "补场景", description: "补一个真实场景。", impact: "让内容更具体。", kind: "explore" },
         { id: "b", label: "深挖原因", description: "说清背后的原因。", impact: "让观点更可信。", kind: "deepen" },
         { id: "c", label: "换角度", description: "从反面重看问题。", impact: "让表达更有张力。", kind: "reframe" }
-      ],
-      memoryObservation: "用户喜欢从真实工作困境切入。"
+      ]
     });
 
     expect(parsed.options.map((option) => option.id)).toEqual(["a", "b", "c"]);
     expect(parsed).not.toHaveProperty("draft");
+    expect(parsed).not.toHaveProperty("memoryObservation");
   });
 });
 
@@ -107,23 +107,23 @@ describe("DirectorNextStepOutputSchema", () => {
   it("accepts a decision to generate a draft without options", () => {
     const parsed = DirectorNextStepOutputSchema.parse({
       action: "draft",
-      roundIntent: "信息足够，生成一版 PRD",
-      memoryObservation: "用户想先改系统样式。"
+      roundIntent: "信息足够，生成一版 PRD"
     });
 
     expect(parsed.action).toBe("draft");
     expect(parsed).not.toHaveProperty("options");
+    expect(parsed).not.toHaveProperty("memoryObservation");
   });
 
   it("accepts a decision to complete the current path without more options or a draft", () => {
     const parsed = DirectorNextStepOutputSchema.parse({
       action: "complete",
-      roundIntent: "当前版本已经可以交付",
-      memoryObservation: "用户选择停在当前版本。"
+      roundIntent: "当前版本已经可以交付"
     });
 
     expect(parsed.action).toBe("complete");
     expect(parsed).not.toHaveProperty("options");
+    expect(parsed).not.toHaveProperty("memoryObservation");
   });
 
   it("accepts a decision to continue with three real choices", () => {
@@ -134,11 +134,11 @@ describe("DirectorNextStepOutputSchema", () => {
         { id: "a", label: "说明页面范围", description: "先确认哪些页面需要改。", impact: "避免草稿假设范围。", kind: "deepen" },
         { id: "b", label: "说明目标风格", description: "先确认要改成什么感觉。", impact: "让后续 PRD 更准确。", kind: "reframe" },
         { id: "c", label: "说明验收标准", description: "先确认怎么判断改好了。", impact: "让需求可执行。", kind: "finish" }
-      ],
-      memoryObservation: "PRD 需要先澄清事实。"
+      ]
     });
 
     expect(parsed.action).toBe("options");
+    expect(parsed).not.toHaveProperty("memoryObservation");
     if (parsed.action === "options") {
       expect(parsed.options.map((option) => option.id)).toEqual(["a", "b", "c"]);
     }
@@ -151,11 +151,11 @@ describe("DirectorNextStepOutputSchema", () => {
         { id: "a", label: "说明页面范围", description: "先确认哪些页面需要改。", impact: "避免草稿假设范围。", kind: "deepen" },
         { id: "b", label: "说明目标风格", description: "先确认要改成什么感觉。", impact: "让后续 PRD 更准确。", kind: "reframe" },
         { id: "c", label: "说明验收标准", description: "先确认怎么判断改好了。", impact: "让需求可执行。", kind: "finish" }
-      ],
-      memoryObservation: "PRD 需要先澄清事实。"
+      ]
     });
 
     expect(parsed.action).toBe("options");
+    expect(parsed).not.toHaveProperty("memoryObservation");
     if (parsed.action === "options") {
       expect(parsed.options).toHaveLength(3);
     }
@@ -181,11 +181,11 @@ describe("DirectorNextStepOutputSchema", () => {
           description: "聚焦这个组件为什么长这样。",
           impact: "适合产品/设计视角分析。"
         }
-      ],
-      memoryObservation: "需要先确定叙事角度。"
+      ]
     });
 
     expect(parsed.action).toBe("options");
+    expect(parsed).not.toHaveProperty("memoryObservation");
     if (parsed.action === "options") {
       expect(parsed.options.map((option) => option.id)).toEqual(["a", "b", "c"]);
       expect(parsed.options.map((option) => option.kind)).toEqual(["explore", "deepen", "reframe"]);
@@ -216,12 +216,12 @@ describe("DirectorOutputSchema", () => {
         hashtags: ["#AI"],
         imagePrompt: "A luminous tree on a writing desk."
       },
-      memoryObservation: "The user prefers reflective product writing.",
       finishAvailable: true,
       publishPackage: null
     });
 
     expect(parsed.options).toHaveLength(3);
+    expect(parsed).not.toHaveProperty("memoryObservation");
   });
 
   it("rejects responses with one option", () => {
@@ -243,7 +243,6 @@ describe("DirectorOutputSchema", () => {
           hashtags: [],
           imagePrompt: ""
         },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       })
@@ -274,7 +273,6 @@ describe("DirectorOutputSchema", () => {
           hashtags: [],
           imagePrompt: ""
         },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       })
@@ -304,7 +302,6 @@ describe("DirectorOutputSchema", () => {
           hashtags: [],
           imagePrompt: ""
         },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       })
@@ -334,7 +331,6 @@ describe("DirectorOutputSchema", () => {
           hashtags: [],
           imagePrompt: ""
         },
-        memoryObservation: "",
         finishAvailable: false,
         publishPackage: null
       })

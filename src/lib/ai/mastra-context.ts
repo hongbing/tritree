@@ -44,9 +44,9 @@ export function buildTreeDraftInstructions(input: SharedAgentContextInput) {
     "# 输出要求",
     "只生成新的内容版本，不要给编辑建议。",
     "这里的输出要求指结构化结果或最终提交工具参数里的字段，不是额外自然语言消息。",
-    "本任务产出的用户可见字段包括：roundIntent、draft.title、draft.body、draft.hashtags、draft.imagePrompt 和 memoryObservation。",
+    "本任务产出的用户可见字段包括：roundIntent、draft.title、draft.body、draft.hashtags 和 draft.imagePrompt。",
     "如果 Skill 要求固定文本、格式、语气或其他可观察结果，最终返回字段里必须能直接看见对应结果。",
-    "最终结构化结果必须覆盖：本轮意图、标题、正文、话题、配图提示和偏好观察。",
+    "最终结构化结果必须覆盖：本轮意图、标题、正文、话题和配图提示。",
     "所有面向用户的字段默认使用简体中文；用户原文、专有名词、代码、品牌名和已启用 Skills 明确要求的非中文文本除外。",
     "# 输出前检查",
     "确认每个已启用 Skill 的要求已落实到本任务产出的用户可见字段；不要因为结构化输出字段而忽略 Skill 要求。"
@@ -83,14 +83,14 @@ export function buildTreeOptionsInstructions(input: SharedAgentContextInput) {
     "# 输出要求",
     "只给一个问题和三个答案，不改写正文。",
     "这里的输出要求指结构化结果或最终提交工具参数里的字段，不是额外自然语言消息。",
-    "本任务产出的用户可见字段包括：roundIntent、options[].label、options[].description、options[].impact 和 memoryObservation。",
+    "本任务产出的用户可见字段包括：roundIntent、options[].label、options[].description 和 options[].impact。",
     "如果 Skill 要求固定文本、格式、语气或其他可观察结果，最终返回字段里必须能直接看见对应结果。",
     "roundIntent 必须是一个用户可以直接回答的问题。",
     "options[].label 写这个答案的短标题。",
     "options[].description 写这个答案代表的取舍、事实口径或处理方式。",
     "options[].impact 写选择后会让后续生成获得什么确定性，例如更清楚、更可信、更有读者感、更可执行或更接近交付。",
     "每个答案都要有短标题、具体说明和预计影响。",
-    "最终结构化结果还必须覆盖一句本轮问题判断和一句偏好观察。",
+    "最终结构化结果还必须覆盖一句本轮问题判断。",
     "所有面向用户的字段默认使用简体中文；用户原文、专有名词、代码、品牌名和已启用 Skills 明确要求的非中文文本除外。",
     "# 输出前检查",
     "确认每个已启用 Skill 的要求已落实到本任务产出的用户可见字段；不要因为结构化输出字段而忽略 Skill 要求。"
@@ -117,9 +117,9 @@ export function buildTreeNextStepInstructions(input: SharedAgentContextInput) {
     "# 输出要求",
     "只返回结构化结果。",
     "action 只能是 options、draft 或 complete。",
-    "当 action=options 时，roundIntent 必须是一个新问题，并必须返回 options[].label、options[].description、options[].impact 和 memoryObservation；不需要输出 id 或 kind，系统会自动把三个答案映射为 a、b、c。",
-    "当 action=draft 时，不返回 options；只返回 roundIntent 和 memoryObservation。",
-    "当 action=complete 时，不返回 options；只返回 roundIntent 和 memoryObservation。",
+    "当 action=options 时，roundIntent 必须是一个新问题，并必须返回 options[].label、options[].description 和 options[].impact；不需要输出 id 或 kind，系统会自动把三个答案映射为 a、b、c。",
+    "当 action=draft 时，不返回 options；只返回 roundIntent。",
+    "当 action=complete 时，不返回 options；只返回 roundIntent。",
     "所有面向用户的字段默认使用简体中文；用户原文、专有名词、代码、品牌名和已启用 Skills 明确要求的非中文文本除外。"
   ]
     .filter(Boolean)

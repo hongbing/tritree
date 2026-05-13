@@ -60,7 +60,6 @@ import {
   stripSkillRuntimeMetadata,
   type InstalledSkillImport
 } from "@/lib/skills/skill-installer";
-import { appendSessionToolMemory } from "@/lib/tool-memory";
 import { createDatabase, defaultDbPath } from "./client";
 
 type UserRow = {
@@ -350,10 +349,6 @@ function toCreationRequestOption(row: CreationRequestOptionRow): CreationRequest
 
 function uniqueSkillIds(skillIds: string[]) {
   return Array.from(new Set(skillIds.filter((id) => id.trim().length > 0)));
-}
-
-function nextSessionToolMemory(session: Pick<SessionRow, "tool_memory">, memoryObservation: string) {
-  return appendSessionToolMemory(session.tool_memory ?? "", memoryObservation);
 }
 
 function latestDraftForNode(draftsByNode: Map<string, DraftVersionRow>, nodeId: string | null) {
@@ -1435,8 +1430,7 @@ export function createTreeableRepository(
       draft,
       output: {
         roundIntent: output.roundIntent,
-        options: output.options,
-        memoryObservation: output.memoryObservation
+        options: output.options
       }
     });
   }
@@ -1490,14 +1484,13 @@ export function createTreeableRepository(
         timestamp
       );
 
-      const toolMemory = nextSessionToolMemory(session, output.memoryObservation);
       db.prepare(
         `
           UPDATE sessions
-          SET title = ?, status = ?, tool_memory = ?, updated_at = ?
+          SET title = ?, status = ?, updated_at = ?
           WHERE id = ? AND user_id = ?
         `
-      ).run(parsedDraft.title || session.title || "Untitled Tree", "active", toolMemory, timestamp, sessionId, userId);
+      ).run(parsedDraft.title || session.title || "Untitled Tree", "active", timestamp, sessionId, userId);
 
       const state = getSessionState(userId, sessionId);
       if (!state) {
@@ -1539,14 +1532,13 @@ export function createTreeableRepository(
         `
       ).run(output.roundIntent, JSON.stringify(output.options), nodeId);
 
-      const toolMemory = nextSessionToolMemory(session, output.memoryObservation);
       db.prepare(
         `
           UPDATE sessions
-          SET tool_memory = ?, updated_at = ?
+          SET updated_at = ?
           WHERE id = ? AND user_id = ?
         `
-      ).run(toolMemory, timestamp, sessionId, userId);
+      ).run(timestamp, sessionId, userId);
 
       const state = getSessionState(userId, sessionId);
       if (!state) {
@@ -1565,7 +1557,7 @@ export function createTreeableRepository(
     userId: string;
     sessionId: string;
     nodeId: string;
-    output: { memoryObservation: string; roundIntent: string };
+    output: { roundIntent: string };
   }) {
     const session = getActiveSession(userId, sessionId);
     if (!session) {
@@ -1587,14 +1579,13 @@ export function createTreeableRepository(
         `
       ).run(output.roundIntent, nodeId);
 
-      const toolMemory = nextSessionToolMemory(session, output.memoryObservation);
       db.prepare(
         `
           UPDATE sessions
-          SET tool_memory = ?, updated_at = ?
+          SET updated_at = ?
           WHERE id = ? AND user_id = ?
         `
-      ).run(toolMemory, timestamp, sessionId, userId);
+      ).run(timestamp, sessionId, userId);
 
       const state = getSessionState(userId, sessionId);
       if (!state) {

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, FileText, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { StyleProfileSetup } from "@/components/root-memory/StyleProfileSetup";
 import { SkillPicker } from "@/components/skills/SkillPicker";
 import {
   DEFAULT_CREATION_REQUEST_OPTIONS,
@@ -10,7 +11,8 @@ import {
   type ArtifactTypeId,
   type CreationRequestOption,
   type RootPreferences,
-  type Skill
+  type Skill,
+  type SkillUpsert
 } from "@/lib/domain";
 import { listArtifactTypes } from "@/lib/artifacts";
 
@@ -58,6 +60,9 @@ export function RootMemorySetup({
   onBack,
   onManageSkills,
   onCreationRequestOptionsChange,
+  onCreateSkill,
+  onUpdateSkill,
+  styleProfileExternalAvailable,
   skills
 }: {
   initialArtifactTypeId?: ArtifactTypeId;
@@ -70,7 +75,10 @@ export function RootMemorySetup({
   message?: string;
   onBack?: () => void;
   onCreationRequestOptionsChange?: (options: CreationRequestOption[]) => void;
+  onCreateSkill?: (input: SkillUpsert) => Promise<Skill | null>;
   onManageSkills: () => void;
+  onUpdateSkill?: (skillId: string, input: SkillUpsert) => Promise<Skill | null>;
+  styleProfileExternalAvailable?: boolean;
   skills: Skill[];
 }) {
   const [artifactTypeId, setArtifactTypeId] = useState<ArtifactTypeId>(initialArtifactTypeId);
@@ -228,6 +236,10 @@ export function RootMemorySetup({
     }
   }
 
+  function handleSavedStyleSkill(skill: Skill) {
+    setSelectedSkillIds((current) => (current.includes(skill.id) ? current : [...current, skill.id]));
+  }
+
   return (
     <main className="root-setup">
       <section className="root-setup__panel">
@@ -286,6 +298,17 @@ export function RootMemorySetup({
             value={seed}
           />
         </label>
+        {onCreateSkill && onUpdateSkill ? (
+          <StyleProfileSetup
+            disabled={isSaving}
+            externalStyleGenerationAvailable={Boolean(styleProfileExternalAvailable)}
+            onCreateSkill={onCreateSkill}
+            onSavedSkill={handleSavedStyleSkill}
+            onUpdateSkill={onUpdateSkill}
+            selectedSkillIds={selectedSkillIds}
+            skills={skills}
+          />
+        ) : null}
         <section aria-label="本次创作要求" className="root-setup__request" role="group">
           <div className="root-setup__request-header">
             <div>

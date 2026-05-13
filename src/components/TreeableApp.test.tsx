@@ -491,6 +491,24 @@ describe("TreeableApp", () => {
     expect(fetchMock).not.toHaveBeenCalledWith("/api/sessions");
   });
 
+  it("passes external style generation availability to the blank seed setup", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          skills,
+          styleProfile: { externalStyleGenerationAvailable: true }
+        })
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp startNewDraft />);
+
+    expect(await screen.findByRole("button", { name: "一键生成我的风格" })).toBeInTheDocument();
+  });
+
   it("falls back to blank seed setup when the requested draft cannot be opened", async () => {
     const fetchMock = vi
       .fn()

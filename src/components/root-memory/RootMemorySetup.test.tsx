@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RootMemorySetup } from "./RootMemorySetup";
-import { DEFAULT_CREATION_REQUEST_OPTIONS, type CreationRequestOption, type Skill } from "@/lib/domain";
+import { DEFAULT_CREATION_REQUEST_OPTIONS, type CreationRequestOption, type Skill, type SkillUpsert } from "@/lib/domain";
 
 const skills: Skill[] = [
   {
@@ -33,6 +33,20 @@ const skills: Skill[] = [
     updatedAt: "2026-04-26T00:00:00.000Z"
   }
 ];
+
+const personalStyleSkill: Skill = {
+  id: "style-new",
+  title: "我的风格：克制产品随笔",
+  category: "风格",
+  description: "短句、具体、少夸张。",
+  prompt: "保持短句，写具体例子。",
+  appliesTo: "writer",
+  isSystem: false,
+  defaultEnabled: false,
+  isArchived: false,
+  createdAt: "2026-05-13T00:00:00.000Z",
+  updatedAt: "2026-05-13T00:00:00.000Z"
+};
 
 function requestOption(option: { id: string; label: string }, sortOrder = 0): CreationRequestOption {
   return {
@@ -333,6 +347,56 @@ describe("RootMemorySetup", () => {
         creationRequest: "面向海外游客，保留中文地名"
       }),
       enabledSkillIds: ["system-analysis"]
+    });
+  });
+
+  it("enables a saved personal style skill for the new work", async () => {
+    const onSubmit = vi.fn();
+    const onCreateSkill = vi.fn(async (_input: SkillUpsert) => personalStyleSkill);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        skillDraft: {
+          title: "克制产品随笔",
+          description: "短句、具体、少夸张。",
+          prompt: "保持短句，写具体例子。"
+        }
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderRootMemorySetup({
+      onCreateSkill,
+      onSubmit,
+      onUpdateSkill: vi.fn(),
+      styleProfileExternalAvailable: false
+    });
+
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。\n\n第二段代表作。");
+    await userEvent.click(screen.getByRole("button", { name: "生成风格草稿" }));
+    expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：克制产品随笔");
+
+    await userEvent.click(screen.getByRole("button", { name: "保存并用于本作品" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "创作 seed" }), "我想写 AI 产品经理的真实困境");
+    await userEvent.click(screen.getByRole("button", { name: "用这个念头开始" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/skills/style/generate-from-samples",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ samples: ["第一段代表作。", "第二段代表作。"] })
+      })
+    );
+    expect(onCreateSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "我的风格：克制产品随笔",
+        category: "风格",
+        appliesTo: "writer"
+      })
+    );
+    expect(onSubmit).toHaveBeenCalledWith({
+      preferences: expect.objectContaining({ seed: "我想写 AI 产品经理的真实困境" }),
+      enabledSkillIds: ["system-analysis", "style-new"]
     });
   });
 

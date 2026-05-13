@@ -449,6 +449,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   const [isSkillPanelOpen, setIsSkillPanelOpen] = useState(false);
   const [isSkillLibraryOpen, setIsSkillLibraryOpen] = useState(false);
   const [skillLibraryMessage, setSkillLibraryMessage] = useState("");
+  const [isExternalStyleGenerationAvailable, setIsExternalStyleGenerationAvailable] = useState(false);
   const [draftComparison, setDraftComparison] = useState<DraftComparisonSelection | null>(null);
   const [rootSetupDefaults, setRootSetupDefaults] = useState<RootSetupDefaults | null>(null);
   const [streamingDraft, setStreamingDraft] = useState<StreamingDraftEntry | null>(null);
@@ -579,11 +580,13 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
         creationRequestOptions?: CreationRequestOption[];
         error?: string;
         skills?: Skill[];
+        styleProfile?: { externalStyleGenerationAvailable?: boolean };
       };
       if (!isCurrentLoadRequest(requestId)) return;
       if (!skillsResponse.ok || !skillsData.skills) throw new Error(skillsData.error ?? "技能加载失败。");
       setSkills(skillsData.skills);
       setCreationRequestOptions(skillsData.creationRequestOptions ?? defaultCreationRequestOptions());
+      setIsExternalStyleGenerationAvailable(Boolean(skillsData.styleProfile?.externalStyleGenerationAvailable));
 
       const response = await fetch("/api/root-memory");
       if (!isCurrentLoadRequest(requestId)) return;
@@ -712,7 +715,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     }
   }
 
-  async function createLibrarySkill(input: SkillUpsert) {
+  async function createLibrarySkill(input: SkillUpsert): Promise<Skill | null> {
     setIsBusy(true);
     setSkillLibraryMessage("");
     try {
@@ -724,10 +727,10 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       const data = (await response.json()) as { skill?: Skill; error?: string };
       if (!response.ok || !data.skill) throw new Error(data.error ?? "技能保存失败。");
       setSkills((current) => [...current, data.skill!]);
-      return true;
+      return data.skill;
     } catch (error) {
       setSkillLibraryMessage(error instanceof Error ? error.message : "技能保存失败。");
-      return false;
+      return null;
     } finally {
       setIsBusy(false);
     }
@@ -1384,9 +1387,12 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           message={message}
           onBack={sessionState ? returnToCurrentWork : undefined}
           onCreationRequestOptionsChange={setCreationRequestOptions}
+          onCreateSkill={createLibrarySkill}
           onManageSkills={() => setIsSkillLibraryOpen(true)}
           onSubmit={saveRoot}
+          onUpdateSkill={updateLibrarySkill}
           isSaving={isBusy}
+          styleProfileExternalAvailable={isExternalStyleGenerationAvailable}
           skills={skills}
         />
         {isSkillLibraryOpen ? (
@@ -1395,7 +1401,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
             isSaving={isBusy}
             onArchive={(skillId) => void archiveLibrarySkill(skillId)}
             onClose={() => setIsSkillLibraryOpen(false)}
-            onCreate={createLibrarySkill}
+            onCreate={async (input) => Boolean(await createLibrarySkill(input))}
             onImport={importLibrarySkills}
             onUpdate={async (skillId, input) => Boolean(await updateLibrarySkill(skillId, input))}
             skills={skills}
@@ -1637,7 +1643,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           isSaving={isBusy}
           onArchive={(skillId) => void archiveLibrarySkill(skillId)}
           onClose={() => setIsSkillLibraryOpen(false)}
-          onCreate={createLibrarySkill}
+          onCreate={async (input) => Boolean(await createLibrarySkill(input))}
           onImport={importLibrarySkills}
           onUpdate={async (skillId, input) => Boolean(await updateLibrarySkill(skillId, input))}
           skills={skills}

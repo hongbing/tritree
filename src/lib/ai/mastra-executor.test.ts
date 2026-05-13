@@ -75,6 +75,7 @@ const enabledSkills: Skill[] = [
 ];
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
   vi.clearAllMocks();
   consoleInfoSpy.mockClear();
   modelFactory.mockClear();
@@ -362,6 +363,32 @@ describe("tree director compatibility generators", () => {
     );
   });
 
+  it("logs the full generated draft response once by default", async () => {
+    const finalObject = {
+      roundIntent: "继续完善",
+      draft: {
+        title: "写作为什么重要",
+        body: "写作让我想清楚事情。\n\n这一段需要原样出现在日志里。",
+        hashtags: ["#写作"],
+        imagePrompt: "桌面上的笔记"
+      },
+      memoryObservation: "用户喜欢具体表达。"
+    };
+    const fakeAgent = {
+      generate: vi.fn(async () => ({ object: finalObject }))
+    };
+
+    await generateTreeDraft({
+      parts: directorParts,
+      treeDraftAgent: fakeAgent
+    });
+
+    const responseLogs = consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-response:draft]");
+    expect(responseLogs).toHaveLength(1);
+    expect(responseLogs[0]?.[1]).toContain('"mode": "generate"');
+    expect(responseLogs[0]?.[1]).toContain("这一段需要原样出现在日志里。");
+  });
+
   it("streams partial old UI draft objects before returning the final object", async () => {
     const finalObject = {
       roundIntent: "继续完善",
@@ -401,6 +428,74 @@ describe("tree director compatibility generators", () => {
       { roundIntent: "继续完善", draft: { title: "写作为什么重要" } },
       { roundIntent: "继续完善", draft: { title: "写作为什么重要", body: "写作让我想清楚事情。" } }
     ]);
+  });
+
+  it("logs only the final streamed options response by default", async () => {
+    vi.stubEnv("TRITREE_DEBUG_STREAM", "0");
+    const finalObject = {
+      roundIntent: "最终选择下一步",
+      options: [
+        { id: "a", label: "最终 A", description: "最终说明 A。", impact: "最终影响 A。", kind: "explore" },
+        { id: "b", label: "最终 B", description: "最终说明 B。", impact: "最终影响 B。", kind: "deepen" },
+        { id: "c", label: "最终 C", description: "最终说明 C。", impact: "最终影响 C。", kind: "reframe" }
+      ],
+      memoryObservation: "最终观察。"
+    };
+    const fakeAgent = {
+      stream: vi.fn(async () => ({
+        objectStream: async function* () {
+          yield { roundIntent: "半成品", options: [{ id: "a", label: "半成品 A" }] };
+          yield finalObject;
+        },
+        object: Promise.resolve(finalObject)
+      })),
+      generate: vi.fn()
+    };
+
+    await streamTreeOptions({
+      parts: directorParts,
+      treeOptionsAgent: fakeAgent
+    });
+
+    const responseLogs = consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-response:options]");
+    const streamLogs = consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-stream:options-partial]");
+    expect(responseLogs).toHaveLength(1);
+    expect(responseLogs[0]?.[1]).toContain("最终选择下一步");
+    expect(responseLogs[0]?.[1]).not.toContain("半成品 A");
+    expect(streamLogs).toHaveLength(0);
+  });
+
+  it("logs full structured stream partials when TRITREE_DEBUG_STREAM is enabled", async () => {
+    vi.stubEnv("TRITREE_DEBUG_STREAM", "1");
+    const finalObject = {
+      roundIntent: "最终选择下一步",
+      options: [
+        { id: "a", label: "最终 A", description: "最终说明 A。", impact: "最终影响 A。", kind: "explore" },
+        { id: "b", label: "最终 B", description: "最终说明 B。", impact: "最终影响 B。", kind: "deepen" },
+        { id: "c", label: "最终 C", description: "最终说明 C。", impact: "最终影响 C。", kind: "reframe" }
+      ],
+      memoryObservation: "最终观察。"
+    };
+    const fakeAgent = {
+      stream: vi.fn(async () => ({
+        objectStream: async function* () {
+          yield { roundIntent: "半成品", options: [{ id: "a", label: "半成品 A" }] };
+          yield finalObject;
+        },
+        object: Promise.resolve(finalObject)
+      })),
+      generate: vi.fn()
+    };
+
+    await streamTreeOptions({
+      parts: directorParts,
+      treeOptionsAgent: fakeAgent
+    });
+
+    const streamLogs = consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-stream:options-partial]");
+    expect(streamLogs).toHaveLength(2);
+    expect(streamLogs[0]?.[1]).toContain("半成品 A");
+    expect(streamLogs[1]?.[1]).toContain("最终 C");
   });
 
   it("generates old UI branch options through a Mastra-compatible structured agent", async () => {

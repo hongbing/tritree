@@ -2,6 +2,7 @@ import { Agent } from "@mastra/core/agent";
 import { z } from "zod";
 import { skillsForTarget, type Draft, type Skill } from "@/lib/domain";
 import { parseDirectorJsonObject } from "./director";
+import { logTritreeAiResponse, logTritreeAiStream } from "./debug-log";
 import { createTreeableAnthropicModel } from "./mastra-agents";
 import type { MemoryScope } from "./mastra-executor";
 import { formatEnabledSkills, type DirectorMessage } from "./prompts";
@@ -31,6 +32,7 @@ type RewriteSelectedDraftTextOptions = {
   onText?: (event: { accumulatedText: string; delta: string; partialReplacementText: string }) => void;
   selectionRewriteAgent?: SelectionRewriteAgentLike;
   signal?: AbortSignal;
+  suppressResponseLog?: boolean;
 };
 
 type SelectionRewriteAgentLike = {
@@ -133,7 +135,11 @@ export async function rewriteSelectedDraftText(
     structuredOutput: { schema: SelectionRewriteOutputSchema }
   });
 
-  return parseSelectionRewriteOutput(result.object ?? result.output);
+  const output = parseSelectionRewriteOutput(result.object ?? result.output);
+  if (!options.suppressResponseLog) {
+    logSelectionRewriteResponse("generate", output);
+  }
+  return output;
 }
 
 export async function streamSelectedDraftText(
@@ -155,6 +161,7 @@ export async function streamSelectedDraftText(
       return;
     }
 
+    logSelectionRewriteStream("partial", partial);
     const delta = partial.replacementText.startsWith(lastPartialReplacementText)
       ? partial.replacementText.slice(lastPartialReplacementText.length)
       : partial.replacementText;
@@ -178,9 +185,11 @@ export async function streamSelectedDraftText(
     const output = await rewriteSelectedDraftText(input, {
       ...options,
       memory,
-      selectionRewriteAgent: agent
+      selectionRewriteAgent: agent,
+      suppressResponseLog: true
     });
     emitPartial(output);
+    logSelectionRewriteResponse("stream", output);
     return output;
   }
 
@@ -194,6 +203,7 @@ export async function streamSelectedDraftText(
 
   const output = parseSelectionRewriteOutput(await resolveStructuredStreamOutput(stream, latestPartial));
   emitPartial(output);
+  logSelectionRewriteResponse("stream", output);
   return output;
 }
 
@@ -215,6 +225,19 @@ function parseSelectionRewriteOutput(value: unknown): SelectionRewriteOutput {
   }
 
   return { replacementText: parsed.replacementText };
+}
+
+function logSelectionRewriteResponse(mode: "generate" | "stream", response: SelectionRewriteOutput) {
+  logTritreeAiResponse("ai-response", "selection-rewrite", {
+    mode,
+    response
+  });
+}
+
+function logSelectionRewriteStream(event: "partial", value: unknown) {
+  logTritreeAiStream("ai-stream", `selection-rewrite-${event}`, {
+    value
+  });
 }
 
 function selectionRewriteMessages(input: SelectionRewriteInput): DirectorMessage[] {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildSelectionRewritePrompt,
   extractPartialSelectionRewriteText,
@@ -30,6 +30,13 @@ const input = {
   selectedText: "第二句要更具体。",
   instruction: "补一个真实工作细节"
 } satisfies SelectionRewriteInput;
+
+const consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+beforeEach(() => {
+  vi.unstubAllEnvs();
+  consoleInfoSpy.mockClear();
+});
 
 describe("buildSelectionRewritePrompt", () => {
   it("includes draft context, selected text, instruction, and enabled skills without path context", () => {
@@ -138,6 +145,23 @@ describe("rewriteSelectedDraftText", () => {
       })
     );
   });
+
+  it("logs the full rewrite response once by default", async () => {
+    const fakeAgent = {
+      generate: vi.fn(async () => ({
+        object: { replacementText: "第二句加入了排期会上的真实追问。\n这行也要完整进日志。" }
+      }))
+    };
+
+    await rewriteSelectedDraftText(input, {
+      selectionRewriteAgent: fakeAgent
+    });
+
+    const responseLogs = consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-response:selection-rewrite]");
+    expect(responseLogs).toHaveLength(1);
+    expect(responseLogs[0]?.[1]).toContain('"mode": "generate"');
+    expect(responseLogs[0]?.[1]).toContain("这行也要完整进日志。");
+  });
 });
 
 describe("streamSelectedDraftText", () => {
@@ -180,5 +204,36 @@ describe("streamSelectedDraftText", () => {
         partialReplacementText: "第二句加入排期会细节。"
       })
     );
+  });
+
+  it("logs streamed rewrite partials only when TRITREE_DEBUG_STREAM is enabled", async () => {
+    const finalObject = { replacementText: "第二句加入排期会细节。" };
+    const fakeAgent = {
+      stream: vi.fn(async () => ({
+        objectStream: async function* () {
+          yield { replacementText: "第二句" };
+          yield finalObject;
+        },
+        object: Promise.resolve(finalObject)
+      })),
+      generate: vi.fn()
+    };
+
+    await streamSelectedDraftText(input, {
+      selectionRewriteAgent: fakeAgent
+    });
+
+    expect(consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-stream:selection-rewrite-partial]")).toHaveLength(0);
+
+    consoleInfoSpy.mockClear();
+    vi.stubEnv("TRITREE_DEBUG_STREAM", "1");
+    await streamSelectedDraftText(input, {
+      selectionRewriteAgent: fakeAgent
+    });
+
+    const streamLogs = consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-stream:selection-rewrite-partial]");
+    expect(streamLogs).toHaveLength(2);
+    expect(streamLogs[0]?.[1]).toContain("第二句");
+    expect(streamLogs[1]?.[1]).toContain("第二句加入排期会细节。");
   });
 });

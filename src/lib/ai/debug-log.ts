@@ -7,6 +7,15 @@ export function logTritreeAiDebug(area: string, event: string, details: Record<s
   console.info(`[tritree:${area}:${event}]`, sanitizeDebugValue(details));
 }
 
+export function logTritreeAiResponse(area: string, event: string, details: Record<string, unknown> = {}) {
+  console.info(`[tritree:${area}:${event}]`, stringifyFullDebugValue(details));
+}
+
+export function logTritreeAiStream(area: string, event: string, details: Record<string, unknown> = {}) {
+  if (process.env.TRITREE_DEBUG_STREAM !== "1") return;
+  console.info(`[tritree:${area}:${event}]`, stringifyFullDebugValue(details));
+}
+
 export function summarizeTritreeStreamEventForLog(value: unknown) {
   if (!isDebugRecord(value)) return { type: typeof value };
 
@@ -57,7 +66,33 @@ export function summarizeTritreeStreamEventForLog(value: unknown) {
 function isTritreeAiDebugEnabled() {
   if (process.env.TRITREE_DEBUG_STREAM === "1") return true;
   if (process.env.TRITREE_DEBUG_STREAM === "0") return false;
-  return process.env.NODE_ENV === "development";
+  return false;
+}
+
+function stringifyFullDebugValue(value: unknown) {
+  const seen = new WeakSet<object>();
+  const text = JSON.stringify(
+    value,
+    (_key, item) => {
+      if (typeof item === "bigint") return item.toString();
+      if (item instanceof Error) {
+        return {
+          name: item.name,
+          message: item.message,
+          stack: item.stack
+        };
+      }
+
+      if (item && typeof item === "object") {
+        if (seen.has(item)) return "[Circular]";
+        seen.add(item);
+      }
+
+      return item;
+    },
+    2
+  );
+  return text ?? String(value);
 }
 
 function sanitizeDebugValue(value: unknown, depth = 0): unknown {

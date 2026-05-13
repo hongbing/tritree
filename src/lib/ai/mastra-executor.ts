@@ -22,7 +22,7 @@ import {
   buildTreeOptionsInstructions,
   type SharedAgentContextInput
 } from "./mastra-context";
-import { logTritreeAiDebug } from "./debug-log";
+import { logTritreeAiDebug, logTritreeAiResponse, logTritreeAiStream } from "./debug-log";
 import { buildDirectorInput, parseDirectorJsonObject } from "./director";
 import type { DirectorInputParts } from "./prompts";
 
@@ -166,15 +166,17 @@ export async function generateTreeDraft({
   env,
   memory,
   context,
-  treeDraftAgent
+  treeDraftAgent,
+  suppressResponseLog
 }: TreeDirectorExecutionInput & {
   treeDraftAgent?: TreeDraftAgentLike;
+  suppressResponseLog?: boolean;
 }): Promise<DirectorDraftOutput> {
   const { agentContext, tools } = await executionContextForDirectorParts(parts, "writer", context, Boolean(treeDraftAgent));
   const messages = directorMessagesForParts(parts);
   logMastraPrompt("draft", agentContext, messages);
   const agent = treeDraftAgent ?? (createTreeDraftAgent(agentContext, env, tools) as unknown as TreeDraftAgentLike);
-  return withStructuredOutputRetries(messages, "draft", async (attemptMessages) => {
+  const output = await withStructuredOutputRetries(messages, "draft", async (attemptMessages) => {
     let result: Awaited<ReturnType<TreeDraftAgentLike["generate"]>>;
     try {
       result = await agent.generate(attemptMessages, {
@@ -189,6 +191,8 @@ export async function generateTreeDraft({
 
     return DirectorDraftOutputSchema.parse(unwrapMastraToolInput(result.object ?? result.output));
   });
+  if (!suppressResponseLog) logAiResponse("draft", "generate", output);
+  return output;
 }
 
 export async function generateTreeNextStep({
@@ -197,15 +201,17 @@ export async function generateTreeNextStep({
   env,
   memory,
   context,
-  treeNextStepAgent
+  treeNextStepAgent,
+  suppressResponseLog
 }: TreeDirectorExecutionInput & {
   treeNextStepAgent?: TreeNextStepAgentLike;
+  suppressResponseLog?: boolean;
 }): Promise<DirectorNextStepOutput> {
   const { agentContext, tools } = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeNextStepAgent));
   const messages = directorMessagesForParts(parts);
   logMastraPrompt("next-step", agentContext, messages);
   const agent = treeNextStepAgent ?? (createTreeNextStepAgent(agentContext, env, tools) as unknown as TreeNextStepAgentLike);
-  return withStructuredOutputRetries(messages, "next-step", async (attemptMessages) => {
+  const output = await withStructuredOutputRetries(messages, "next-step", async (attemptMessages) => {
     let result: Awaited<ReturnType<TreeNextStepAgentLike["generate"]>>;
     try {
       result = await agent.generate(attemptMessages, {
@@ -220,6 +226,8 @@ export async function generateTreeNextStep({
 
     return DirectorNextStepOutputSchema.parse(unwrapMastraToolInput(result.object ?? result.output));
   });
+  if (!suppressResponseLog) logAiResponse("next-step", "generate", output);
+  return output;
 }
 
 export async function streamTreeNextStep({
@@ -241,7 +249,7 @@ export async function streamTreeNextStep({
   logMastraPrompt("next-step", agentContext, messages);
   const agent = treeNextStepAgent ?? (createTreeNextStepAgent(agentContext, env, tools) as unknown as TreeNextStepAgentLike);
 
-  return withStructuredOutputRetries(messages, "next-step", async (attemptMessages) => {
+  const output = await withStructuredOutputRetries(messages, "next-step", async (attemptMessages) => {
     const stream = agent.stream
       ? await agent.stream(attemptMessages, {
           abortSignal: signal,
@@ -258,7 +266,8 @@ export async function streamTreeNextStep({
         env,
         memory,
         context,
-        treeNextStepAgent: agent
+        treeNextStepAgent: agent,
+        suppressResponseLog: true
       });
       onPartialObject?.(output as TreeNextStepPartial);
       return output;
@@ -267,11 +276,13 @@ export async function streamTreeNextStep({
     let latestPartial: unknown = null;
     if (stream.fullStream) {
       latestPartial = await consumeStructuredFullStream<TreeNextStepPartial>(stream.fullStream, {
+        logTarget: "next-step",
         onPartialObject,
         onReasoningText
       });
     } else if (stream.objectStream) {
       for await (const partial of toAsyncIterable(stream.objectStream)) {
+        logAiStream("next-step", "partial", partial);
         latestPartial = partial;
         onPartialObject?.(partial as TreeNextStepPartial);
       }
@@ -280,6 +291,8 @@ export async function streamTreeNextStep({
     const output = await resolveStructuredStreamOutput(stream, latestPartial);
     return DirectorNextStepOutputSchema.parse(output);
   });
+  logAiResponse("next-step", "stream", output);
+  return output;
 }
 
 export async function streamTreeDraft({
@@ -305,7 +318,7 @@ export async function streamTreeDraft({
   const agent = treeDraftAgent ?? (createTreeDraftAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeDraftAgentLike);
   if (runtimeHasTools) {
     const runtimeTools = agentTools as ToolsInput;
-    return streamRuntimeToolsThenStructure<TreeDraftPartial, DirectorDraftOutput>({
+    const output = await streamRuntimeToolsThenStructure<TreeDraftPartial, DirectorDraftOutput>({
       agent,
       env,
       memory: memory ?? memoryScopeForDirectorParts(parts),
@@ -317,9 +330,11 @@ export async function streamTreeDraft({
       target: "draft",
       tools: runtimeTools
     });
+    logAiResponse("draft", "stream", output);
+    return output;
   }
 
-  return withStructuredOutputRetries(messages, "draft", async (attemptMessages) => {
+  const output = await withStructuredOutputRetries(messages, "draft", async (attemptMessages) => {
     const stream = agent.stream
       ? await agent.stream(attemptMessages, {
           abortSignal: signal,
@@ -336,7 +351,8 @@ export async function streamTreeDraft({
         env,
         memory,
         context,
-        treeDraftAgent: agent
+        treeDraftAgent: agent,
+        suppressResponseLog: true
       });
       onPartialObject?.(output);
       return output;
@@ -345,11 +361,13 @@ export async function streamTreeDraft({
     let latestPartial: unknown = null;
     if (stream.fullStream) {
       latestPartial = await consumeStructuredFullStream<TreeDraftPartial>(stream.fullStream, {
+        logTarget: "draft",
         onPartialObject,
         onReasoningText
       });
     } else if (stream.objectStream) {
       for await (const partial of toAsyncIterable(stream.objectStream)) {
+        logAiStream("draft", "partial", partial);
         latestPartial = partial;
         onPartialObject?.(partial as TreeDraftPartial);
       }
@@ -358,6 +376,8 @@ export async function streamTreeDraft({
     const output = await resolveStructuredStreamOutput(stream, latestPartial);
     return DirectorDraftOutputSchema.parse(output);
   });
+  logAiResponse("draft", "stream", output);
+  return output;
 }
 
 export async function generateTreeOptions({
@@ -366,15 +386,17 @@ export async function generateTreeOptions({
   env,
   memory,
   context,
-  treeOptionsAgent
+  treeOptionsAgent,
+  suppressResponseLog
 }: TreeDirectorExecutionInput & {
   treeOptionsAgent?: TreeOptionsAgentLike;
+  suppressResponseLog?: boolean;
 }): Promise<DirectorOptionsOutput> {
   const { agentContext, tools } = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeOptionsAgent));
   const messages = directorMessagesForParts(parts);
   logMastraPrompt("options", agentContext, messages);
   const agent = treeOptionsAgent ?? (createTreeOptionsAgent(agentContext, env, tools) as unknown as TreeOptionsAgentLike);
-  return withStructuredOutputRetries(messages, "options", async (attemptMessages) => {
+  const output = await withStructuredOutputRetries(messages, "options", async (attemptMessages) => {
     let result: Awaited<ReturnType<TreeOptionsAgentLike["generate"]>>;
     try {
       result = await agent.generate(attemptMessages, {
@@ -389,6 +411,8 @@ export async function generateTreeOptions({
 
     return DirectorOptionsOutputSchema.parse(unwrapMastraToolInput(result.object ?? result.output));
   });
+  if (!suppressResponseLog) logAiResponse("options", "generate", output);
+  return output;
 }
 
 export async function streamTreeOptions({
@@ -414,7 +438,7 @@ export async function streamTreeOptions({
   const agent = treeOptionsAgent ?? (createTreeOptionsAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeOptionsAgentLike);
   if (runtimeHasTools) {
     const runtimeTools = agentTools as ToolsInput;
-    return streamRuntimeToolsThenStructure<TreeOptionsPartial, DirectorOptionsOutput>({
+    const output = await streamRuntimeToolsThenStructure<TreeOptionsPartial, DirectorOptionsOutput>({
       agent,
       env,
       memory: memory ?? memoryScopeForDirectorParts(parts),
@@ -426,9 +450,11 @@ export async function streamTreeOptions({
       target: "options",
       tools: runtimeTools
     });
+    logAiResponse("options", "stream", output);
+    return output;
   }
 
-  return withStructuredOutputRetries(messages, "options", async (attemptMessages) => {
+  const output = await withStructuredOutputRetries(messages, "options", async (attemptMessages) => {
     const stream = agent.stream
       ? await agent.stream(attemptMessages, {
           abortSignal: signal,
@@ -445,7 +471,8 @@ export async function streamTreeOptions({
         env,
         memory,
         context,
-        treeOptionsAgent: agent
+        treeOptionsAgent: agent,
+        suppressResponseLog: true
       });
       onPartialObject?.(output);
       return output;
@@ -454,11 +481,13 @@ export async function streamTreeOptions({
     let latestPartial: unknown = null;
     if (stream.fullStream) {
       latestPartial = await consumeStructuredFullStream<TreeOptionsPartial>(stream.fullStream, {
+        logTarget: "options",
         onPartialObject,
         onReasoningText
       });
     } else if (stream.objectStream) {
       for await (const partial of toAsyncIterable(stream.objectStream)) {
+        logAiStream("options", "partial", partial);
         latestPartial = partial;
         onPartialObject?.(partial as TreeOptionsPartial);
       }
@@ -467,6 +496,8 @@ export async function streamTreeOptions({
     const output = await resolveStructuredStreamOutput(stream, latestPartial);
     return DirectorOptionsOutputSchema.parse(output);
   });
+  logAiResponse("options", "stream", output);
+  return output;
 }
 
 function contextForDirectorParts(
@@ -517,6 +548,19 @@ function withFinalSubmitTool(tools: ToolsInput, target: "draft" | "options"): To
 
 function finalSubmitToolName(target: "draft" | "options") {
   return target === "draft" ? SUBMIT_TREE_DRAFT_TOOL_NAME : SUBMIT_TREE_OPTIONS_TOOL_NAME;
+}
+
+function logAiResponse(target: "draft" | "next-step" | "options", mode: "generate" | "stream", response: unknown) {
+  logTritreeAiResponse("ai-response", target, {
+    mode,
+    response
+  });
+}
+
+function logAiStream(target: "draft" | "next-step" | "options", event: "chunk" | "partial", value: unknown) {
+  logTritreeAiStream("ai-stream", `${target}-${event}`, {
+    value
+  });
 }
 
 async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
@@ -605,7 +649,8 @@ async function streamRuntimeToolsOnce<TPartial, TOutput>({
 
   const summary = await consumeRuntimeReActStream<TPartial>(stream, {
     onPartialObject,
-    onReasoningText
+    onReasoningText,
+    target
   });
   return {
     output: await parseRuntimeReActStreamOutput(stream, summary, schema, target),
@@ -618,6 +663,7 @@ async function consumeRuntimeReActStream<TPartial>(
   options: {
     onPartialObject?: (partial: TPartial) => void;
     onReasoningText?: (event: ReasoningTextEvent) => void;
+    target: "draft" | "options";
   }
 ): Promise<RuntimeToolStreamSummary> {
   let accumulatedProgressText = "";
@@ -637,6 +683,7 @@ async function consumeRuntimeReActStream<TPartial>(
 
   if (stream.fullStream) {
     for await (const chunk of toAsyncIterable(stream.fullStream)) {
+      logAiStream(options.target, "chunk", chunk);
       const textDelta = textDeltaFromStreamChunk(chunk);
       const submittedDeltaOutput = submittedOutputDeltaFromStreamChunk(chunk, toolCallDeltaState);
       const submittedChunkOutput = submittedOutputFromStreamChunk(chunk);
@@ -698,17 +745,20 @@ async function consumeRuntimeReActStream<TPartial>(
       hasSeenToolActivity = hasSeenToolActivity || hasToolActivity;
 
       if (partial !== undefined) {
+        logAiStream(options.target, "partial", partial);
         latestPartial = partial;
         options.onPartialObject?.(partial as TPartial);
       }
 
       if (submittedDeltaOutput !== undefined) {
+        logAiStream(options.target, "partial", submittedDeltaOutput);
         submittedOutput = submittedDeltaOutput;
         latestPartial = submittedDeltaOutput;
         options.onPartialObject?.(submittedDeltaOutput as TPartial);
       }
 
       if (submittedChunkOutput !== undefined) {
+        logAiStream(options.target, "partial", submittedChunkOutput);
         submittedOutput = submittedChunkOutput;
         latestPartial = submittedChunkOutput;
         options.onPartialObject?.(submittedChunkOutput as TPartial);
@@ -725,6 +775,7 @@ async function consumeRuntimeReActStream<TPartial>(
 
   if (stream.objectStream) {
     for await (const partial of toAsyncIterable(stream.objectStream)) {
+      logAiStream(options.target, "partial", partial);
       latestPartial = partial;
       options.onPartialObject?.(partial as TPartial);
     }
@@ -1161,6 +1212,7 @@ function hasRuntimeTools(tools: ToolsInput | undefined): tools is ToolsInput {
 async function consumeStructuredFullStream<TPartial>(
   fullStream: StreamSource<unknown>,
   options: {
+    logTarget: "draft" | "next-step" | "options";
     onPartialObject?: (partial: TPartial) => void;
     onReasoningText?: (event: ReasoningTextEvent) => void;
   }
@@ -1170,6 +1222,7 @@ async function consumeStructuredFullStream<TPartial>(
   let previousProgressSegmentKind: ProgressSegmentKind | null = null;
 
   for await (const chunk of toAsyncIterable(fullStream)) {
+    logAiStream(options.logTarget, "chunk", chunk);
     const formattedProgress = formatProgressSegments(
       progressSegmentsFromStreamChunk(chunk),
       accumulatedProgressText,
@@ -1187,6 +1240,7 @@ async function consumeStructuredFullStream<TPartial>(
 
     const partial = structuredObjectFromStreamChunk(chunk);
     if (partial !== undefined) {
+      logAiStream(options.logTarget, "partial", partial);
       latestPartial = partial;
       options.onPartialObject?.(partial as TPartial);
     }

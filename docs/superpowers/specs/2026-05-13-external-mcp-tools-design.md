@@ -78,7 +78,7 @@ Example HTTP config:
 }
 ```
 
-Environment variable expansion is limited to exact `${NAME}` placeholders in configured string values. Missing placeholders should make that server unavailable with a redacted diagnostic.
+Environment variable expansion replaces `${NAME}` placeholders inside configured string values. Missing placeholders should make that server unavailable with a redacted diagnostic.
 
 ## Config Contract
 

@@ -137,7 +137,7 @@ export function StyleProfileSetup({
         <button
           aria-expanded={isExpanded}
           className="secondary-button"
-          disabled={disabled}
+          disabled={isBusy}
           onClick={() => setIsExpanded((expanded) => !expanded)}
           type="button"
         >

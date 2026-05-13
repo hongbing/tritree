@@ -22,6 +22,7 @@ import {
 } from "@/lib/auth/types";
 import {
   type BranchOption,
+  type AgentMessage,
   type CreationRequestOption,
   type CreationRequestOptionUpsert,
   type DirectorDraftOutput,
@@ -36,6 +37,7 @@ import {
   type SkillUpsert,
   type SessionState,
   type TreeNode,
+  AgentMessageSchema,
   BranchOptionSchema,
   CUSTOM_EDIT_OPTION,
   CUSTOM_OPTION_ID_PREFIX,
@@ -105,7 +107,6 @@ type SessionRow = {
   status: string;
   current_node_id: string | null;
   is_archived: number;
-  tool_memory: string;
   created_at: string;
   updated_at: string;
 };
@@ -125,6 +126,7 @@ type TreeNodeRow = {
   options_json: string;
   selected_option_id: string | null;
   folded_options_json: string;
+  agent_messages_json?: string;
   is_terminal?: number;
   created_at: string;
 };
@@ -186,12 +188,30 @@ const OLD_CREATION_REQUEST_OPTION_ORDER = [
   "default-short-version"
 ];
 
+const MAX_NODE_AGENT_MESSAGES_JSON_CHARS = 48000;
+
 function now() {
   return new Date().toISOString();
 }
 
 function parseJson<T>(value: string): T {
   return JSON.parse(value) as T;
+}
+
+function parseAgentMessages(value: string | null | undefined) {
+  return AgentMessageSchema.array().parse(parseJson<unknown>(value || "[]"));
+}
+
+function appendAgentMessagesJson(currentJson: string | null | undefined, agentMessages: AgentMessage[] | undefined) {
+  const incoming = AgentMessageSchema.array().parse(agentMessages ?? []);
+  const existing = parseAgentMessages(currentJson);
+  if (incoming.length === 0) return JSON.stringify(existing);
+
+  const next = [...existing, ...incoming];
+  while (next.length > 0 && JSON.stringify(next).length > MAX_NODE_AGENT_MESSAGES_JSON_CHARS) {
+    next.shift();
+  }
+  return JSON.stringify(next);
 }
 
 function toUser(row: UserRow): User {
@@ -308,6 +328,7 @@ function toNode(row: TreeNodeRow): TreeNode {
     options,
     selectedOptionId: row.selected_option_id as BranchOption["id"] | null,
     foldedOptions,
+    agentMessages: parseAgentMessages(row.agent_messages_json),
     isTerminal: Boolean(row.is_terminal),
     createdAt: row.created_at
   });
@@ -1471,12 +1492,14 @@ export function createTreeableRepository(
     userId,
     sessionId,
     nodeId,
-    output
+    output,
+    agentMessages
   }: {
     userId: string;
     sessionId: string;
     nodeId: string;
     output: DirectorDraftOutput;
+    agentMessages?: AgentMessage[];
   }) {
     const session = getActiveSession(userId, sessionId);
     if (!session) {
@@ -1489,15 +1512,16 @@ export function createTreeableRepository(
 
     const parsedDraft = DraftSchema.parse(output.draft);
     const timestamp = now();
+    const agentMessagesJson = appendAgentMessagesJson(target.agent_messages_json, agentMessages);
 
     return withTransaction(db, () => {
       db.prepare(
         `
           UPDATE tree_nodes
-          SET round_intent = ?
+          SET round_intent = ?, agent_messages_json = ?
           WHERE id = ?
         `
-      ).run(output.roundIntent, nodeId);
+      ).run(output.roundIntent, agentMessagesJson, nodeId);
 
       db.prepare(
         `
@@ -1536,12 +1560,14 @@ export function createTreeableRepository(
     userId,
     sessionId,
     nodeId,
-    output
+    output,
+    agentMessages
   }: {
     userId: string;
     sessionId: string;
     nodeId: string;
     output: DirectorOptionsOutput;
+    agentMessages?: AgentMessage[];
   }) {
     requireThreeOptions(output.options);
     const session = getActiveSession(userId, sessionId);
@@ -1554,15 +1580,16 @@ export function createTreeableRepository(
     }
 
     const timestamp = now();
+    const agentMessagesJson = appendAgentMessagesJson(target.agent_messages_json, agentMessages);
 
     return withTransaction(db, () => {
       db.prepare(
         `
           UPDATE tree_nodes
-          SET round_intent = ?, options_json = ?
+          SET round_intent = ?, options_json = ?, agent_messages_json = ?
           WHERE id = ?
         `
-      ).run(output.roundIntent, JSON.stringify(output.options), nodeId);
+      ).run(output.roundIntent, JSON.stringify(output.options), agentMessagesJson, nodeId);
 
       db.prepare(
         `
@@ -1584,12 +1611,14 @@ export function createTreeableRepository(
     userId,
     sessionId,
     nodeId,
-    output
+    output,
+    agentMessages
   }: {
     userId: string;
     sessionId: string;
     nodeId: string;
     output: { roundIntent: string };
+    agentMessages?: AgentMessage[];
   }) {
     const session = getActiveSession(userId, sessionId);
     if (!session) {
@@ -1601,15 +1630,16 @@ export function createTreeableRepository(
     }
 
     const timestamp = now();
+    const agentMessagesJson = appendAgentMessagesJson(target.agent_messages_json, agentMessages);
 
     return withTransaction(db, () => {
       db.prepare(
         `
           UPDATE tree_nodes
-          SET round_intent = ?, options_json = '[]', is_terminal = 1
+          SET round_intent = ?, options_json = '[]', agent_messages_json = ?, is_terminal = 1
           WHERE id = ?
         `
-      ).run(output.roundIntent, nodeId);
+      ).run(output.roundIntent, agentMessagesJson, nodeId);
 
       db.prepare(
         `
@@ -1978,7 +2008,6 @@ export function createTreeableRepository(
       nodeDrafts: [...latestDraftByNode.values()].map((row) => ({ nodeId: row.node_id, draft: toDraft(row) })),
       selectedPath,
       treeNodes: nodes,
-      toolMemory: session.tool_memory ?? "",
       enabledSkillIds: enabledSkills.map((skill) => skill.id),
       enabledSkills,
       foldedBranches: historyRows.map((row) => ({

@@ -370,6 +370,20 @@ export const NodeDraftSchema = z.object({
   draft: DraftSchema
 });
 
+const AgentMessageContentSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
+  z.array(z.unknown()),
+  z.record(z.unknown())
+]);
+
+export const AgentMessageSchema = z.object({
+  role: z.enum(["assistant", "tool", "user"]),
+  content: AgentMessageContentSchema
+});
+
 export const DirectorOutputSchema = z.object({
   roundIntent: z.string().min(1),
   options: z.array(BranchOptionSchema).length(3, "AI suggestions must include exactly three items."),
@@ -471,6 +485,7 @@ export const TreeNodeSchema = z.object({
   options: z.array(BranchOptionSchema),
   selectedOptionId: BranchOptionSchema.shape.id.nullable(),
   foldedOptions: z.array(BranchOptionSchema),
+  agentMessages: z.array(AgentMessageSchema),
   isTerminal: z.boolean().optional(),
   createdAt: z.string()
 });
@@ -498,7 +513,6 @@ export const SessionStateSchema = z.object({
   nodeDrafts: z.array(NodeDraftSchema).default([]),
   selectedPath: z.array(TreeNodeSchema),
   treeNodes: z.array(TreeNodeSchema).optional(),
-  toolMemory: z.string().default(""),
   enabledSkillIds: z.array(z.string().min(1)).default([]),
   enabledSkills: z.array(SkillSchema).default([]),
   foldedBranches: z.array(FoldedBranchSchema),
@@ -530,6 +544,7 @@ export type SkillTarget = Exclude<SkillAppliesTo, "both">;
 export type RootMemory = z.infer<typeof RootMemorySchema>;
 export type BranchOption = z.infer<typeof BranchOptionSchema>;
 export type Draft = z.infer<typeof DraftSchema>;
+export type AgentMessage = z.infer<typeof AgentMessageSchema>;
 export type PublishPackage = z.infer<typeof PublishPackageSchema>;
 export type NodeDraft = z.infer<typeof NodeDraftSchema>;
 export type OptionGenerationMode = z.infer<typeof OptionGenerationModeSchema>;

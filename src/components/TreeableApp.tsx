@@ -90,7 +90,6 @@ type DraftStreamEvent =
   | { type: "error"; error: string }
   | { type: "text"; text: string };
 type OptionsStreamEvent =
-  | { type: "state"; state: SessionState }
   | { type: "options"; nodeId: string; options: BranchOption[]; roundIntent?: string | null }
   | { type: "thinking"; nodeId?: string | null; text: string }
   | { type: "done"; state: SessionState }
@@ -211,7 +210,6 @@ function isOptionsStreamEvent(value: unknown): value is OptionsStreamEvent {
   if (!isRecord(value) || typeof value.type !== "string") return false;
 
   switch (value.type) {
-    case "state":
     case "done":
       return SessionStateSchema.safeParse(value.state).success;
     case "options":
@@ -679,12 +677,16 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       const data = (await response.json().catch(() => null)) as { error?: string } | null;
       throw new Error(data?.error ?? "启动创作失败。");
     }
-    if (!response.body) throw new Error("启动创作失败。");
+    const data = (await response.json()) as { state?: SessionState; error?: string };
+    if (!data.state?.currentNode) throw new Error(data.error ?? "启动创作失败。");
 
-    const state = await readOptionsStream(response);
-    if (!state) throw new Error("启动创作失败。");
-
+    const nodeId = data.state.currentNode.id;
+    setSessionState(data.state);
+    setViewNodeId(nodeId);
+    setLoadState("ready");
+    const state = await ensureNodeOptions(data.state, nodeId);
     setSessionState(state);
+    setViewNodeId(state.currentNode?.id ?? nodeId);
     setStreamingOptions(null);
     setStreamingThinking(null);
     setGeneratedDiffNodeId(null);
@@ -947,6 +949,46 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     return streamedState;
   }
 
+  function applyStreamingOptionsPreview(
+    value: { nodeId: string; options: BranchOption[]; roundIntent?: string | null },
+    completeOptionPreviewNodeIds: Set<string>
+  ) {
+    if (completeOptionPreviewNodeIds.has(value.nodeId) && value.options.length < 3) {
+      return false;
+    }
+
+    if (value.options.length >= 3) {
+      completeOptionPreviewNodeIds.add(value.nodeId);
+      setStreamingThinking((current) =>
+        current?.stage === "options" && (!current.nodeId || current.nodeId === value.nodeId) ? null : current
+      );
+    }
+
+    setGenerationStage({ nodeId: value.nodeId, stage: "options" });
+    setStreamingOptions({ nodeId: value.nodeId, roundIntent: value.roundIntent ?? null, options: value.options });
+    markMobilePanelUnread("tree");
+    return true;
+  }
+
+  function applyStreamingOptionsThinking(
+    value: { nodeId?: string | null; text: string },
+    fallbackNodeId: string | null | undefined,
+    completeOptionPreviewNodeIds: Set<string>
+  ) {
+    const thinkingNodeId = value.nodeId ?? fallbackNodeId ?? null;
+    if (thinkingNodeId && completeOptionPreviewNodeIds.has(thinkingNodeId)) {
+      return false;
+    }
+
+    setStreamingThinking({
+      nodeId: thinkingNodeId,
+      stage: "options",
+      text: value.text
+    });
+    markMobilePanelUnread("tree");
+    return true;
+  }
+
   async function readDraftStream(response: Response, nodeId: string) {
     if (!response.body) return null;
 
@@ -957,6 +999,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     let receivedDone = false;
     let streamRoutedToOptions = false;
     let streamError: string | null = null;
+    const completeOptionPreviewNodeIds = new Set<string>();
     const decoder = new TextDecoder();
     const reader = response.body.getReader();
     const throwStreamError = () => {
@@ -976,11 +1019,10 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       }
 
       if (value.type === "options") {
-        setGenerationStage({ nodeId: value.nodeId, stage: "options" });
-        setStreamingOptions({ nodeId: value.nodeId, roundIntent: value.roundIntent ?? null, options: value.options });
+        const didApplyOptions = applyStreamingOptionsPreview(value, completeOptionPreviewNodeIds);
         setStreamingThinking(null);
         showMobileTreeForOptionsGeneration();
-        receivedOptions = true;
+        receivedOptions = didApplyOptions;
         streamRoutedToOptions = true;
         return;
       }
@@ -1082,50 +1124,13 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     const parser = createNdjsonParser((value) => {
       if (!isOptionsStreamEvent(value)) return;
 
-      if (value.type === "state") {
-        const nodeId = value.state.currentNode?.id ?? fallbackNodeId ?? null;
-        setSessionState(value.state);
-        setViewNodeId(nodeId);
-        if (nodeId && needsNodeOptions(value.state, nodeId)) {
-          setGenerationStage({ nodeId, stage: "options" });
-          setStreamingOptions({ nodeId, options: [] });
-        }
-        markMobilePanelUnread("tree");
-        setLoadState("ready");
-        return;
-      }
-
       if (value.type === "options") {
-        if (completeOptionPreviewNodeIds.has(value.nodeId) && value.options.length < 3) {
-          return;
-        }
-
-        if (value.options.length >= 3) {
-          completeOptionPreviewNodeIds.add(value.nodeId);
-          setStreamingThinking((current) =>
-            current?.stage === "options" && (!current.nodeId || current.nodeId === value.nodeId) ? null : current
-          );
-        }
-
-        setStreamingOptions({ nodeId: value.nodeId, roundIntent: value.roundIntent ?? null, options: value.options });
-        markMobilePanelUnread("tree");
-        receivedOptions = true;
+        receivedOptions = applyStreamingOptionsPreview(value, completeOptionPreviewNodeIds);
         return;
       }
 
       if (value.type === "thinking") {
-        const thinkingNodeId = value.nodeId ?? fallbackNodeId ?? null;
-        if (thinkingNodeId && completeOptionPreviewNodeIds.has(thinkingNodeId)) {
-          return;
-        }
-
-        setStreamingThinking({
-          nodeId: thinkingNodeId,
-          stage: "options",
-          text: value.text
-        });
-        markMobilePanelUnread("tree");
-        receivedThinking = true;
+        receivedThinking = applyStreamingOptionsThinking(value, fallbackNodeId, completeOptionPreviewNodeIds);
         return;
       }
 

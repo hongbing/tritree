@@ -585,6 +585,7 @@ describe("SessionStateSchema", () => {
       options: [option],
       selectedOptionId: null,
       foldedOptions: [],
+      agentMessages: [],
       createdAt: "2026-04-24T00:00:00.000Z"
     };
 
@@ -647,6 +648,5 @@ describe("SessionStateSchema", () => {
 
     expect(parsed.session.status).toBe("active");
     expect(parsed.session.artifactTypeId).toBe("prd");
-    expect(parsed.toolMemory).toBe("");
   });
 });

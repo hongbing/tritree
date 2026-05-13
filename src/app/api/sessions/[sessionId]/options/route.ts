@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { streamDirectorOptions } from "@/lib/ai/director-stream";
+import { streamOptionsForNode } from "@/lib/api/options-stream";
 import { logTritreeAiDebug, summarizeTritreeStreamEventForLog } from "@/lib/ai/debug-log";
 import { badRequestResponse, isBadRequestError, publicServerErrorMessage } from "@/lib/api/errors";
-import { focusSessionStateForNode, summarizeCurrentDraftOptionsForDirector } from "@/lib/app-state";
+import { focusSessionStateForNode } from "@/lib/app-state";
 import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
 import { getRepository } from "@/lib/db/repository";
 import { OptionGenerationModeSchema } from "@/lib/domain";
@@ -74,45 +74,22 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
       };
 
       try {
-        logTritreeAiDebug("api-options", "stream-start", {
-          sessionId,
-          nodeId: body.nodeId,
+        logTritreeAiDebug("api-options", "stream-request", {
           force: body.force,
-          optionMode: body.optionMode,
           existingOptionCount: focusedNode.options.length
         });
-        const output = await streamDirectorOptions(summarizeCurrentDraftOptionsForDirector(focusedState, body.optionMode), {
-          memory: { resource: state.rootMemory.id, thread: sessionId },
+        await streamOptionsForNode({
+          logTarget: "api-options",
+          nodeId: body.nodeId,
+          optionMode: body.optionMode,
+          repository,
+          rootMemoryId: state.rootMemory.id,
+          send,
+          sessionId,
           signal: request.signal,
-          onReasoningText(event) {
-            send({ type: "thinking", nodeId: body.nodeId, text: event.accumulatedText });
-          },
-          onText(event) {
-            if (event.partialOptions) {
-              send({
-                type: "options",
-                nodeId: body.nodeId,
-                roundIntent: event.partialRoundIntent,
-                options: event.partialOptions
-              });
-            }
-          }
+          state: focusedState,
+          userId: user.id
         });
-        logTritreeAiDebug("api-options", "stream-output", {
-          sessionId,
-          nodeId: body.nodeId,
-          roundIntent: output.roundIntent,
-          optionCount: output.options.length,
-          optionLabels: output.options.map((option) => option.label)
-        });
-        const nextState = repository.updateNodeOptions({
-          userId: user.id,
-          sessionId,
-          nodeId: body.nodeId,
-          output
-        });
-        send({ type: "options", nodeId: body.nodeId, roundIntent: output.roundIntent, options: output.options });
-        send({ type: "done", state: nextState });
       } catch (error) {
         console.error("[treeable:generate-options]", error);
         send({ type: "error", error: publicServerErrorMessage(error, "无法生成下一步选项。") });

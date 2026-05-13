@@ -44,6 +44,7 @@ const node = {
   options: [],
   selectedOptionId: null,
   foldedOptions: [],
+  agentMessages: [],
   createdAt: "2026-04-27T00:00:00.000Z"
 };
 
@@ -125,6 +126,30 @@ describe("POST /api/sessions/:sessionId/options", () => {
         { id: "b", label: "深挖", description: "B", impact: "B", kind: "deepen" },
         { id: "c", label: "换角度", description: "C", impact: "C", kind: "reframe" }
       ],
+      agentMessages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call-1",
+              toolName: "statusServer_getUserTimeline",
+              input: { screenName: "来去之间" }
+            }
+          ]
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call-1",
+              toolName: "statusServer_getUserTimeline",
+              output: { type: "json", value: { statuses: [{ text: "转发微博内容" }] } }
+            }
+          ]
+        }
+      ]
     };
     const finalState = {
       ...state,
@@ -165,7 +190,16 @@ describe("POST /api/sessions/:sessionId/options", () => {
     expect(text).toContain('"type":"done"');
     expect(text.indexOf('"type":"thinking"')).toBeLessThan(text.indexOf('"type":"options"'));
     expect(text.indexOf('"type":"options"')).toBeLessThan(text.indexOf('"type":"done"'));
-    expect(updateNodeOptions).toHaveBeenCalledWith({ userId: "user-1", sessionId: "session-1", nodeId: "node-1", output });
+    expect(updateNodeOptions).toHaveBeenCalledWith({
+      userId: "user-1",
+      sessionId: "session-1",
+      nodeId: "node-1",
+      output: {
+        roundIntent: output.roundIntent,
+        options: output.options
+      },
+      agentMessages: output.agentMessages
+    });
   });
 
   it("passes option mode into current-draft option generation", async () => {

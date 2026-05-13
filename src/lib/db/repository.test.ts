@@ -1074,7 +1074,7 @@ describe("Treeable repository", () => {
     });
   });
 
-  it("leaves session tool memory unchanged when generated outputs are saved", async () => {
+  it("appends generated agent messages to the backend tree node history", async () => {
     const repo = createTreeableRepository(testDbPath());
     const user = await createTestUser(repo, "writer");
     const root = repo.saveRootMemory(user.id, {
@@ -1094,6 +1094,30 @@ describe("Treeable repository", () => {
       userId: user.id,
       sessionId: draftState.session.id,
       nodeId: draftState.currentNode!.id,
+      agentMessages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "tool-1",
+              toolName: "statusServer_getUserTimeline",
+              input: { screenName: "来去之间" }
+            }
+          ]
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "tool-1",
+              toolName: "statusServer_getUserTimeline",
+              output: { type: "json", value: { statuses: [{ text: "转发微博内容" }] } }
+            }
+          ]
+        }
+      ],
       output: {
         roundIntent: "选择差异化角度",
         options: [
@@ -1104,8 +1128,9 @@ describe("Treeable repository", () => {
       }
     });
 
-    expect((state as any).toolMemory).toBe("");
-    expect((repo.getSessionState(user.id, draftState.session.id) as any).toolMemory).toBe("");
+    expect(state.currentNode?.agentMessages).toHaveLength(2);
+    expect(JSON.stringify(state.currentNode?.agentMessages)).toContain("statusServer_getUserTimeline");
+    expect(JSON.stringify(repo.getSessionState(user.id, draftState.session.id)?.currentNode?.agentMessages)).toContain("转发微博内容");
   });
 
   it("defaults legacy skill rows to shared applicability during migration", async () => {

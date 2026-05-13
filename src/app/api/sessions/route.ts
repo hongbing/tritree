@@ -1,13 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { badRequestResponse, isBadRequestError, publicServerErrorMessage } from "@/lib/api/errors";
-import { logTritreeAiDebug, summarizeTritreeStreamEventForLog } from "@/lib/ai/debug-log";
-import { streamDirectorOptions } from "@/lib/ai/director-stream";
-import { summarizeCurrentDraftOptionsForDirector } from "@/lib/app-state";
 import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
 import { getRepository } from "@/lib/db/repository";
 import { createSeedDraft } from "@/lib/seed-draft";
-import { encodeNdjson } from "@/lib/stream/ndjson";
 
 export const runtime = "nodejs";
 
@@ -16,12 +12,6 @@ const StartSessionBodySchema = z
     enabledSkillIds: z.array(z.string().min(1)).optional()
   })
   .default({});
-
-const ndjsonHeaders = {
-  "Content-Type": "application/x-ndjson; charset=utf-8",
-  "Cache-Control": "no-cache, no-transform",
-  "X-Content-Type-Options": "nosniff"
-};
 
 export async function GET(request: Request) {
   try {
@@ -70,77 +60,13 @@ export async function POST(request: Request) {
 
   try {
     const seedDraft = createSeedDraft(rootMemory.preferences.seed);
-    const enabledSkills = repository.resolveSkillsByIds(body.enabledSkillIds ?? repository.defaultEnabledSkillIds(), user.id);
     const draftState = repository.createSessionDraft({
       userId: user.id,
       rootMemoryId: rootMemory.id,
       draft: seedDraft,
       ...(body.enabledSkillIds ? { enabledSkillIds: body.enabledSkillIds } : {})
     });
-    const stream = new ReadableStream({
-      async start(controller) {
-        const encoder = new TextEncoder();
-        const send = (value: unknown) => {
-          logTritreeAiDebug("api-sessions", "send", summarizeTritreeStreamEventForLog(value));
-          controller.enqueue(encoder.encode(encodeNdjson(value)));
-        };
-
-        send({ type: "state", state: draftState });
-        logTritreeAiDebug("api-sessions", "options-stream-start", {
-          sessionId: draftState.session.id,
-          nodeId: draftState.currentNode?.id ?? null,
-          enabledSkillCount: enabledSkills.length
-        });
-
-        try {
-          const output = await streamDirectorOptions(
-            summarizeCurrentDraftOptionsForDirector({
-              ...draftState,
-              enabledSkills
-            }),
-            {
-              memory: { resource: rootMemory.id, thread: draftState.session.id },
-              signal: request.signal,
-              onReasoningText(event) {
-                send({ type: "thinking", nodeId: draftState.currentNode?.id ?? null, text: event.accumulatedText });
-              },
-              onText(event) {
-                if (event.partialOptions && draftState.currentNode) {
-                  send({
-                    type: "options",
-                    nodeId: draftState.currentNode.id,
-                    roundIntent: event.partialRoundIntent,
-                    options: event.partialOptions
-                  });
-                }
-              }
-            }
-          );
-          logTritreeAiDebug("api-sessions", "options-stream-output", {
-            sessionId: draftState.session.id,
-            nodeId: draftState.currentNode?.id ?? null,
-            roundIntent: output.roundIntent,
-            optionCount: output.options.length,
-            optionLabels: output.options.map((option) => option.label)
-          });
-          const nextState = repository.updateNodeOptions({
-            userId: user.id,
-            sessionId: draftState.session.id,
-            nodeId: draftState.currentNode!.id,
-            output
-          });
-          send({ type: "options", nodeId: draftState.currentNode!.id, roundIntent: output.roundIntent, options: output.options });
-          send({ type: "done", state: nextState });
-        } catch (error) {
-          console.error("[treeable:start-session]", error);
-          send({ type: "error", error: publicServerErrorMessage(error, "无法启动创作。") });
-        } finally {
-          controller.close();
-        }
-      }
-    });
-
-    return new Response(stream, { headers: ndjsonHeaders });
+    return NextResponse.json({ state: draftState });
   } catch (error) {
     console.error("[treeable:start-session]", error);
     return NextResponse.json({ error: publicServerErrorMessage(error, "无法启动创作。") }, { status: 500 });

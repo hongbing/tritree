@@ -189,25 +189,49 @@ describe("summarizeSessionForDirector", () => {
     expect(optionSummary.selectedOptionLabel).not.toContain("方向范围：平衡");
   });
 
-  it("includes completed tool query memory in later draft and option prompts", () => {
-    const state = {
-      ...createStateWithPath([]),
-      toolMemory: [
-        "# 工具查询记忆",
-        "后续轮次优先复用这些结果；不要重复相同查询。",
-        "[工具结果:完成] run_skill_command: {\"feeds\":[{\"displayTitle\":\"青岛三天两晚攻略\"}]}"
-      ].join("\n")
-    };
+  it("includes saved agent message history in later draft and option prompts", () => {
+    const state = createStateWithPath([
+      createNode({
+        id: "node-1",
+        roundIndex: 1,
+        options: [],
+        selectedOptionId: null,
+        agentMessages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool-call",
+                toolCallId: "tool-1",
+                toolName: "run_skill_command",
+                input: { query: "青岛攻略" }
+              }
+            ]
+          },
+          {
+            role: "tool",
+            content: [
+              {
+                type: "tool-result",
+                toolCallId: "tool-1",
+                toolName: "run_skill_command",
+                output: { type: "json", value: { feeds: [{ displayTitle: "青岛三天两晚攻略" }] } }
+              }
+            ]
+          }
+        ]
+      })
+    ]);
 
     const draftSummary = summarizeSessionForDirector(state, option("a", "避开游客打卡视角"));
     const optionSummary = summarizeCurrentDraftOptionsForDirector(state);
-    const draftMessages = (draftSummary as any).messages as Array<{ role: string; content: string }>;
-    const optionMessages = (optionSummary as any).messages as Array<{ role: string; content: string }>;
+    const draftMessages = (draftSummary as any).messages as Array<{ role: string; content: unknown }>;
+    const optionMessages = (optionSummary as any).messages as Array<{ role: string; content: unknown }>;
 
-    expect(draftMessages[0].content).toContain("青岛三天两晚攻略");
-    expect(draftMessages[0].content).toContain("不要重复相同查询");
-    expect(optionMessages[0].content).toContain("青岛三天两晚攻略");
-    expect(optionMessages[0].content).toContain("不要重复相同查询");
+    expect(draftMessages).toContainEqual(expect.objectContaining({ role: "tool", content: expect.any(Array) }));
+    expect(JSON.stringify(draftMessages)).toContain("青岛三天两晚攻略");
+    expect(optionMessages).toContainEqual(expect.objectContaining({ role: "tool", content: expect.any(Array) }));
+    expect(JSON.stringify(optionMessages)).toContain("青岛三天两晚攻略");
   });
 
   it("puts the direction range into editor conversation messages", () => {
@@ -318,13 +342,16 @@ describe("summarizeSessionForDirector", () => {
     expect(messages[1].content).toContain("旧版标题");
     expect(messages[1].content).not.toContain("正文：这是一段旧版正文，应该只作为摘要来源，而不应该完整进入 draft 历史消息。");
     expect(messages[1].content).not.toContain("选项：");
-    expect(messages[2].content).toContain("下一步写作意图：确定写给谁看");
+    expect(messages[2].content).toBe("确定写给谁看: 确定写给谁看的说明。");
+    expect(messages[2].content).not.toContain("历史已选方向");
+    expect(messages[2].content).not.toContain("下一步写作意图");
     expect(messages[2].content).not.toContain("用户选择");
     expect(messages[3].content).toContain("第 2 版已形成草稿");
     expect(messages[3].content).not.toContain("采用的写作意图");
     expect(messages[3].content).toContain("配图提示");
     expect(messages[3].content).not.toContain("选项：");
-    expect(messages[4].content).toContain("用户想要完成的写作意图：分析做这个的动机");
+    expect(messages[4].content).toContain("分析做这个的动机");
+    expect(messages[4].content).not.toContain("用户想要完成的写作意图");
     expect(messages[4].content).not.toContain("请按本轮写作意图生成新的内容版本");
     expect(messages[4].content).not.toContain("当前内容是本轮唯一写作基线");
     expect(messages[4].content).not.toContain("先按已选技能判断当前内容状态和改动幅度");
@@ -358,8 +385,8 @@ describe("summarizeSessionForDirector", () => {
     const messages = (summary as any).messages as Array<{ role: string; content: string }>;
     const finalMessage = messages.at(-1)?.content ?? "";
 
-    expect(finalMessage).toContain("用户想要完成的写作意图");
     expect(finalMessage).toContain("选择读者视角");
+    expect(finalMessage).not.toContain("用户想要完成的写作意图");
     expect(finalMessage).not.toContain("请按本轮写作意图生成新的内容版本");
     expect(finalMessage).not.toContain("先按已选技能判断当前内容状态和改动幅度");
     expect(finalMessage).not.toContain("保留当前内容中已经成立的部分");
@@ -405,7 +432,8 @@ describe("summarizeSessionForDirector", () => {
     expect(assistantHistory).toContain("第 3 版已形成草稿");
     expect(assistantHistory).not.toContain("采用的写作意图");
     expect(assistantHistory).toContain("正文：比如我知道要做啥——不是“帮我写个登录功能”这种。");
-    expect(finalUserRequest).toContain("用户想要完成的写作意图：换成行业观察");
+    expect(finalUserRequest).toContain("换成行业观察");
+    expect(finalUserRequest).not.toContain("用户想要完成的写作意图");
     expect(finalUserRequest).toContain("用户补充要求：知道要做啥指的是我知道用户需求，而不是被动接受任务。");
     expect(finalUserRequest).not.toContain("当前内容：");
     expect(finalUserRequest).not.toContain("帮我写个登录功能");
@@ -709,6 +737,7 @@ function createNode(overrides: {
   options: BranchOption[];
   selectedOptionId: BranchOption["id"] | null;
   foldedOptions?: BranchOption[];
+  agentMessages?: TreeNode["agentMessages"];
 }): TreeNode {
   return {
     id: overrides.id,
@@ -720,6 +749,7 @@ function createNode(overrides: {
     options: overrides.options,
     selectedOptionId: overrides.selectedOptionId,
     foldedOptions: overrides.foldedOptions ?? [],
+    agentMessages: overrides.agentMessages ?? [],
     createdAt: "2026-04-24T00:00:00.000Z"
   };
 }

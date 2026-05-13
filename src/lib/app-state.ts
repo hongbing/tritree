@@ -200,8 +200,7 @@ function buildDraftConversationMessages(state: SessionState, finalUserRequest: s
       content: [
         artifactContextForState(state),
         `初始内容：\n${state.rootMemory.summary}`,
-        `已学习偏好：\n${state.rootMemory.learnedSummary || "暂无已学习偏好。"}`,
-        formatToolMemoryForDirector(state.toolMemory)
+        `已学习偏好：\n${state.rootMemory.learnedSummary || "暂无已学习偏好。"}`
       ]
         .filter(Boolean)
         .join("\n\n")
@@ -210,14 +209,18 @@ function buildDraftConversationMessages(state: SessionState, finalUserRequest: s
 
   const lastPathIndex = state.selectedPath.length - 1;
   state.selectedPath.forEach((node, index) => {
-    messages.push({ role: "assistant", content: formatDraftHistoryRoundForWriter(state, node, index === lastPathIndex) });
+    if (node.agentMessages.length > 0) {
+      messages.push(...node.agentMessages);
+    } else {
+      messages.push({ role: "assistant", content: formatDraftHistoryRoundForWriter(state, node, index === lastPathIndex) });
+    }
 
     const selectedOption = node.selectedOptionId
       ? node.options.find((option) => option.id === node.selectedOptionId)
       : null;
     const isCurrentDraftIntent = index === lastPathIndex;
     if (selectedOption && !isCurrentDraftIntent) {
-      messages.push({ role: "user", content: `下一步写作意图：${formatSuggestionForDirector(selectedOption)}` });
+      messages.push({ role: "user", content: formatSuggestionForDirector(selectedOption) });
     }
   });
 
@@ -236,8 +239,7 @@ function buildEditorMessages(state: SessionState, currentDraft: Draft | null, re
       content: [
         artifactContextForState(state),
         `初始内容：\n${state.rootMemory.summary}`,
-        `已学习偏好：\n${state.rootMemory.learnedSummary || "暂无已学习偏好。"}`,
-        formatToolMemoryForDirector(state.toolMemory)
+        `已学习偏好：\n${state.rootMemory.learnedSummary || "暂无已学习偏好。"}`
       ]
         .filter(Boolean)
         .join("\n\n")
@@ -247,7 +249,9 @@ function buildEditorMessages(state: SessionState, currentDraft: Draft | null, re
   let latestRevisionSummary = "";
 
   state.selectedPath.forEach((node, index) => {
-    if (node.options.length > 0) {
+    if (node.agentMessages.length > 0) {
+      messages.push(...node.agentMessages);
+    } else if (node.options.length > 0) {
       messages.push({ role: "assistant", content: formatEditorSuggestionRound(node) });
     }
 
@@ -286,7 +290,12 @@ function mergeConsecutiveUserMessages(messages: DirectorMessage[]) {
 
   for (const message of messages) {
     const previous = merged.at(-1);
-    if (previous?.role === "user" && message.role === "user") {
+    if (
+      previous?.role === "user" &&
+      message.role === "user" &&
+      typeof previous.content === "string" &&
+      typeof message.content === "string"
+    ) {
       previous.content = `${previous.content}\n\n${message.content}`;
     } else {
       merged.push({ ...message });
@@ -294,17 +303,6 @@ function mergeConsecutiveUserMessages(messages: DirectorMessage[]) {
   }
 
   return merged;
-}
-
-function formatToolMemoryForDirector(toolMemory?: string) {
-  const text = toolMemory?.trim();
-  if (!text) return "";
-
-  return [
-    "已完成的外部查询/工具结果：",
-    text,
-    "使用规则：如果已有结果覆盖当前任务，先复用；不要重复相同查询，除非用户要求更新、查询条件改变或已有结果明显不足。"
-  ].join("\n");
 }
 
 function formatDraftHistoryRoundForWriter(
@@ -354,11 +352,11 @@ function formatDraftUserRequest({
 
   const selectedLines = selectedOption
     ? [
-        `用户想要完成的写作意图：${formatSuggestionForDirector(selectedOption)}`,
+        formatSuggestionForDirector(selectedOption),
         selectedOptionNote ? `用户补充要求：${selectedOptionNote}` : "",
         modeHint
       ].filter(Boolean)
-    : ["用户想要完成的写作意图：基于初始内容和上一版草稿生成新的内容版本。"];
+    : ["基于初始内容和上一版草稿生成新的内容版本。"];
 
   return [
     ...selectedLines

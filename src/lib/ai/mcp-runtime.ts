@@ -424,6 +424,11 @@ export async function createMcpRuntimeTools(options: McpRuntimeOptions = {}): Pr
     logDiagnostic(diagnostic);
     return emptyMcpRuntimeTools(diagnostics);
   }
+  if (!path.isAbsolute(configPath)) {
+    const diagnostic = "MCP configPath must be an absolute path.";
+    logDiagnostic(diagnostic);
+    return emptyMcpRuntimeTools(diagnostics);
+  }
 
   const loaded = loadMcpServerDefinitions({
     configPath,

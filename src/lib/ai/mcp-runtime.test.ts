@@ -454,4 +454,21 @@ describe("MCP runtime tool loading", () => {
     expect(result.toolSummaries.join("\n")).toContain("TRITREE_MCP_CONFIG_PATH must be an absolute path");
     expect(log).toHaveBeenCalledWith(expect.stringContaining("TRITREE_MCP_CONFIG_PATH must be an absolute path"));
   });
+
+  it("returns no tools when an explicit config path is relative", async () => {
+    const log = vi.fn();
+    const createClient = vi.fn();
+    const result = await createMcpRuntimeTools({
+      configPath: "relative/mcp.json",
+      createClient,
+      env: {},
+      log
+    });
+
+    expect(result.tools).toEqual({});
+    expect(result.toolSummaries.join("\n")).toContain("configPath must be an absolute path");
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("[tritree:mcp]"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("configPath must be an absolute path"));
+    expect(createClient).not.toHaveBeenCalled();
+  });
 });

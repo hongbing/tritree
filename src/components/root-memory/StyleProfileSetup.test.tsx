@@ -1,0 +1,200 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Skill } from "@/lib/domain";
+import { StyleProfileSetup } from "./StyleProfileSetup";
+
+const baseSkill: Skill = {
+  id: "style-1",
+  title: "我的风格：克制产品随笔",
+  category: "风格",
+  description: "短句、具体。",
+  prompt: "使用短句，保留具体例子。",
+  appliesTo: "writer",
+  isSystem: false,
+  defaultEnabled: false,
+  isArchived: false,
+  createdAt: "2026-05-13T00:00:00.000Z",
+  updatedAt: "2026-05-13T00:00:00.000Z"
+};
+
+const generatedDraft = {
+  title: "我的风格：自然短句",
+  category: "风格",
+  description: "更自然的短句表达。",
+  prompt: "使用自然短句，减少抽象形容。",
+  appliesTo: "writer",
+  defaultEnabled: false,
+  isArchived: false
+} as const;
+
+function renderSetup(props: Partial<ComponentProps<typeof StyleProfileSetup>> = {}) {
+  return render(
+    <StyleProfileSetup
+      disabled={false}
+      externalStyleGenerationAvailable={false}
+      onCreateSkill={vi.fn(async () => ({
+        ...generatedDraft,
+        id: "style-new",
+        isSystem: false,
+        createdAt: "",
+        updatedAt: ""
+      }))}
+      onSavedSkill={vi.fn()}
+      onUpdateSkill={vi.fn(async () => ({ ...baseSkill, ...generatedDraft }))}
+      selectedSkillIds={[]}
+      skills={[]}
+      {...props}
+    />
+  );
+}
+
+describe("StyleProfileSetup", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("renders expanded when no personal style is selected", () => {
+    renderSetup();
+
+    expect(screen.getByRole("region", { name: "我的风格" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "一键生成我的风格" })).not.toBeInTheDocument();
+  });
+
+  it("renders collapsed when a selected personal style exists and can expand", async () => {
+    renderSetup({ selectedSkillIds: ["style-1"], skills: [baseSkill] });
+
+    expect(screen.getByText("正在使用：我的风格：克制产品随笔")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "展开我的风格设置" }));
+
+    expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
+  });
+
+  it("shows one-click generation when the external provider is available", () => {
+    renderSetup({ externalStyleGenerationAvailable: true });
+
+    expect(screen.getByRole("button", { name: "一键生成我的风格" })).toBeInTheDocument();
+  });
+
+  it("generates from pasted samples and saves a new skill", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ skillDraft: generatedDraft })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onCreateSkill = vi.fn(async () => ({
+      ...generatedDraft,
+      id: "style-new",
+      isSystem: false,
+      createdAt: "2026-05-13T00:00:00.000Z",
+      updatedAt: "2026-05-13T00:00:00.000Z"
+    }));
+    const onSavedSkill = vi.fn();
+
+    renderSetup({ onCreateSkill, onSavedSkill });
+
+    await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "第一段代表作。\n\n第二段代表作。");
+    await userEvent.click(screen.getByRole("button", { name: "生成风格草稿" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/skills/style/generate-from-samples",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ samples: ["第一段代表作。", "第二段代表作。"] })
+      })
+    );
+    expect(await screen.findByRole("textbox", { name: "风格名称" })).toHaveValue("我的风格：自然短句");
+
+    await userEvent.click(screen.getByRole("button", { name: "保存并用于本作品" }));
+
+    expect(onCreateSkill).toHaveBeenCalledWith(generatedDraft);
+    expect(onSavedSkill).toHaveBeenCalledWith(expect.objectContaining({ id: "style-new" }));
+  });
+
+  it("generates from external provider and updates an existing style", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ skillDraft: generatedDraft })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onUpdateSkill = vi.fn(async () => ({ ...baseSkill, ...generatedDraft }));
+    const onSavedSkill = vi.fn();
+
+    renderSetup({
+      externalStyleGenerationAvailable: true,
+      onSavedSkill,
+      onUpdateSkill,
+      selectedSkillIds: ["style-1"],
+      skills: [baseSkill]
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "展开我的风格设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "一键生成我的风格" }));
+    await screen.findByRole("textbox", { name: "风格名称" });
+    await userEvent.click(screen.getByRole("radio", { name: "更新已有风格" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存并用于本作品" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/skills/style/generate-external",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(onUpdateSkill).toHaveBeenCalledWith("style-1", generatedDraft);
+    expect(onSavedSkill).toHaveBeenCalledWith(expect.objectContaining({ id: "style-1" }));
+  });
+
+  it("preserves input and offers recovery after generation failure", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: "样本太少，请再贴一段。" })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSetup();
+
+    await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "代表作样本" }), "只有一句。");
+    await userEvent.click(screen.getByRole("button", { name: "生成风格草稿" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("样本太少，请再贴一段。");
+    expect(screen.getByRole("textbox", { name: "代表作样本" })).toHaveValue("只有一句。");
+    expect(screen.getByRole("button", { name: "重试生成" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "改为手动创建" })).toBeInTheDocument();
+  });
+
+  it("lets the user edit a manual draft before saving", async () => {
+    const onCreateSkill = vi.fn(async () => ({
+      ...generatedDraft,
+      title: "我的风格：产品观察",
+      description: "具体、克制。",
+      prompt: "写作时具体、克制。",
+      id: "style-new",
+      isSystem: false,
+      createdAt: "",
+      updatedAt: ""
+    }));
+
+    renderSetup({ onCreateSkill });
+
+    await userEvent.click(screen.getByRole("button", { name: "改为手动创建" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "风格名称" }), "产品观察");
+    await userEvent.type(screen.getByRole("textbox", { name: "风格说明" }), "具体、克制。");
+    await userEvent.type(screen.getByRole("textbox", { name: "风格提示词" }), "写作时具体、克制。");
+    await userEvent.click(screen.getByRole("button", { name: "保存并用于本作品" }));
+
+    await waitFor(() =>
+      expect(onCreateSkill).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "我的风格：产品观察",
+          description: "具体、克制。",
+          prompt: "写作时具体、克制。"
+        })
+      )
+    );
+  });
+});

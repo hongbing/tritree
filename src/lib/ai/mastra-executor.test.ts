@@ -13,6 +13,7 @@ import type { DirectorInputParts } from "./prompts";
 const mocks = vi.hoisted(() => ({
   agentConstructor: vi.fn(),
   createAnthropic: vi.fn(),
+  createMcpRuntimeTools: vi.fn(),
   createSkillRuntimeTools: vi.fn()
 }));
 
@@ -26,6 +27,10 @@ vi.mock("@mastra/core/agent", () => ({
 
 vi.mock("@/lib/skills/skill-runtime", () => ({
   createSkillRuntimeTools: mocks.createSkillRuntimeTools
+}));
+
+vi.mock("./mcp-runtime", () => ({
+  createMcpRuntimeTools: mocks.createMcpRuntimeTools
 }));
 
 const modelFactory = vi.fn((modelId: string) => ({ modelId }));
@@ -81,6 +86,7 @@ beforeEach(() => {
   modelFactory.mockClear();
   mocks.createAnthropic.mockReturnValue(modelFactory);
   mocks.createSkillRuntimeTools.mockResolvedValue({ toolSummaries: [], tools: {} });
+  mocks.createMcpRuntimeTools.mockResolvedValue({ disconnect: vi.fn(), toolSummaries: [], tools: {} });
   mocks.agentConstructor.mockImplementation(function Agent(options) {
     return {
       options,
@@ -325,6 +331,146 @@ describe("tree director compatibility generators", () => {
       "[treeable:mastra-prompt:options]",
       expect.not.stringContaining("标题和正文都要克制。")
     );
+  });
+
+  it("merges configured MCP tools with Skill runtime tools for real agents", async () => {
+    const runSkillCommand = {
+      id: "run_skill_command",
+      description: "Run an installed skill command.",
+      execute: vi.fn()
+    };
+    const readFile = {
+      id: "filesystem_read_file",
+      description: "Read a configured file.",
+      execute: vi.fn()
+    };
+    const finalObject = {
+      roundIntent: "选择下一步",
+      options: [
+        { id: "a", label: "补具体场景", description: "加入真实场景。", impact: "让文章更具体。", kind: "explore" },
+        { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
+        { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
+      ],
+    };
+
+    mocks.createSkillRuntimeTools.mockResolvedValueOnce({
+      availableSkillSummaries: [],
+      enabledSkills,
+      toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
+      tools: { run_skill_command: runSkillCommand }
+    });
+    mocks.createMcpRuntimeTools.mockResolvedValueOnce({
+      disconnect: vi.fn(),
+      toolSummaries: ["MCP filesystem：可用工具 filesystem_read_file。"],
+      tools: { filesystem_read_file: readFile }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        generate: vi.fn(async () => ({ object: finalObject })),
+        stream: vi.fn()
+      };
+    });
+
+    await generateTreeOptions({
+      parts: directorParts,
+      env: { KIMI_API_KEY: "token" }
+    });
+
+    expect(mocks.createMcpRuntimeTools).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingTools: { run_skill_command: runSkillCommand }
+      })
+    );
+    expect(mocks.agentConstructor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools: {
+          run_skill_command: runSkillCommand,
+          filesystem_read_file: readFile
+        }
+      })
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[treeable:mastra-prompt:options]",
+      expect.stringContaining("MCP filesystem")
+    );
+  });
+
+  it("disconnects MCP runtime tools after a successful real-agent run", async () => {
+    const disconnect = vi.fn(async () => undefined);
+    const finalObject = {
+      roundIntent: "继续完善",
+      draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+    };
+
+    mocks.createMcpRuntimeTools.mockResolvedValueOnce({
+      disconnect,
+      toolSummaries: ["MCP filesystem：可用工具 filesystem_read_file。"],
+      tools: {
+        filesystem_read_file: { id: "filesystem_read_file", description: "Read file", execute: vi.fn() }
+      }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        generate: vi.fn(async () => ({ object: finalObject })),
+        stream: vi.fn()
+      };
+    });
+
+    await generateTreeDraft({
+      parts: directorParts,
+      env: { KIMI_API_KEY: "token" }
+    });
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("disconnects MCP runtime tools when real-agent generation fails", async () => {
+    const disconnect = vi.fn(async () => undefined);
+    mocks.createMcpRuntimeTools.mockResolvedValueOnce({
+      disconnect,
+      toolSummaries: ["MCP filesystem：可用工具 filesystem_read_file。"],
+      tools: {
+        filesystem_read_file: { id: "filesystem_read_file", description: "Read file", execute: vi.fn() }
+      }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        generate: vi.fn(async () => {
+          throw new Error("model failed");
+        }),
+        stream: vi.fn()
+      };
+    });
+
+    await expect(
+      generateTreeDraft({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" }
+      })
+    ).rejects.toThrow("model failed");
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not load MCP runtime tools for injected fake agents", async () => {
+    const fakeAgent = {
+      generate: vi.fn(async () => ({
+        object: {
+          roundIntent: "继续完善",
+          draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+        }
+      }))
+    };
+
+    await generateTreeDraft({
+      parts: directorParts,
+      treeDraftAgent: fakeAgent
+    });
+
+    expect(mocks.createMcpRuntimeTools).not.toHaveBeenCalled();
   });
 
   it("generates old UI draft output through a Mastra-compatible structured agent", async () => {

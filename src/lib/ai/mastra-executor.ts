@@ -23,6 +23,7 @@ import {
 } from "./mastra-context";
 import { logTritreeAiDebug, logTritreeAiResponse, logTritreeAiStream } from "./debug-log";
 import { buildDirectorInput, parseDirectorJsonObject } from "./director";
+import { createMcpRuntimeTools, type McpRuntimeTools } from "./mcp-runtime";
 import type { DirectorInputParts } from "./prompts";
 
 export type MastraConversationMessage = {
@@ -170,27 +171,32 @@ export async function generateTreeDraft({
   treeDraftAgent?: TreeDraftAgentLike;
   suppressResponseLog?: boolean;
 }): Promise<DirectorDraftOutput> {
-  const { agentContext, tools } = await executionContextForDirectorParts(parts, "writer", context, Boolean(treeDraftAgent));
-  const messages = directorMessagesForParts(parts);
-  logMastraPrompt("draft", agentContext, messages);
-  const agent = treeDraftAgent ?? (createTreeDraftAgent(agentContext, env, tools) as unknown as TreeDraftAgentLike);
-  const output = await withStructuredOutputRetries(messages, "draft", async (attemptMessages) => {
-    let result: Awaited<ReturnType<TreeDraftAgentLike["generate"]>>;
-    try {
-      result = await agent.generate(attemptMessages, {
-        abortSignal: signal,
-        ...executionOptionsForTools(tools),
-        memory: memory ?? memoryScopeForDirectorParts(parts),
-        structuredOutput: structuredOutputForDirector(DirectorDraftOutputSchema, env, tools, "generate")
-      });
-    } catch (error) {
-      return DirectorDraftOutputSchema.parse(recoverMastraStructuredOutputValidationValue(error));
-    }
+  const executionContext = await executionContextForDirectorParts(parts, "writer", context, Boolean(treeDraftAgent));
+  const { agentContext, tools } = executionContext;
+  try {
+    const messages = directorMessagesForParts(parts);
+    logMastraPrompt("draft", agentContext, messages);
+    const agent = treeDraftAgent ?? (createTreeDraftAgent(agentContext, env, tools) as unknown as TreeDraftAgentLike);
+    const output = await withStructuredOutputRetries(messages, "draft", async (attemptMessages) => {
+      let result: Awaited<ReturnType<TreeDraftAgentLike["generate"]>>;
+      try {
+        result = await agent.generate(attemptMessages, {
+          abortSignal: signal,
+          ...executionOptionsForTools(tools),
+          memory: memory ?? memoryScopeForDirectorParts(parts),
+          structuredOutput: structuredOutputForDirector(DirectorDraftOutputSchema, env, tools, "generate")
+        });
+      } catch (error) {
+        return DirectorDraftOutputSchema.parse(recoverMastraStructuredOutputValidationValue(error));
+      }
 
-    return DirectorDraftOutputSchema.parse(unwrapMastraToolInput(result.object ?? result.output));
-  });
-  if (!suppressResponseLog) logAiResponse("draft", "generate", output);
-  return output;
+      return DirectorDraftOutputSchema.parse(unwrapMastraToolInput(result.object ?? result.output));
+    });
+    if (!suppressResponseLog) logAiResponse("draft", "generate", output);
+    return output;
+  } finally {
+    await executionContext.disconnect();
+  }
 }
 
 export async function generateTreeNextStep({
@@ -205,27 +211,32 @@ export async function generateTreeNextStep({
   treeNextStepAgent?: TreeNextStepAgentLike;
   suppressResponseLog?: boolean;
 }): Promise<DirectorNextStepOutput> {
-  const { agentContext, tools } = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeNextStepAgent));
-  const messages = directorMessagesForParts(parts);
-  logMastraPrompt("next-step", agentContext, messages);
-  const agent = treeNextStepAgent ?? (createTreeNextStepAgent(agentContext, env, tools) as unknown as TreeNextStepAgentLike);
-  const output = await withStructuredOutputRetries(messages, "next-step", async (attemptMessages) => {
-    let result: Awaited<ReturnType<TreeNextStepAgentLike["generate"]>>;
-    try {
-      result = await agent.generate(attemptMessages, {
-        abortSignal: signal,
-        ...executionOptionsForTools(tools),
-        memory: memory ?? memoryScopeForDirectorParts(parts),
-        structuredOutput: structuredOutputForDirector(DirectorNextStepOutputSchema, env, tools, "generate")
-      });
-    } catch (error) {
-      return DirectorNextStepOutputSchema.parse(recoverMastraStructuredOutputValidationValue(error));
-    }
+  const executionContext = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeNextStepAgent));
+  const { agentContext, tools } = executionContext;
+  try {
+    const messages = directorMessagesForParts(parts);
+    logMastraPrompt("next-step", agentContext, messages);
+    const agent = treeNextStepAgent ?? (createTreeNextStepAgent(agentContext, env, tools) as unknown as TreeNextStepAgentLike);
+    const output = await withStructuredOutputRetries(messages, "next-step", async (attemptMessages) => {
+      let result: Awaited<ReturnType<TreeNextStepAgentLike["generate"]>>;
+      try {
+        result = await agent.generate(attemptMessages, {
+          abortSignal: signal,
+          ...executionOptionsForTools(tools),
+          memory: memory ?? memoryScopeForDirectorParts(parts),
+          structuredOutput: structuredOutputForDirector(DirectorNextStepOutputSchema, env, tools, "generate")
+        });
+      } catch (error) {
+        return DirectorNextStepOutputSchema.parse(recoverMastraStructuredOutputValidationValue(error));
+      }
 
-    return DirectorNextStepOutputSchema.parse(unwrapMastraToolInput(result.object ?? result.output));
-  });
-  if (!suppressResponseLog) logAiResponse("next-step", "generate", output);
-  return output;
+      return DirectorNextStepOutputSchema.parse(unwrapMastraToolInput(result.object ?? result.output));
+    });
+    if (!suppressResponseLog) logAiResponse("next-step", "generate", output);
+    return output;
+  } finally {
+    await executionContext.disconnect();
+  }
 }
 
 export async function streamTreeNextStep({
@@ -242,55 +253,60 @@ export async function streamTreeNextStep({
   onPartialObject?: (partial: TreeNextStepPartial) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorNextStepOutput> {
-  const { agentContext, tools } = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeNextStepAgent));
-  const messages = directorMessagesForParts(parts);
-  logMastraPrompt("next-step", agentContext, messages);
-  const agent = treeNextStepAgent ?? (createTreeNextStepAgent(agentContext, env, tools) as unknown as TreeNextStepAgentLike);
+  const executionContext = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeNextStepAgent));
+  const { agentContext, tools } = executionContext;
+  try {
+    const messages = directorMessagesForParts(parts);
+    logMastraPrompt("next-step", agentContext, messages);
+    const agent = treeNextStepAgent ?? (createTreeNextStepAgent(agentContext, env, tools) as unknown as TreeNextStepAgentLike);
 
-  const output = await withStructuredOutputRetries(messages, "next-step", async (attemptMessages) => {
-    const stream = agent.stream
-      ? await agent.stream(attemptMessages, {
-          abortSignal: signal,
-          ...executionOptionsForTools(tools),
-          memory: memory ?? memoryScopeForDirectorParts(parts),
-          structuredOutput: structuredOutputForDirector(DirectorNextStepOutputSchema, env, tools, "stream")
-        })
-      : null;
+    const output = await withStructuredOutputRetries(messages, "next-step", async (attemptMessages) => {
+      const stream = agent.stream
+        ? await agent.stream(attemptMessages, {
+            abortSignal: signal,
+            ...executionOptionsForTools(tools),
+            memory: memory ?? memoryScopeForDirectorParts(parts),
+            structuredOutput: structuredOutputForDirector(DirectorNextStepOutputSchema, env, tools, "stream")
+          })
+        : null;
 
-    if (!stream) {
-      const output = await generateTreeNextStep({
-        parts: { ...parts, messages: attemptMessages },
-        signal,
-        env,
-        memory,
-        context,
-        treeNextStepAgent: agent,
-        suppressResponseLog: true
-      });
-      onPartialObject?.(output as TreeNextStepPartial);
-      return output;
-    }
-
-    let latestPartial: unknown = null;
-    if (stream.fullStream) {
-      latestPartial = await consumeStructuredFullStream<TreeNextStepPartial>(stream.fullStream, {
-        logTarget: "next-step",
-        onPartialObject,
-        onReasoningText
-      });
-    } else if (stream.objectStream) {
-      for await (const partial of toAsyncIterable(stream.objectStream)) {
-        logAiStream("next-step", "partial", partial);
-        latestPartial = partial;
-        onPartialObject?.(partial as TreeNextStepPartial);
+      if (!stream) {
+        const output = await generateTreeNextStep({
+          parts: { ...parts, messages: attemptMessages },
+          signal,
+          env,
+          memory,
+          context,
+          treeNextStepAgent: agent,
+          suppressResponseLog: true
+        });
+        onPartialObject?.(output as TreeNextStepPartial);
+        return output;
       }
-    }
 
-    const output = await resolveStructuredStreamOutput(stream, latestPartial);
-    return DirectorNextStepOutputSchema.parse(output);
-  });
-  logAiResponse("next-step", "stream", output);
-  return output;
+      let latestPartial: unknown = null;
+      if (stream.fullStream) {
+        latestPartial = await consumeStructuredFullStream<TreeNextStepPartial>(stream.fullStream, {
+          logTarget: "next-step",
+          onPartialObject,
+          onReasoningText
+        });
+      } else if (stream.objectStream) {
+        for await (const partial of toAsyncIterable(stream.objectStream)) {
+          logAiStream("next-step", "partial", partial);
+          latestPartial = partial;
+          onPartialObject?.(partial as TreeNextStepPartial);
+        }
+      }
+
+      const output = await resolveStructuredStreamOutput(stream, latestPartial);
+      return DirectorNextStepOutputSchema.parse(output);
+    });
+    logAiResponse("next-step", "stream", output);
+    return output;
+  } finally {
+    await executionContext.disconnect();
+  }
 }
 
 export async function streamTreeDraft({
@@ -307,75 +323,80 @@ export async function streamTreeDraft({
   onPartialObject?: (partial: TreeDraftPartial) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorDraftOutput> {
-  const { agentContext, tools } = await executionContextForDirectorParts(parts, "writer", context, Boolean(treeDraftAgent));
-  const runtimeHasTools = hasRuntimeTools(tools);
-  const agentContextWithSubmit = runtimeHasTools ? withFinalSubmitToolSummary(agentContext, "draft") : agentContext;
-  const agentTools = runtimeHasTools ? withFinalSubmitTool(tools, "draft") : tools;
-  const messages = directorMessagesForParts(parts);
-  logMastraPrompt("draft", agentContextWithSubmit, messages);
-  const agent = treeDraftAgent ?? (createTreeDraftAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeDraftAgentLike);
-  if (runtimeHasTools) {
-    const runtimeTools = agentTools as ToolsInput;
-    const output = await streamRuntimeToolsThenStructure<TreeDraftPartial, DirectorDraftOutput>({
-      agent,
-      env,
-      memory: memory ?? memoryScopeForDirectorParts(parts),
-      messages,
-      onPartialObject,
-      onReasoningText,
-      schema: DirectorDraftOutputSchema,
-      signal,
-      target: "draft",
-      tools: runtimeTools
-    });
-    logAiResponse("draft", "stream", output);
-    return output;
-  }
-
-  const output = await withStructuredOutputRetries(messages, "draft", async (attemptMessages) => {
-    const stream = agent.stream
-      ? await agent.stream(attemptMessages, {
-          abortSignal: signal,
-          ...executionOptionsForTools(tools),
-          memory: memory ?? memoryScopeForDirectorParts(parts),
-          structuredOutput: structuredOutputForDirector(DirectorDraftOutputSchema, env, tools, "stream")
-        })
-      : null;
-
-    if (!stream) {
-      const output = await generateTreeDraft({
-        parts: { ...parts, messages: attemptMessages },
-        signal,
+  const executionContext = await executionContextForDirectorParts(parts, "writer", context, Boolean(treeDraftAgent));
+  const { agentContext, tools } = executionContext;
+  try {
+    const runtimeHasTools = hasRuntimeTools(tools);
+    const agentContextWithSubmit = runtimeHasTools ? withFinalSubmitToolSummary(agentContext, "draft") : agentContext;
+    const agentTools = runtimeHasTools ? withFinalSubmitTool(tools, "draft") : tools;
+    const messages = directorMessagesForParts(parts);
+    logMastraPrompt("draft", agentContextWithSubmit, messages);
+    const agent = treeDraftAgent ?? (createTreeDraftAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeDraftAgentLike);
+    if (runtimeHasTools) {
+      const runtimeTools = agentTools as ToolsInput;
+      const output = await streamRuntimeToolsThenStructure<TreeDraftPartial, DirectorDraftOutput>({
+        agent,
         env,
-        memory,
-        context,
-        treeDraftAgent: agent,
-        suppressResponseLog: true
+        memory: memory ?? memoryScopeForDirectorParts(parts),
+        messages,
+        onPartialObject,
+        onReasoningText,
+        schema: DirectorDraftOutputSchema,
+        signal,
+        target: "draft",
+        tools: runtimeTools
       });
-      onPartialObject?.(output);
+      logAiResponse("draft", "stream", output);
       return output;
     }
 
-    let latestPartial: unknown = null;
-    if (stream.fullStream) {
-      latestPartial = await consumeStructuredFullStream<TreeDraftPartial>(stream.fullStream, {
-        logTarget: "draft",
-        onPartialObject,
-        onReasoningText
-      });
-    } else if (stream.objectStream) {
-      for await (const partial of toAsyncIterable(stream.objectStream)) {
-        logAiStream("draft", "partial", partial);
-        latestPartial = partial;
-        onPartialObject?.(partial as TreeDraftPartial);
-      }
-    }
+    const output = await withStructuredOutputRetries(messages, "draft", async (attemptMessages) => {
+      const stream = agent.stream
+        ? await agent.stream(attemptMessages, {
+            abortSignal: signal,
+            ...executionOptionsForTools(tools),
+            memory: memory ?? memoryScopeForDirectorParts(parts),
+            structuredOutput: structuredOutputForDirector(DirectorDraftOutputSchema, env, tools, "stream")
+          })
+        : null;
 
-    const output = await resolveStructuredStreamOutput(stream, latestPartial);
-    return DirectorDraftOutputSchema.parse(output);
-  });
-  logAiResponse("draft", "stream", output);
-  return output;
+      if (!stream) {
+        const output = await generateTreeDraft({
+          parts: { ...parts, messages: attemptMessages },
+          signal,
+          env,
+          memory,
+          context,
+          treeDraftAgent: agent,
+          suppressResponseLog: true
+        });
+        onPartialObject?.(output);
+        return output;
+      }
+
+      let latestPartial: unknown = null;
+      if (stream.fullStream) {
+        latestPartial = await consumeStructuredFullStream<TreeDraftPartial>(stream.fullStream, {
+          logTarget: "draft",
+          onPartialObject,
+          onReasoningText
+        });
+      } else if (stream.objectStream) {
+        for await (const partial of toAsyncIterable(stream.objectStream)) {
+          logAiStream("draft", "partial", partial);
+          latestPartial = partial;
+          onPartialObject?.(partial as TreeDraftPartial);
+        }
+      }
+
+      const output = await resolveStructuredStreamOutput(stream, latestPartial);
+      return DirectorDraftOutputSchema.parse(output);
+    });
+    logAiResponse("draft", "stream", output);
+    return output;
+  } finally {
+    await executionContext.disconnect();
+  }
 }
 
 export async function generateTreeOptions({
@@ -390,27 +411,32 @@ export async function generateTreeOptions({
   treeOptionsAgent?: TreeOptionsAgentLike;
   suppressResponseLog?: boolean;
 }): Promise<DirectorOptionsOutput> {
-  const { agentContext, tools } = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeOptionsAgent));
-  const messages = directorMessagesForParts(parts);
-  logMastraPrompt("options", agentContext, messages);
-  const agent = treeOptionsAgent ?? (createTreeOptionsAgent(agentContext, env, tools) as unknown as TreeOptionsAgentLike);
-  const output = await withStructuredOutputRetries(messages, "options", async (attemptMessages) => {
-    let result: Awaited<ReturnType<TreeOptionsAgentLike["generate"]>>;
-    try {
-      result = await agent.generate(attemptMessages, {
-        abortSignal: signal,
-        ...executionOptionsForTools(tools),
-        memory: memory ?? memoryScopeForDirectorParts(parts),
-        structuredOutput: structuredOutputForDirector(DirectorOptionsOutputSchema, env, tools, "generate")
-      });
-    } catch (error) {
-      return DirectorOptionsOutputSchema.parse(recoverMastraStructuredOutputValidationValue(error));
-    }
+  const executionContext = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeOptionsAgent));
+  const { agentContext, tools } = executionContext;
+  try {
+    const messages = directorMessagesForParts(parts);
+    logMastraPrompt("options", agentContext, messages);
+    const agent = treeOptionsAgent ?? (createTreeOptionsAgent(agentContext, env, tools) as unknown as TreeOptionsAgentLike);
+    const output = await withStructuredOutputRetries(messages, "options", async (attemptMessages) => {
+      let result: Awaited<ReturnType<TreeOptionsAgentLike["generate"]>>;
+      try {
+        result = await agent.generate(attemptMessages, {
+          abortSignal: signal,
+          ...executionOptionsForTools(tools),
+          memory: memory ?? memoryScopeForDirectorParts(parts),
+          structuredOutput: structuredOutputForDirector(DirectorOptionsOutputSchema, env, tools, "generate")
+        });
+      } catch (error) {
+        return DirectorOptionsOutputSchema.parse(recoverMastraStructuredOutputValidationValue(error));
+      }
 
-    return DirectorOptionsOutputSchema.parse(unwrapMastraToolInput(result.object ?? result.output));
-  });
-  if (!suppressResponseLog) logAiResponse("options", "generate", output);
-  return output;
+      return DirectorOptionsOutputSchema.parse(unwrapMastraToolInput(result.object ?? result.output));
+    });
+    if (!suppressResponseLog) logAiResponse("options", "generate", output);
+    return output;
+  } finally {
+    await executionContext.disconnect();
+  }
 }
 
 export async function streamTreeOptions({
@@ -427,75 +453,80 @@ export async function streamTreeOptions({
   onPartialObject?: (partial: TreeOptionsPartial) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorOptionsOutput> {
-  const { agentContext, tools } = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeOptionsAgent));
-  const runtimeHasTools = hasRuntimeTools(tools);
-  const agentContextWithSubmit = runtimeHasTools ? withFinalSubmitToolSummary(agentContext, "options") : agentContext;
-  const agentTools = runtimeHasTools ? withFinalSubmitTool(tools, "options") : tools;
-  const messages = directorMessagesForParts(parts);
-  logMastraPrompt("options", agentContextWithSubmit, messages);
-  const agent = treeOptionsAgent ?? (createTreeOptionsAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeOptionsAgentLike);
-  if (runtimeHasTools) {
-    const runtimeTools = agentTools as ToolsInput;
-    const output = await streamRuntimeToolsThenStructure<TreeOptionsPartial, DirectorOptionsOutput>({
-      agent,
-      env,
-      memory: memory ?? memoryScopeForDirectorParts(parts),
-      messages,
-      onPartialObject,
-      onReasoningText,
-      schema: DirectorOptionsOutputSchema,
-      signal,
-      target: "options",
-      tools: runtimeTools
-    });
-    logAiResponse("options", "stream", output);
-    return output;
-  }
-
-  const output = await withStructuredOutputRetries(messages, "options", async (attemptMessages) => {
-    const stream = agent.stream
-      ? await agent.stream(attemptMessages, {
-          abortSignal: signal,
-          ...executionOptionsForTools(tools),
-          memory: memory ?? memoryScopeForDirectorParts(parts),
-          structuredOutput: structuredOutputForDirector(DirectorOptionsOutputSchema, env, tools, "stream")
-        })
-      : null;
-
-    if (!stream) {
-      const output = await generateTreeOptions({
-        parts: { ...parts, messages: attemptMessages },
-        signal,
+  const executionContext = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeOptionsAgent));
+  const { agentContext, tools } = executionContext;
+  try {
+    const runtimeHasTools = hasRuntimeTools(tools);
+    const agentContextWithSubmit = runtimeHasTools ? withFinalSubmitToolSummary(agentContext, "options") : agentContext;
+    const agentTools = runtimeHasTools ? withFinalSubmitTool(tools, "options") : tools;
+    const messages = directorMessagesForParts(parts);
+    logMastraPrompt("options", agentContextWithSubmit, messages);
+    const agent = treeOptionsAgent ?? (createTreeOptionsAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeOptionsAgentLike);
+    if (runtimeHasTools) {
+      const runtimeTools = agentTools as ToolsInput;
+      const output = await streamRuntimeToolsThenStructure<TreeOptionsPartial, DirectorOptionsOutput>({
+        agent,
         env,
-        memory,
-        context,
-        treeOptionsAgent: agent,
-        suppressResponseLog: true
+        memory: memory ?? memoryScopeForDirectorParts(parts),
+        messages,
+        onPartialObject,
+        onReasoningText,
+        schema: DirectorOptionsOutputSchema,
+        signal,
+        target: "options",
+        tools: runtimeTools
       });
-      onPartialObject?.(output);
+      logAiResponse("options", "stream", output);
       return output;
     }
 
-    let latestPartial: unknown = null;
-    if (stream.fullStream) {
-      latestPartial = await consumeStructuredFullStream<TreeOptionsPartial>(stream.fullStream, {
-        logTarget: "options",
-        onPartialObject,
-        onReasoningText
-      });
-    } else if (stream.objectStream) {
-      for await (const partial of toAsyncIterable(stream.objectStream)) {
-        logAiStream("options", "partial", partial);
-        latestPartial = partial;
-        onPartialObject?.(partial as TreeOptionsPartial);
-      }
-    }
+    const output = await withStructuredOutputRetries(messages, "options", async (attemptMessages) => {
+      const stream = agent.stream
+        ? await agent.stream(attemptMessages, {
+            abortSignal: signal,
+            ...executionOptionsForTools(tools),
+            memory: memory ?? memoryScopeForDirectorParts(parts),
+            structuredOutput: structuredOutputForDirector(DirectorOptionsOutputSchema, env, tools, "stream")
+          })
+        : null;
 
-    const output = await resolveStructuredStreamOutput(stream, latestPartial);
-    return DirectorOptionsOutputSchema.parse(output);
-  });
-  logAiResponse("options", "stream", output);
-  return output;
+      if (!stream) {
+        const output = await generateTreeOptions({
+          parts: { ...parts, messages: attemptMessages },
+          signal,
+          env,
+          memory,
+          context,
+          treeOptionsAgent: agent,
+          suppressResponseLog: true
+        });
+        onPartialObject?.(output);
+        return output;
+      }
+
+      let latestPartial: unknown = null;
+      if (stream.fullStream) {
+        latestPartial = await consumeStructuredFullStream<TreeOptionsPartial>(stream.fullStream, {
+          logTarget: "options",
+          onPartialObject,
+          onReasoningText
+        });
+      } else if (stream.objectStream) {
+        for await (const partial of toAsyncIterable(stream.objectStream)) {
+          logAiStream("options", "partial", partial);
+          latestPartial = partial;
+          onPartialObject?.(partial as TreeOptionsPartial);
+        }
+      }
+
+      const output = await resolveStructuredStreamOutput(stream, latestPartial);
+      return DirectorOptionsOutputSchema.parse(output);
+    });
+    logAiResponse("options", "stream", output);
+    return output;
+  } finally {
+    await executionContext.disconnect();
+  }
 }
 
 function contextForDirectorParts(
@@ -1121,14 +1152,23 @@ async function executionContextForDirectorParts(
 ) {
   const baseContext = contextForDirectorParts(parts, target, context);
   if (skipRuntimeTools) {
-    return { agentContext: baseContext, tools: undefined as ToolsInput | undefined };
+    return {
+      agentContext: baseContext,
+      disconnect: async () => undefined,
+      tools: undefined as ToolsInput | undefined
+    };
   }
 
   const runtime = await createSkillRuntimeTools(baseContext.enabledSkills);
+  const mcpRuntime = await createMcpRuntimeTools({ existingTools: runtime.tools });
   const runtimeEnabledSkills = Array.isArray(runtime.enabledSkills) ? runtime.enabledSkills : baseContext.enabledSkills;
   const runtimeAvailableSkillSummaries = Array.isArray(runtime.availableSkillSummaries)
     ? runtime.availableSkillSummaries
     : [];
+  const tools = {
+    ...(runtime.tools ?? {}),
+    ...(mcpRuntime.tools ?? {})
+  };
   return {
     agentContext: {
       ...baseContext,
@@ -1137,10 +1177,19 @@ async function executionContextForDirectorParts(
         ...runtimeAvailableSkillSummaries
       ],
       enabledSkills: runtimeEnabledSkills,
-      toolSummaries: [...(baseContext.toolSummaries ?? []), ...runtime.toolSummaries]
+      toolSummaries: [...(baseContext.toolSummaries ?? []), ...runtime.toolSummaries, ...mcpRuntime.toolSummaries]
     },
-    tools: runtime.tools
+    disconnect: () => disconnectRuntimeTools(mcpRuntime),
+    tools
   };
+}
+
+async function disconnectRuntimeTools(runtime: Pick<McpRuntimeTools, "disconnect">) {
+  try {
+    await runtime.disconnect();
+  } catch (error) {
+    logTritreeAiDebug("mcp-runtime", "disconnect-failed", { error });
+  }
 }
 
 function executionOptionsForTools(tools: ToolsInput | undefined) {

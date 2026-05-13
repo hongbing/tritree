@@ -112,14 +112,15 @@ export async function fetchExternalStyleProfile({
     );
   }
 
-  let data: { skillDraft?: unknown };
+  let data: unknown;
   try {
-    data = (await response.json()) as { skillDraft?: unknown };
+    data = await response.json();
   } catch {
     throw new StyleProfileGenerationError("生成的风格内容不完整。", 502);
   }
 
-  return normalizeGeneratedStyleDraft(data.skillDraft);
+  const skillDraft = data && typeof data === "object" ? (data as { skillDraft?: unknown }).skillDraft : undefined;
+  return normalizeGeneratedStyleDraft(skillDraft);
 }
 
 export function buildStyleProfileUserPrompt(samples: string[]) {

@@ -72,21 +72,15 @@ describe("style profile helpers", () => {
   });
 
   it("normalizes final domain schema violations into style generation errors", () => {
-    expect(() =>
+    const run = () =>
       normalizeGeneratedStyleDraft({
         title: "克制产品随笔",
         description: "偏克制、具体。",
         prompt: "句".repeat(100001)
-      })
-    ).toThrow(StyleProfileGenerationError);
+      });
 
-    expect(() =>
-      normalizeGeneratedStyleDraft({
-        title: "克制产品随笔",
-        description: "偏克制、具体。",
-        prompt: "句".repeat(100001)
-      })
-    ).toThrow("生成的风格内容不完整。");
+    expect(run).toThrow(StyleProfileGenerationError);
+    expect(run).toThrow("生成的风格内容不完整。");
   });
 
   it("splits representative samples by blank lines and trims empty entries", () => {
@@ -202,20 +196,45 @@ describe("fetchExternalStyleProfile", () => {
       }
     });
 
-    await expect(
-      fetchExternalStyleProfile({
+    let error: unknown;
+    try {
+      await fetchExternalStyleProfile({
         env: { TRITREE_STYLE_PROFILE_URL: "https://style.example/generate" },
         fetchImpl: fetchMock,
         user: { id: "user-1", username: "awei", displayName: "Awei" }
-      })
-    ).rejects.toBeInstanceOf(StyleProfileGenerationError);
+      });
+    } catch (caught) {
+      error = caught;
+    }
 
-    await expect(
-      fetchExternalStyleProfile({
+    expect(error).toBeInstanceOf(StyleProfileGenerationError);
+    expect(error).toMatchObject({
+      message: "生成的风格内容不完整。",
+      status: 502
+    });
+  });
+
+  it("normalizes invalid provider envelopes into style generation errors", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => null
+    });
+
+    let error: unknown;
+    try {
+      await fetchExternalStyleProfile({
         env: { TRITREE_STYLE_PROFILE_URL: "https://style.example/generate" },
         fetchImpl: fetchMock,
         user: { id: "user-1", username: "awei", displayName: "Awei" }
-      })
-    ).rejects.toThrow("生成的风格内容不完整。");
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(StyleProfileGenerationError);
+    expect(error).toMatchObject({
+      message: "生成的风格内容不完整。",
+      status: 502
+    });
   });
 });

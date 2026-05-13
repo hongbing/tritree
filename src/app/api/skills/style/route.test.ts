@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthApiError } from "@/lib/auth/current-user";
+import { StyleProfileGenerationError } from "@/lib/skills/style-profile";
 import { POST as EXTERNAL_POST } from "./generate-external/route";
 import { POST as SAMPLES_POST } from "./generate-from-samples/route";
 
@@ -94,9 +95,58 @@ describe("/api/skills/style/generate-from-samples", () => {
     expect(response.status).toBe(400);
     expect(mocks.generateStyleFromSamples).not.toHaveBeenCalled();
   });
+
+  it("requires samples in the JSON body", async () => {
+    const response = await SAMPLES_POST(
+      new Request("http://test.local/api/skills/style/generate-from-samples", {
+        method: "POST",
+        body: JSON.stringify({})
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.generateStyleFromSamples).not.toHaveBeenCalled();
+  });
+
+  it("turns generation errors into public responses", async () => {
+    mocks.generateStyleFromSamples.mockRejectedValueOnce(new StyleProfileGenerationError("请先粘贴至少一段代表作。", 400));
+
+    const response = await SAMPLES_POST(
+      new Request("http://test.local/api/skills/style/generate-from-samples", {
+        method: "POST",
+        body: JSON.stringify({ samples: [""] })
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "请先粘贴至少一段代表作。" });
+  });
+
+  it("uses the fallback response for unknown generation failures", async () => {
+    mocks.generateStyleFromSamples.mockRejectedValueOnce(Object.assign(new Error("boom"), { status: 418 }));
+
+    const response = await SAMPLES_POST(
+      new Request("http://test.local/api/skills/style/generate-from-samples", {
+        method: "POST",
+        body: JSON.stringify({ samples: ["第一段代表作。"] })
+      })
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "无法生成我的风格。" });
+  });
 });
 
 describe("/api/skills/style/generate-external", () => {
+  it("requires login", async () => {
+    mocks.requireCurrentUser.mockRejectedValue(new AuthApiError(401, "请先登录。"));
+
+    const response = await EXTERNAL_POST(new Request("http://test.local/api/skills/style/generate-external", { method: "POST" }));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "请先登录。" });
+  });
+
   it("uses the current user identity and returns a draft", async () => {
     const response = await EXTERNAL_POST(
       new Request("http://test.local/api/skills/style/generate-external", {
@@ -112,11 +162,20 @@ describe("/api/skills/style/generate-external", () => {
   });
 
   it("turns provider errors into public responses", async () => {
-    mocks.fetchExternalStyleProfile.mockRejectedValueOnce(Object.assign(new Error("外部风格生成没有配置。"), { status: 503 }));
+    mocks.fetchExternalStyleProfile.mockRejectedValueOnce(new StyleProfileGenerationError("外部风格生成没有配置。", 503));
 
     const response = await EXTERNAL_POST(new Request("http://test.local/api/skills/style/generate-external", { method: "POST" }));
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "外部风格生成没有配置。" });
+  });
+
+  it("uses the fallback response for unknown provider failures", async () => {
+    mocks.fetchExternalStyleProfile.mockRejectedValueOnce(Object.assign(new Error("boom"), { status: 503 }));
+
+    const response = await EXTERNAL_POST(new Request("http://test.local/api/skills/style/generate-external", { method: "POST" }));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "无法生成我的风格。" });
   });
 });

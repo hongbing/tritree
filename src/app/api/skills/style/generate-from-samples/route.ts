@@ -8,7 +8,7 @@ import { StyleProfileGenerationError } from "@/lib/skills/style-profile";
 export const runtime = "nodejs";
 
 const GenerateFromSamplesBodySchema = z.object({
-  samples: z.array(z.string()).default([])
+  samples: z.array(z.string())
 });
 
 export async function POST(request: Request) {
@@ -21,13 +21,9 @@ export async function POST(request: Request) {
     const authResponse = authErrorResponse(error);
     if (authResponse) return authResponse;
     if (isBadRequestError(error)) return badRequestResponse(error);
-    if (isStyleProfileGenerationError(error)) {
+    if (error instanceof StyleProfileGenerationError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     return NextResponse.json({ error: "无法生成我的风格。" }, { status: 500 });
   }
-}
-
-function isStyleProfileGenerationError(error: unknown): error is StyleProfileGenerationError {
-  return error instanceof StyleProfileGenerationError;
 }

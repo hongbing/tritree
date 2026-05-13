@@ -187,8 +187,10 @@ export function StyleProfileSetup({
             <p className="style-profile-setup__summary">正在使用：{selectedPersonalStyle.title}</p>
           ) : collapsedPersonalStyle && !isExpanded ? (
             <p className="style-profile-setup__summary">已有个人风格：{collapsedPersonalStyle.title}</p>
+          ) : hasPersonalStyles ? (
+            <p className="style-profile-setup__summary">选择一种方式更新或创建个人风格。</p>
           ) : (
-            <p className="style-profile-setup__summary">创建一个可复用的个人风格 Skill，并用于这次作品。</p>
+            <p className="style-profile-setup__summary">你还没有个人风格。选择一种方式创建后，会用于这次作品。</p>
           )}
         </div>
         <button

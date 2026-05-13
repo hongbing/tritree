@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace Tritree's granular visible default system skills with two visible, default-enabled system skills: `系统写作者` and `系统审核者`.
+**Goal:** Replace Tritree's visible built-in system skills with two visible, default-enabled system skills: `系统写作者` and `系统审核者`.
 
-**Architecture:** Keep the existing skill schema and seeding flow. Add two merged system skill ids, archive legacy granular default system skill ids, and add a startup compatibility backfill that enables the merged skills for sessions that previously referenced legacy defaults.
+**Architecture:** Keep the existing skill schema and seeding flow. Add two merged system skill ids, archive legacy system skill ids, and add a startup compatibility backfill that enables the merged skills for sessions that previously referenced legacy system skills.
 
 **Tech Stack:** TypeScript, Next.js app code, Vitest, Node SQLite repository tests.
 
@@ -12,7 +12,7 @@
 
 ## File Structure
 
-- Modify `src/lib/domain.ts`: add merged skill id constants, add two visible default system skills, and archive legacy granular system skills.
+- Modify `src/lib/domain.ts`: add merged skill id constants, add two visible default system skills, and archive legacy system skills.
 - Modify `src/lib/domain.test.ts`: assert the new two-skill default system model and prompt coverage.
 - Modify `src/lib/db/repository.ts`: add startup compatibility backfill after system skill seeding.
 - Modify `src/lib/db/repository.test.ts`: update default skill expectations and cover legacy-session backfill.
@@ -35,36 +35,59 @@ Replace the existing default-system-skill tests with these expectations:
   });
 
   it("ships only the merged writer and reviewer skills as default enabled system skills", () => {
+    expect(DEFAULT_SYSTEM_SKILLS.filter((skill) => !skill.isArchived).map((skill) => skill.id)).toEqual([
+      "system-writer",
+      "system-reviewer"
+    ]);
     expect(DEFAULT_SYSTEM_SKILLS.filter((skill) => skill.defaultEnabled).map((skill) => skill.id)).toEqual([
       "system-writer",
       "system-reviewer"
     ]);
 
-    expect(
-      DEFAULT_SYSTEM_SKILLS.filter((skill) =>
-        [
-          "system-content-workflow",
-          "system-analysis",
-          "system-expand",
-          "system-rewrite",
-          "system-polish",
-          "system-correct",
-          "system-logic-review",
-          "system-reader-entry",
-          "system-final-pass"
-        ].includes(skill.id)
-      ).map((skill) => ({ id: skill.id, defaultEnabled: skill.defaultEnabled, isArchived: skill.isArchived }))
-    ).toEqual([
+    const archivedLegacySkills = DEFAULT_SYSTEM_SKILLS.filter((skill) =>
+      [
+        "system-content-workflow",
+        "system-analysis",
+        "system-expand",
+        "system-rewrite",
+        "system-polish",
+        "system-correct",
+        "system-style-shift",
+        "system-compress",
+        "system-restructure",
+        "system-audience",
+        "system-concrete-examples",
+        "system-no-hype-title",
+        "system-logic-review",
+        "system-reader-entry",
+        "system-claim-risk",
+        "system-title-opening-promise",
+        "system-final-pass",
+        "system-natural-short-sentences"
+      ].includes(skill.id)
+    ).map((skill) => ({ id: skill.id, defaultEnabled: skill.defaultEnabled, isArchived: skill.isArchived }));
+
+    expect(archivedLegacySkills).toHaveLength(18);
+    expect(archivedLegacySkills).toEqual(expect.arrayContaining([
       { id: "system-content-workflow", defaultEnabled: false, isArchived: true },
       { id: "system-analysis", defaultEnabled: false, isArchived: true },
       { id: "system-expand", defaultEnabled: false, isArchived: true },
       { id: "system-rewrite", defaultEnabled: false, isArchived: true },
       { id: "system-polish", defaultEnabled: false, isArchived: true },
       { id: "system-correct", defaultEnabled: false, isArchived: true },
+      { id: "system-style-shift", defaultEnabled: false, isArchived: true },
+      { id: "system-compress", defaultEnabled: false, isArchived: true },
+      { id: "system-restructure", defaultEnabled: false, isArchived: true },
+      { id: "system-audience", defaultEnabled: false, isArchived: true },
+      { id: "system-concrete-examples", defaultEnabled: false, isArchived: true },
+      { id: "system-no-hype-title", defaultEnabled: false, isArchived: true },
       { id: "system-logic-review", defaultEnabled: false, isArchived: true },
       { id: "system-reader-entry", defaultEnabled: false, isArchived: true },
-      { id: "system-final-pass", defaultEnabled: false, isArchived: true }
-    ]);
+      { id: "system-claim-risk", defaultEnabled: false, isArchived: true },
+      { id: "system-title-opening-promise", defaultEnabled: false, isArchived: true },
+      { id: "system-final-pass", defaultEnabled: false, isArchived: true },
+      { id: "system-natural-short-sentences", defaultEnabled: false, isArchived: true }
+    ]));
   });
 
   it("keeps merged system prompts as creator decision guidance", () => {
@@ -94,7 +117,7 @@ Run:
 npm test -- src/lib/domain.test.ts
 ```
 
-Expected: FAIL because `system-writer` and `system-reviewer` do not exist yet and the old default-enabled list is still granular.
+Expected: FAIL because `system-writer` and `system-reviewer` do not exist yet and the old visible system list is still too large.
 
 ### Task 2: Define The Two Merged System Skills
 
@@ -107,22 +130,31 @@ Add these constants near `MAX_SKILL_PROMPT_LENGTH`:
 
 ```ts
 export const MERGED_SYSTEM_SKILL_IDS = ["system-writer", "system-reviewer"] as const;
-export const LEGACY_DEFAULT_SYSTEM_SKILL_IDS = [
+export const LEGACY_SYSTEM_SKILL_IDS = [
   "system-content-workflow",
   "system-analysis",
   "system-expand",
   "system-rewrite",
   "system-polish",
   "system-correct",
+  "system-style-shift",
+  "system-compress",
+  "system-restructure",
+  "system-audience",
+  "system-concrete-examples",
+  "system-no-hype-title",
   "system-logic-review",
   "system-reader-entry",
-  "system-final-pass"
+  "system-claim-risk",
+  "system-title-opening-promise",
+  "system-final-pass",
+  "system-natural-short-sentences"
 ] as const;
 ```
 
 - [ ] **Step 2: Replace the first part of `DEFAULT_SYSTEM_SKILLS`**
 
-Make the visible default-enabled skill list start with these two objects:
+Make the visible system skill list start with these two default-enabled objects:
 
 ```ts
   {
@@ -147,9 +179,9 @@ Make the visible default-enabled skill list start with these two objects:
   },
 ```
 
-- [ ] **Step 3: Archive the legacy granular defaults**
+- [ ] **Step 3: Archive the legacy system skills**
 
-For each id in `LEGACY_DEFAULT_SYSTEM_SKILL_IDS`, set:
+For each id in `LEGACY_SYSTEM_SKILL_IDS`, set:
 
 ```ts
     defaultEnabled: false,
@@ -208,7 +240,7 @@ In `ignores archived system skills when reading session skills`, pass `enabledSk
 Add this test near the skill repository tests:
 
 ```ts
-  it("backfills merged system skills for sessions that referenced legacy default skills", async () => {
+  it("backfills merged system skills for sessions that referenced legacy system skills", async () => {
     const dbPath = testDbPath();
     const repo = createTreeableRepository(dbPath);
     const user = await createTestUser(repo, "writer");
@@ -278,7 +310,7 @@ Expected: FAIL because repository startup does not backfill `system-writer` and 
 Extend the domain import with:
 
 ```ts
-  LEGACY_DEFAULT_SYSTEM_SKILL_IDS,
+  LEGACY_SYSTEM_SKILL_IDS,
   MERGED_SYSTEM_SKILL_IDS,
 ```
 
@@ -298,7 +330,7 @@ Add this function after `ensureSystemSkills()`:
 
 ```ts
   function backfillMergedSystemSkillsForLegacySessions() {
-    const legacyPlaceholders = LEGACY_DEFAULT_SYSTEM_SKILL_IDS.map(() => "?").join(", ");
+    const legacyPlaceholders = LEGACY_SYSTEM_SKILL_IDS.map(() => "?").join(", ");
     const sessionRows = db
       .prepare(
         `
@@ -307,7 +339,7 @@ Add this function after `ensureSystemSkills()`:
           WHERE skill_id IN (${legacyPlaceholders})
         `
       )
-      .all(...LEGACY_DEFAULT_SYSTEM_SKILL_IDS) as Array<{ session_id: string }>;
+      .all(...LEGACY_SYSTEM_SKILL_IDS) as Array<{ session_id: string }>;
 
     if (sessionRows.length === 0) return;
 

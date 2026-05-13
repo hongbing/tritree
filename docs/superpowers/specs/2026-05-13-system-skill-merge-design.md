@@ -40,7 +40,7 @@ Both new skills should be system skills, visible, default-enabled, and non-archi
 
 ### Legacy Skills
 
-Existing granular system skill ids should remain in the seed list, but become archived and not default-enabled. This avoids deleting historical references or database rows while removing them from normal pickers and new-session defaults.
+Existing system skill ids should remain in the seed list, but become archived and not default-enabled. This avoids deleting historical references or database rows while removing them from normal pickers and new-session defaults.
 
 The legacy ids include:
 
@@ -50,11 +50,20 @@ The legacy ids include:
 - `system-rewrite`
 - `system-polish`
 - `system-correct`
+- `system-style-shift`
+- `system-compress`
+- `system-restructure`
+- `system-audience`
+- `system-concrete-examples`
+- `system-no-hype-title`
 - `system-logic-review`
 - `system-reader-entry`
+- `system-claim-risk`
+- `system-title-opening-promise`
 - `system-final-pass`
+- `system-natural-short-sentences`
 
-Existing archived or optional system skills should stay archived or optional unless their guidance is folded into the two new prompts.
+Their guidance is folded into the two new prompts where it still belongs. User-created and imported skills remain visible according to their own archive state.
 
 ### Data Flow
 
@@ -64,8 +73,8 @@ On repository startup, `ensureSystemSkills()` upserts the revised `DEFAULT_SYSTE
 
 Because archived skills are filtered out of active runtime context, startup should also run an additive compatibility step for existing sessions:
 
-- If a session has any enabled legacy default system skill, ensure `system-writer` is enabled for that session.
-- If a session has any enabled legacy default system skill, ensure `system-reviewer` is enabled for that session.
+- If a session has any enabled legacy system skill, ensure `system-writer` is enabled for that session.
+- If a session has any enabled legacy system skill, ensure `system-reviewer` is enabled for that session.
 - Leave the old session-skill rows in place so history remains inspectable and no destructive migration is required.
 
 Historical sessions then continue to read cleanly and retain active system guidance through the two merged skills. The archived legacy records remain inspectable through `includeArchived`.
@@ -77,7 +86,7 @@ The seed screen and skill picker should show two selected system skills by defau
 - `系统写作者` in the writing group.
 - `系统审核者` in the review group.
 
-The skill library should no longer show the old granular skills in the normal visible list. They remain visible only when archived skills are explicitly included by repository callers.
+The skill library should no longer show the old system skills in the normal visible list. They remain visible only when archived skills are explicitly included by repository callers.
 
 ### Error Handling
 
@@ -94,13 +103,13 @@ Update domain tests to assert:
 - The two new system skills are the only default-enabled system skills.
 - Their `appliesTo` values are `writer` and `editor`.
 - Their prompts preserve the important guidance from the merged skills.
-- Legacy granular skills are archived and not default-enabled.
+- Legacy system skills are archived and not default-enabled.
 
 Update repository tests to assert:
 
 - `defaultEnabledSkillIds()` returns only the two new ids.
-- Legacy granular skills are hidden from the visible list and still present with `includeArchived`.
-- Existing sessions that referenced legacy default system skills are additively backfilled with the two merged skill ids.
+- Legacy system skills are hidden from the visible list and still present with `includeArchived`.
+- Existing sessions that referenced legacy system skills are additively backfilled with the two merged skill ids.
 - System skill seeding remains idempotent.
 
 Existing prompt and UI tests should continue to work with fixture-level skill ids unless they specifically assert the global default system skill list.

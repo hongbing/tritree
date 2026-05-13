@@ -46,6 +46,8 @@ import {
   DraftSummarySchema,
   DraftSchema,
   DEFAULT_ARTIFACT_TYPE_ID,
+  LEGACY_SYSTEM_SKILL_IDS,
+  MERGED_SYSTEM_SKILL_IDS,
   RootPreferencesSchema,
   SessionStateSchema,
   SessionStatusSchema,
@@ -385,6 +387,7 @@ export function createTreeableRepository(
   const db = createDatabase(dbPath);
   cleanupStoredSkillRuntimePrompts();
   ensureSystemSkills();
+  backfillMergedSystemSkillsForLegacySessions();
   ensureDefaultCreationRequestOptions();
 
   function cleanupStoredSkillRuntimePrompts() {
@@ -438,6 +441,35 @@ export function createTreeableRepository(
           timestamp,
           timestamp
         );
+      }
+    }
+  }
+
+  function backfillMergedSystemSkillsForLegacySessions() {
+    const legacyPlaceholders = LEGACY_SYSTEM_SKILL_IDS.map(() => "?").join(", ");
+    const sessionRows = db
+      .prepare(
+        `
+          SELECT DISTINCT session_id
+          FROM session_enabled_skills
+          WHERE skill_id IN (${legacyPlaceholders})
+        `
+      )
+      .all(...LEGACY_SYSTEM_SKILL_IDS) as Array<{ session_id: string }>;
+
+    if (sessionRows.length === 0) return;
+
+    const timestamp = now();
+    const insert = db.prepare(
+      `
+        INSERT OR IGNORE INTO session_enabled_skills (session_id, skill_id, created_at)
+        VALUES (?, ?, ?)
+      `
+    );
+
+    for (const row of sessionRows) {
+      for (const skillId of MERGED_SYSTEM_SKILL_IDS) {
+        insert.run(row.session_id, skillId, timestamp);
       }
     }
   }

@@ -6,6 +6,7 @@ import {
   generateTreeNextStep,
   generateTreeOptions,
   streamTreeDraft,
+  streamTreeNextStep,
   streamTreeOptions
 } from "./mastra-executor";
 import type { DirectorInputParts } from "./prompts";
@@ -455,6 +456,50 @@ describe("tree director compatibility generators", () => {
     expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
+  it("swallows and logs MCP disconnect failures after successful real-agent generation", async () => {
+    vi.stubEnv("TRITREE_DEBUG_STREAM", "1");
+    const disconnectError = new Error("disconnect failed");
+    const disconnect = vi.fn(async () => {
+      throw disconnectError;
+    });
+    const finalObject = {
+      roundIntent: "继续完善",
+      draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+    };
+
+    mocks.createMcpRuntimeTools.mockResolvedValueOnce({
+      disconnect,
+      toolSummaries: ["MCP filesystem：可用工具 filesystem_read_file。"],
+      tools: {
+        filesystem_read_file: { id: "filesystem_read_file", description: "Read file", execute: vi.fn() }
+      }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        generate: vi.fn(async () => ({ object: finalObject })),
+        stream: vi.fn()
+      };
+    });
+
+    await expect(
+      generateTreeDraft({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" }
+      })
+    ).resolves.toEqual(finalObject);
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[tritree:mcp-runtime:disconnect-failed]",
+      expect.objectContaining({
+        error: expect.objectContaining({
+          message: "disconnect failed"
+        })
+      })
+    );
+  });
+
   it("does not load MCP runtime tools for injected fake agents", async () => {
     const fakeAgent = {
       generate: vi.fn(async () => ({
@@ -470,6 +515,31 @@ describe("tree director compatibility generators", () => {
       treeDraftAgent: fakeAgent
     });
 
+    expect(mocks.createMcpRuntimeTools).not.toHaveBeenCalled();
+  });
+
+  it("does not load MCP runtime tools when an injected stream agent falls back to generate", async () => {
+    const finalObject = {
+      action: "options",
+      roundIntent: "先澄清背景",
+      options: [
+        { id: "a", label: "补系统范围", description: "先确认哪些模块要改。", impact: "避免 PRD 编造范围。", kind: "deepen" },
+        { id: "b", label: "补目标风格", description: "先确认要改成什么风格。", impact: "让需求更明确。", kind: "reframe" },
+        { id: "c", label: "补验收标准", description: "先确认怎么算改好。", impact: "让后续草稿可执行。", kind: "finish" }
+      ],
+    };
+    const fakeAgent = {
+      generate: vi.fn(async () => ({ object: finalObject }))
+    };
+
+    await expect(
+      streamTreeNextStep({
+        parts: directorParts,
+        treeNextStepAgent: fakeAgent
+      })
+    ).resolves.toEqual(finalObject);
+
+    expect(fakeAgent.generate).toHaveBeenCalled();
     expect(mocks.createMcpRuntimeTools).not.toHaveBeenCalled();
   });
 

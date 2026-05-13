@@ -1,0 +1,139 @@
+import { z } from "zod";
+import { SkillUpsertSchema, type Skill, type SkillUpsert } from "@/lib/domain";
+
+export const MY_STYLE_TITLE_PREFIX = "我的风格：";
+export const STYLE_PROFILE_URL_ENV = "TRITREE_STYLE_PROFILE_URL";
+export const STYLE_PROFILE_TOKEN_ENV = "TRITREE_STYLE_PROFILE_TOKEN";
+
+const GeneratedStyleDraftSchema = z.object({
+  title: z.string().trim().min(1).max(40),
+  description: z.string().trim().max(240).default(""),
+  prompt: z.string().trim().min(1)
+});
+
+export type StyleProfileUser = {
+  id: string;
+  username: string;
+  displayName: string;
+};
+
+type FetchLike = typeof fetch;
+
+export class StyleProfileGenerationError extends Error {
+  constructor(
+    message: string,
+    public readonly status = 500
+  ) {
+    super(message);
+    this.name = "StyleProfileGenerationError";
+  }
+}
+
+export class ExternalStyleProviderUnavailableError extends StyleProfileGenerationError {
+  constructor() {
+    super("外部风格生成没有配置。", 503);
+    this.name = "ExternalStyleProviderUnavailableError";
+  }
+}
+
+export function isPersonalStyleSkill(
+  skill: Pick<Skill, "category" | "isArchived" | "isSystem" | "title">
+) {
+  return !skill.isSystem && !skill.isArchived && skill.category === "风格" && skill.title.startsWith(MY_STYLE_TITLE_PREFIX);
+}
+
+export function splitRepresentativeSamples(value: string) {
+  return value
+    .split(/\n\s*\n/)
+    .map((sample) => sample.trim())
+    .filter(Boolean);
+}
+
+export function normalizeGeneratedStyleDraft(value: unknown): SkillUpsert {
+  const parsed = GeneratedStyleDraftSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new StyleProfileGenerationError("生成的风格内容不完整。", 502);
+  }
+
+  const title = withPersonalStylePrefix(parsed.data.title);
+  return SkillUpsertSchema.parse({
+    title,
+    category: "风格",
+    description: parsed.data.description,
+    prompt: parsed.data.prompt,
+    appliesTo: "writer",
+    defaultEnabled: false,
+    isArchived: false
+  });
+}
+
+export function externalStyleProviderAvailable(env: Record<string, string | undefined> = process.env) {
+  return Boolean(env[STYLE_PROFILE_URL_ENV]?.trim());
+}
+
+export async function fetchExternalStyleProfile({
+  env = process.env,
+  fetchImpl = fetch,
+  user
+}: {
+  env?: Record<string, string | undefined>;
+  fetchImpl?: FetchLike;
+  user: StyleProfileUser;
+}) {
+  const url = env[STYLE_PROFILE_URL_ENV]?.trim();
+  if (!url) throw new ExternalStyleProviderUnavailableError();
+
+  const token = env[STYLE_PROFILE_TOKEN_ENV]?.trim();
+  const response = await fetchImpl(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify({
+      user: {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new StyleProfileGenerationError(
+      `外部风格服务返回 ${response.status}${text.trim() ? `：${text.trim()}` : ""}`,
+      response.status === 401 || response.status === 403 ? response.status : 502
+    );
+  }
+
+  const data = (await response.json()) as { skillDraft?: unknown };
+  return normalizeGeneratedStyleDraft(data.skillDraft);
+}
+
+export function buildStyleProfileUserPrompt(samples: string[]) {
+  const sampleText = samples.map((sample, index) => `样本 ${index + 1}：\n${sample}`).join("\n\n");
+
+  return `
+请从以下代表作中归纳作者可复用的写作风格，并生成一个 Tritree Skill 草稿。
+
+要求：
+- 只归纳表达习惯，不把样本主题当成作者长期兴趣。
+- 关注句子节奏、细节密度、语气温度、读者关系、结构习惯和需要避免的表达。
+- 不要复制样本中的长句或隐私信息。
+- 如果样本明显不足以归纳风格，返回 prompt 字段说明需要更多样本。
+- 返回 title、description、prompt 三个字段。
+
+代表作：
+${sampleText}
+`.trim();
+}
+
+function withPersonalStylePrefix(title: string) {
+  const trimmed = title.trim().replace(new RegExp(`^${escapeRegExp(MY_STYLE_TITLE_PREFIX)}\\s*`), "");
+  return `${MY_STYLE_TITLE_PREFIX}${trimmed}`.slice(0, 40);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

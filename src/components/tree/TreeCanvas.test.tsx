@@ -295,7 +295,7 @@ describe("TreeCanvas", () => {
     const questionTextRule = css.match(/\.branch-option-question__text\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
     const mainRule = css.match(/\.branch-option-main\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
 
-    expect(trayRule).toContain("max-height:");
+    expect(trayRule).toContain("max-height: min(320px, calc(100dvh - 220px))");
     expect(trayRule).toContain("overflow: hidden");
     expect(questionRule).toContain("max-height:");
     expect(questionRule).toContain("overflow: auto");

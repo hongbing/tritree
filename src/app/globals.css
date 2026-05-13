@@ -2067,7 +2067,7 @@ button:disabled {
   gap: 6px;
   grid-template-rows: minmax(0, auto) min-content minmax(0, 1fr);
   align-items: stretch;
-  max-height: min(292px, calc(100dvh - 220px));
+  max-height: min(320px, calc(100dvh - 220px));
   margin: 10px var(--tree-canvas-inset) 12px;
   overflow: hidden;
   padding-top: 10px;

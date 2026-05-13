@@ -87,6 +87,50 @@ npm run dev
 
 Tritree Skill 可以是普通提示词，也可以是带 `SKILL.md` 的 GitHub 仓库。导入后，它会作为创作指令参与草稿生成和编辑建议；如果 Skill 提供额外工具能力，Tritree 会在本轮 AI 任务中按需使用。
 
+## 外部 MCP 工具
+
+自托管管理员可以给 Tritree 配置外部 MCP 服务器。配置只在服务端读取；普通用户不需要在每次创作时手动启用。默认配置文件路径是项目根目录下的 `.tritree/mcp.json`，也可以用环境变量覆盖：
+
+```env
+TRITREE_MCP_CONFIG_PATH=/absolute/path/to/mcp.json
+```
+
+stdio 示例：
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/absolute/allowed/path"
+      ]
+    }
+  }
+}
+```
+
+HTTP 示例：
+
+```json
+{
+  "mcpServers": {
+    "remoteSearch": {
+      "url": "https://mcp.example.com/mcp",
+      "requestInit": {
+        "headers": {
+          "Authorization": "Bearer ${REMOTE_SEARCH_MCP_TOKEN}"
+        }
+      }
+    }
+  }
+}
+```
+
+字符串里的 `${NAME}` 会从 Tritree 进程环境变量展开。MCP 服务器拥有其配置授予的本机或网络权限；文件访问类服务器请使用绝对路径并显式限制允许访问的目录。不要把 `.tritree/mcp.json` 或包含 token 的配置提交到代码仓库。
+
 ## 开发命令
 
 ```bash

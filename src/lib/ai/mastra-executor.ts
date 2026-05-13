@@ -1624,7 +1624,7 @@ function partialSubmitToolOutputFromArgsText(toolName: string, argsText: string)
 }
 
 function partialNextStepSubmitOutputFromArgsText(argsText: string) {
-  const output = partialOptionsSubmitOutputFromArgsText(argsText) as Record<string, unknown>;
+  const output: Record<string, unknown> = partialOptionsSubmitOutputFromArgsText(argsText) ?? {};
   const action = extractVisibleJsonStringField(argsText, "action");
   if (action) output.action = action;
   return Object.keys(output).length > 0 ? output : undefined;

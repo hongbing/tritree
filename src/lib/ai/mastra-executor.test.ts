@@ -1694,6 +1694,21 @@ describe("tree director compatibility generators", () => {
           }
         };
         yield {
+          type: "tool-call-streaming-start",
+          payload: {
+            toolCallId: "submit-delta-1",
+            toolName: "submit_tree_next_step"
+          }
+        };
+        yield {
+          type: "tool-call-delta",
+          payload: {
+            toolCallId: "submit-delta-1",
+            toolName: "submit_tree_next_step",
+            argsTextDelta: '{"'
+          }
+        };
+        yield {
           type: "tool-call",
           payload: {
             toolCallId: "submit-1",

@@ -145,6 +145,7 @@ type ToolCallDeltaState = {
 };
 
 type ProgressSegmentKind = "debug" | "text" | "tool";
+type RuntimeSubmitTarget = "draft" | "next-step" | "options";
 
 type ProgressSegment = {
   delta: string;
@@ -155,6 +156,7 @@ const MAX_STRUCTURED_OUTPUT_RETRIES = 2;
 const MASTRA_STRUCTURED_OUTPUT_VALIDATION_ID = "STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED";
 const MAX_TOOL_TRANSCRIPT_CHARS = 24000;
 const SUBMIT_TREE_DRAFT_TOOL_NAME = "submit_tree_draft";
+const SUBMIT_TREE_NEXT_STEP_TOOL_NAME = "submit_tree_next_step";
 const SUBMIT_TREE_OPTIONS_TOOL_NAME = "submit_tree_options";
 
 type TreeNextStepAgentLike = TreeOptionsAgentLike;
@@ -256,9 +258,29 @@ export async function streamTreeNextStep({
   const executionContext = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeNextStepAgent));
   const { agentContext, tools } = executionContext;
   try {
+    const runtimeHasTools = hasRuntimeTools(tools);
+    const agentContextWithSubmit = runtimeHasTools ? withFinalSubmitToolSummary(agentContext, "next-step") : agentContext;
+    const agentTools = runtimeHasTools ? withFinalSubmitTool(tools, "next-step") : tools;
     const messages = directorMessagesForParts(parts);
-    logMastraPrompt("next-step", agentContext, messages);
-    const agent = treeNextStepAgent ?? (createTreeNextStepAgent(agentContext, env, tools) as unknown as TreeNextStepAgentLike);
+    logMastraPrompt("next-step", agentContextWithSubmit, messages);
+    const agent = treeNextStepAgent ?? (createTreeNextStepAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeNextStepAgentLike);
+    if (runtimeHasTools) {
+      const runtimeTools = agentTools as ToolsInput;
+      const output = await streamRuntimeToolsThenStructure<TreeNextStepPartial, DirectorNextStepOutput>({
+        agent,
+        env,
+        memory: memory ?? memoryScopeForDirectorParts(parts),
+        messages,
+        onPartialObject,
+        onReasoningText,
+        schema: DirectorNextStepOutputSchema,
+        signal,
+        target: "next-step",
+        tools: runtimeTools
+      });
+      logAiResponse("next-step", "stream", output);
+      return output;
+    }
 
     const output = await withStructuredOutputRetries(messages, "next-step", async (attemptMessages) => {
       const stream = agent.stream
@@ -546,10 +568,15 @@ function contextForDirectorParts(
 
 function withFinalSubmitToolSummary(
   context: SharedAgentContextInput,
-  target: "draft" | "options"
+  target: RuntimeSubmitTarget
 ): SharedAgentContextInput {
   const toolName = finalSubmitToolName(target);
-  const finalShape = target === "draft" ? draftOutputShapeSummary() : optionsOutputShapeSummary();
+  const finalShape =
+    target === "draft"
+      ? draftOutputShapeSummary()
+      : target === "next-step"
+        ? nextStepOutputShapeSummary()
+        : optionsOutputShapeSummary();
   return {
     ...context,
     toolSummaries: [
@@ -559,7 +586,7 @@ function withFinalSubmitToolSummary(
   };
 }
 
-function withFinalSubmitTool(tools: ToolsInput, target: "draft" | "options"): ToolsInput {
+function withFinalSubmitTool(tools: ToolsInput, target: RuntimeSubmitTarget): ToolsInput {
   const toolName = finalSubmitToolName(target);
   return {
     ...tools,
@@ -568,15 +595,26 @@ function withFinalSubmitTool(tools: ToolsInput, target: "draft" | "options"): To
       description:
         target === "draft"
           ? "Submit the final Tritree draft output. This is the last step after runtime skill tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls."
-          : "Submit the final Tritree branch options output. This is the last step after runtime skill tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls.",
-      inputSchema: target === "draft" ? DirectorDraftOutputSchema : DirectorOptionsOutputSchema,
+          : target === "next-step"
+            ? "Submit the final Tritree next-step routing decision. This is the last step after runtime tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls."
+            : "Submit the final Tritree branch options output. This is the last step after runtime skill tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls.",
+      inputSchema:
+        target === "draft"
+          ? DirectorDraftOutputSchema
+          : target === "next-step"
+            ? DirectorNextStepOutputSchema
+            : DirectorOptionsOutputSchema,
       execute: async (input) => input
     })
   };
 }
 
-function finalSubmitToolName(target: "draft" | "options") {
-  return target === "draft" ? SUBMIT_TREE_DRAFT_TOOL_NAME : SUBMIT_TREE_OPTIONS_TOOL_NAME;
+function finalSubmitToolName(target: RuntimeSubmitTarget) {
+  return target === "draft"
+    ? SUBMIT_TREE_DRAFT_TOOL_NAME
+    : target === "next-step"
+      ? SUBMIT_TREE_NEXT_STEP_TOOL_NAME
+      : SUBMIT_TREE_OPTIONS_TOOL_NAME;
 }
 
 function logAiResponse(target: "draft" | "next-step" | "options", mode: "generate" | "stream", response: unknown) {
@@ -612,7 +650,7 @@ async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
   onReasoningText?: (event: ReasoningTextEvent) => void;
   schema: ParseableOutputSchema<TOutput>;
   signal?: AbortSignal;
-  target: "draft" | "options";
+  target: RuntimeSubmitTarget;
   tools: ToolsInput;
 }): Promise<TOutput> {
   return withStructuredOutputRetries(messages, target, async (attemptMessages) => {
@@ -652,7 +690,7 @@ async function streamRuntimeToolsOnce<TPartial, TOutput>({
   onReasoningText?: (event: ReasoningTextEvent) => void;
   schema: ParseableOutputSchema<TOutput>;
   signal?: AbortSignal;
-  target: "draft" | "options";
+  target: RuntimeSubmitTarget;
   tools: ToolsInput;
 }): Promise<{ output: TOutput; toolTranscript: string }> {
   const stream = agent.stream
@@ -692,7 +730,7 @@ async function consumeRuntimeReActStream<TPartial>(
   options: {
     onPartialObject?: (partial: TPartial) => void;
     onReasoningText?: (event: ReasoningTextEvent) => void;
-    target: "draft" | "options";
+    target: RuntimeSubmitTarget;
   }
 ): Promise<RuntimeToolStreamSummary> {
   let accumulatedProgressText = "";
@@ -822,7 +860,7 @@ async function parseRuntimeReActStreamOutput<TOutput>(
   stream: StructuredObjectStreamResult,
   summary: RuntimeToolStreamSummary,
   schema: ParseableOutputSchema<TOutput>,
-  target: "draft" | "options"
+  target: RuntimeSubmitTarget
 ) {
   let streamError: unknown;
   logTritreeAiDebug("react-stream", "parse-start", {
@@ -1580,8 +1618,16 @@ function partialSubmitToolOutputFromArgsText(toolName: string, argsText: string)
   if (isObjectRecord(parsed)) return parsed;
 
   if (toolName === SUBMIT_TREE_OPTIONS_TOOL_NAME) return partialOptionsSubmitOutputFromArgsText(argsText);
+  if (toolName === SUBMIT_TREE_NEXT_STEP_TOOL_NAME) return partialNextStepSubmitOutputFromArgsText(argsText);
   if (toolName === SUBMIT_TREE_DRAFT_TOOL_NAME) return partialDraftSubmitOutputFromArgsText(argsText);
   return undefined;
+}
+
+function partialNextStepSubmitOutputFromArgsText(argsText: string) {
+  const output = partialOptionsSubmitOutputFromArgsText(argsText) as Record<string, unknown>;
+  const action = extractVisibleJsonStringField(argsText, "action");
+  if (action) output.action = action;
+  return Object.keys(output).length > 0 ? output : undefined;
 }
 
 function partialOptionsSubmitOutputFromArgsText(argsText: string) {
@@ -1790,7 +1836,11 @@ function unwrapSubmitToolOutput(output: unknown) {
 }
 
 function isFinalSubmitToolName(toolName: string) {
-  return toolName === SUBMIT_TREE_DRAFT_TOOL_NAME || toolName === SUBMIT_TREE_OPTIONS_TOOL_NAME;
+  return (
+    toolName === SUBMIT_TREE_DRAFT_TOOL_NAME ||
+    toolName === SUBMIT_TREE_NEXT_STEP_TOOL_NAME ||
+    toolName === SUBMIT_TREE_OPTIONS_TOOL_NAME
+  );
 }
 
 function streamChunkTypeForLog(chunk: unknown) {

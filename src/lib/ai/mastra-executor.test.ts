@@ -1664,6 +1664,95 @@ describe("tree director compatibility generators", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  it("accepts runtime final next-step decisions only through the submit_tree_next_step tool", async () => {
+    const runSkillCommand = {
+      id: "run_skill_command",
+      description: "Run an installed skill command.",
+      execute: vi.fn()
+    };
+    const finalObject = {
+      action: "options",
+      roundIntent: "你想从哪个角度评价这几条微博？",
+      options: [
+        { label: "平台视角", description: "分析转发策略背后的平台表达边界。", impact: "后续判断更有结构。" },
+        { label: "用户视角", description: "写成一个普通用户刷到后的观察。", impact: "更轻、更像随手发。" },
+        { label: "信息流视角", description: "讨论只转发不原创的信息分发模式。", impact: "概念更完整。" }
+      ]
+    };
+    const stream = vi.fn(async () => ({
+      fullStream: async function* () {
+        yield {
+          type: "tool-result",
+          payload: {
+            toolCallId: "tool-1",
+            toolName: "run_skill_command",
+            result: {
+              exitCode: 0,
+              ok: true,
+              stdout: JSON.stringify({ statuses: [{ text: "转发微博内容" }] })
+            }
+          }
+        };
+        yield {
+          type: "tool-call",
+          payload: {
+            toolCallId: "submit-1",
+            toolName: "submit_tree_next_step",
+            args: finalObject
+          }
+        };
+      },
+      object: Promise.resolve(undefined)
+    }));
+    const generate = vi.fn();
+    mocks.createSkillRuntimeTools.mockResolvedValueOnce({
+      toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
+      tools: { run_skill_command: runSkillCommand }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate
+      };
+    });
+    const partials: unknown[] = [];
+
+    await expect(
+      streamTreeNextStep({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" },
+        onPartialObject: (partial) => partials.push(partial)
+      })
+    ).resolves.toMatchObject({
+      action: "options",
+      roundIntent: finalObject.roundIntent,
+      options: [
+        { id: "a", label: "平台视角", kind: "explore" },
+        { id: "b", label: "用户视角", kind: "deepen" },
+        { id: "c", label: "信息流视角", kind: "reframe" }
+      ]
+    });
+
+    expect(mocks.agentConstructor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: expect.stringContaining("submit_tree_next_step"),
+        tools: expect.objectContaining({
+          run_skill_command: runSkillCommand,
+          submit_tree_next_step: expect.anything()
+        })
+      })
+    );
+    const streamOptions = (stream.mock.calls as unknown as Array<[unknown, Record<string, unknown>]>)[0]?.[1];
+    expect(streamOptions).toEqual(
+      expect.not.objectContaining({
+        structuredOutput: expect.anything()
+      })
+    );
+    expect(partials).toContainEqual(finalObject);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   it("suppresses noisy thinking text after the final submit tool has been called", async () => {
     const runSkillCommand = {
       id: "run_skill_command",

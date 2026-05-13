@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-const CURRENT_SCHEMA_VERSION = 10;
+const CURRENT_SCHEMA_VERSION = 11;
 const TREEABLE_TABLES = [
   "publish_packages",
   "branch_history",
@@ -191,7 +191,8 @@ function createSchema(sqlite: DatabaseSync) {
   addColumnIfMissing(sqlite, "sessions", "artifact_type_id", "TEXT NOT NULL DEFAULT 'social-post'");
   addColumnIfMissing(sqlite, "skills", "user_id", "TEXT REFERENCES users(id)");
   addColumnIfMissing(sqlite, "creation_request_options", "user_id", "TEXT REFERENCES users(id)");
-  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS root_memory_user_id_unique ON root_memory(user_id) WHERE user_id IS NOT NULL;");
+  sqlite.exec("DROP INDEX IF EXISTS root_memory_user_id_unique;");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS root_memory_user_updated_idx ON root_memory(user_id, updated_at, created_at);");
   sqlite.exec("CREATE INDEX IF NOT EXISTS sessions_user_updated_idx ON sessions(user_id, updated_at, created_at);");
   sqlite.exec("CREATE INDEX IF NOT EXISTS sessions_user_archived_updated_idx ON sessions(user_id, is_archived, updated_at, created_at);");
   sqlite.exec("CREATE INDEX IF NOT EXISTS skills_user_archived_idx ON skills(user_id, is_archived);");

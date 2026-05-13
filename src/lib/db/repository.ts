@@ -272,6 +272,25 @@ function toRootMemory(row: RootMemoryRow): RootMemory {
   };
 }
 
+function rootMemoryForSession(row: RootMemoryRow, session: SessionRow, initialDraft: DraftVersionRow | undefined): RootMemory {
+  const rootMemory = toRootMemory(row);
+  const currentSeed = rootMemory.preferences.seed.trim();
+  const initialSeed = initialDraft?.body.trim() ?? "";
+  const rootWasEditedAfterSessionStarted = row.updated_at > (initialDraft?.created_at ?? session.created_at);
+  if (!rootWasEditedAfterSessionStarted || !currentSeed || !initialSeed || currentSeed === initialSeed) return rootMemory;
+
+  const preferences = RootPreferencesSchema.parse({
+    ...rootMemory.preferences,
+    seed: initialSeed,
+    creationRequest: ""
+  });
+  return {
+    ...rootMemory,
+    preferences,
+    summary: summarizePreferences(preferences)
+  };
+}
+
 function toNode(row: TreeNodeRow): TreeNode {
   const options = parseJson<BranchOption[]>(row.options_json).map((option) => BranchOptionSchema.parse(option));
   const foldedOptions = parseJson<BranchOption[]>(row.folded_options_json).map((option) =>
@@ -1107,35 +1126,37 @@ export function createTreeableRepository(
   }
 
   function getRootMemory(userId: string) {
-    const row = db.prepare("SELECT * FROM root_memory WHERE user_id = ? LIMIT 1").get(userId) as RootMemoryRow | undefined;
+    const row = db
+      .prepare(
+        `
+          SELECT *
+          FROM root_memory
+          WHERE user_id = ?
+          ORDER BY updated_at DESC, created_at DESC, rowid DESC
+          LIMIT 1
+        `
+      )
+      .get(userId) as RootMemoryRow | undefined;
     return row ? toRootMemory(row) : null;
   }
 
   function saveRootMemory(userId: string, preferences: RootPreferences) {
     const parsed = RootPreferencesSchema.parse(preferences);
     const existing = getRootMemory(userId);
-    const id = existing?.id ?? nanoid();
+    const id = nanoid();
     const timestamp = now();
     const summary = summarizePreferences(parsed);
 
-    if (existing) {
-      db.prepare(
-        `
-          UPDATE root_memory
-          SET preferences_json = ?, summary = ?, updated_at = ?
-          WHERE id = ? AND user_id = ?
-        `
-      ).run(JSON.stringify(parsed), summary, timestamp, id, userId);
-    } else {
-      db.prepare(
-        `
-          INSERT INTO root_memory (id, user_id, preferences_json, summary, learned_summary, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `
-      ).run(id, userId, JSON.stringify(parsed), summary, "", timestamp, timestamp);
-    }
+    db.prepare(
+      `
+        INSERT INTO root_memory (id, user_id, preferences_json, summary, learned_summary, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `
+    ).run(id, userId, JSON.stringify(parsed), summary, existing?.learnedSummary ?? "", timestamp, timestamp);
 
-    return getRootMemory(userId)!;
+    const row = db.prepare("SELECT * FROM root_memory WHERE id = ? AND user_id = ?").get(id, userId) as RootMemoryRow | undefined;
+    if (!row) throw new Error("Failed to save root memory.");
+    return toRootMemory(row);
   }
 
   function createSessionDraft({
@@ -1903,6 +1924,9 @@ export function createTreeableRepository(
     const drafts = db
       .prepare("SELECT * FROM draft_versions WHERE session_id = ? ORDER BY round_index DESC, created_at DESC, rowid DESC")
       .all(sessionId) as DraftVersionRow[];
+    const initialDraft = db
+      .prepare("SELECT * FROM draft_versions WHERE session_id = ? ORDER BY round_index ASC, created_at ASC, rowid ASC LIMIT 1")
+      .get(sessionId) as DraftVersionRow | undefined;
     const latestDraftByNode = new Map<string, DraftVersionRow>();
     for (const draft of drafts) {
       if (!latestDraftByNode.has(draft.node_id)) {
@@ -1916,7 +1940,7 @@ export function createTreeableRepository(
     const enabledSkills = enabledSkillsForSession(sessionId, userId);
 
     return SessionStateSchema.parse({
-      rootMemory: toRootMemory(root),
+      rootMemory: rootMemoryForSession(root, session, initialDraft),
       session: {
         artifactTypeId: session.artifact_type_id || DEFAULT_ARTIFACT_TYPE_ID,
         id: session.id,

@@ -1460,6 +1460,78 @@ describe("Treeable repository", () => {
     expect(repo.getSessionState(user.id, state.session.id)?.session.artifactTypeId).toBe("prd");
   });
 
+  it("keeps a session bound to the seed it was created with", async () => {
+    const repo = createTreeableRepository(testDbPath());
+    const user = await createTestUser(repo, "writer");
+    const firstRoot = repo.saveRootMemory(user.id, {
+      seed: "旧草稿的 seed",
+      domains: ["AI"],
+      tones: ["calm"],
+      styles: ["opinion-driven"],
+      personas: ["practitioner"]
+    });
+    const firstState = repo.createSessionDraft({
+      userId: user.id,
+      rootMemoryId: firstRoot.id,
+      draft: { title: "旧草稿", body: "旧草稿正文", hashtags: [], imagePrompt: "" }
+    });
+
+    repo.saveRootMemory(user.id, {
+      seed: "新草稿的 seed",
+      domains: ["Creation"],
+      tones: ["sincere"],
+      styles: ["story-driven"],
+      personas: ["observer"]
+    });
+
+    expect(repo.getRootMemory(user.id)?.preferences.seed).toBe("新草稿的 seed");
+    expect(repo.getSessionState(user.id, firstState.session.id)?.rootMemory.preferences.seed).toBe("旧草稿的 seed");
+  });
+
+  it("recovers a legacy session seed from its first draft when shared root memory was overwritten", async () => {
+    const dbPath = testDbPath();
+    const repo = createTreeableRepository(dbPath);
+    const user = await createTestUser(repo, "writer");
+    const sharedRoot = repo.saveRootMemory(user.id, {
+      seed: "旧草稿原本的 seed",
+      domains: ["AI"],
+      tones: ["calm"],
+      styles: ["opinion-driven"],
+      personas: ["practitioner"]
+    });
+    const legacyState = repo.createSessionDraft({
+      userId: user.id,
+      rootMemoryId: sharedRoot.id,
+      draft: { title: "旧草稿", body: "旧草稿原本的 seed", hashtags: [], imagePrompt: "" }
+    });
+    const sqlite = new DatabaseSync(dbPath);
+    sqlite
+      .prepare(
+        `
+          UPDATE root_memory
+          SET preferences_json = ?, summary = ?, updated_at = ?
+          WHERE id = ?
+        `
+      )
+      .run(
+        JSON.stringify({
+          ...sharedRoot.preferences,
+          seed: "后来覆盖的 seed",
+          creationRequest: "后来覆盖的要求"
+        }),
+        "Seed：后来覆盖的 seed\n本次创作要求：后来覆盖的要求",
+        "2030-01-01T00:00:00.000Z",
+        sharedRoot.id
+      );
+    sqlite.close();
+
+    const openedState = repo.getSessionState(user.id, legacyState.session.id);
+
+    expect(openedState?.rootMemory.preferences.seed).toBe("旧草稿原本的 seed");
+    expect(openedState?.rootMemory.preferences.creationRequest).toBe("");
+    expect(openedState?.rootMemory.summary).toBe("Seed：旧草稿原本的 seed");
+  });
+
   it("keeps finishing output as an active draft instead of a publish package", async () => {
     const repo = createTreeableRepository(testDbPath());
     const user = await createTestUser(repo, "writer");

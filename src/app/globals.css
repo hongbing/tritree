@@ -764,7 +764,7 @@ button:disabled {
 }
 
 .style-profile-setup__samples textarea,
-.style-profile-review input,
+.style-profile-review input:not([type="radio"]),
 .style-profile-review select,
 .style-profile-review textarea {
   border: 1px solid rgba(148, 163, 184, 0.6);

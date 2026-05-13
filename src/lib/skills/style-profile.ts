@@ -105,11 +105,10 @@ export async function fetchExternalStyleProfile({
   });
 
   if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new StyleProfileGenerationError(
-      `外部风格服务返回 ${response.status}${text.trim() ? `：${text.trim()}` : ""}`,
-      response.status === 401 || response.status === 403 ? response.status : 502
-    );
+    if (response.status === 401 || response.status === 403) {
+      throw new StyleProfileGenerationError("外部风格服务认证失败，请检查配置。", response.status);
+    }
+    throw new StyleProfileGenerationError("外部风格服务暂时不可用。", 502);
   }
 
   let data: unknown;

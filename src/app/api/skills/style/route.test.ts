@@ -84,7 +84,7 @@ describe("/api/skills/style/generate-from-samples", () => {
     expect(await response.json()).toEqual({ skillDraft });
   });
 
-  it("rejects invalid JSON bodies", async () => {
+  it("rejects schema-invalid JSON bodies", async () => {
     const response = await SAMPLES_POST(
       new Request("http://test.local/api/skills/style/generate-from-samples", {
         method: "POST",
@@ -93,6 +93,19 @@ describe("/api/skills/style/generate-from-samples", () => {
     );
 
     expect(response.status).toBe(400);
+    expect(mocks.generateStyleFromSamples).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed JSON bodies", async () => {
+    const response = await SAMPLES_POST(
+      new Request("http://test.local/api/skills/style/generate-from-samples", {
+        method: "POST",
+        body: "{"
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "请求不是有效的 JSON。" });
     expect(mocks.generateStyleFromSamples).not.toHaveBeenCalled();
   });
 

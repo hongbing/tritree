@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthApiError } from "@/lib/auth/current-user";
+import { STYLE_PROFILE_URL_ENV } from "@/lib/skills/style-profile";
 import { GET, POST } from "./route";
 import { PATCH } from "./[skillId]/route";
 import { POST as IMPORT_POST } from "./import/route";
@@ -19,6 +20,8 @@ const currentUser = {
   createdAt: "2026-05-06T00:00:00.000Z",
   updatedAt: "2026-05-06T00:00:00.000Z"
 };
+
+const originalStyleProfileUrl = process.env[STYLE_PROFILE_URL_ENV];
 
 vi.mock("server-only", () => ({}));
 
@@ -40,10 +43,19 @@ vi.mock("@/lib/skills/skill-installer", () => ({
 }));
 
 beforeEach(() => {
+  delete process.env[STYLE_PROFILE_URL_ENV];
   mocks.getRepository.mockReset();
   mocks.installSkillFromGitHub.mockReset();
   mocks.requireCurrentUser.mockReset();
   mocks.requireCurrentUser.mockResolvedValue(currentUser);
+});
+
+afterEach(() => {
+  if (originalStyleProfileUrl === undefined) {
+    delete process.env[STYLE_PROFILE_URL_ENV];
+  } else {
+    process.env[STYLE_PROFILE_URL_ENV] = originalStyleProfileUrl;
+  }
 });
 
 describe("/api/skills", () => {
@@ -69,6 +81,20 @@ describe("/api/skills", () => {
     expect(data.skills).toEqual([{ id: "system-analysis", title: "分析" }]);
     expect(data.creationRequestOptions).toEqual([{ id: "request-preserve", label: "保留我的原意" }]);
     expect(data.styleProfile).toEqual({ externalStyleGenerationAvailable: false });
+  });
+
+  it("reports when external style generation is available", async () => {
+    process.env[STYLE_PROFILE_URL_ENV] = "https://style.example/generate";
+    mocks.getRepository.mockReturnValue({
+      listCreationRequestOptions: vi.fn().mockReturnValue([]),
+      listSkills: vi.fn().mockReturnValue([])
+    });
+
+    const response = await GET();
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.styleProfile).toEqual({ externalStyleGenerationAvailable: true });
   });
 
   it("creates a user skill", async () => {

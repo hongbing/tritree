@@ -157,20 +157,66 @@ describe("fetchExternalStyleProfile", () => {
     expect(draft.appliesTo).toBe("writer");
   });
 
-  it("returns a public error when the provider rejects the request", async () => {
+  it("returns a curated public error when the provider rejects authentication", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
-      text: async () => "bad token"
+      text: async () => "bad token secret=style-profile-token"
     });
 
-    await expect(
-      fetchExternalStyleProfile({
+    let error: unknown;
+    try {
+      await fetchExternalStyleProfile({
         env: { TRITREE_STYLE_PROFILE_URL: "https://style.example/generate" },
         fetchImpl: fetchMock,
         user: { id: "user-1", username: "awei", displayName: "Awei" }
-      })
-    ).rejects.toThrow("外部风格服务返回 401：bad token");
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(StyleProfileGenerationError);
+    expect(error).toMatchObject({
+      message: "外部风格服务认证失败，请检查配置。",
+      status: 401
+    });
+    expect(error).not.toMatchObject({
+      message: expect.stringContaining("bad token")
+    });
+    expect(error).not.toMatchObject({
+      message: expect.stringContaining("style-profile-token")
+    });
+  });
+
+  it("does not include raw provider failure text in public errors", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => "stacktrace: token=super-secret-provider-key"
+    });
+
+    let error: unknown;
+    try {
+      await fetchExternalStyleProfile({
+        env: { TRITREE_STYLE_PROFILE_URL: "https://style.example/generate" },
+        fetchImpl: fetchMock,
+        user: { id: "user-1", username: "awei", displayName: "Awei" }
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(StyleProfileGenerationError);
+    expect(error).toMatchObject({
+      message: "外部风格服务暂时不可用。",
+      status: 502
+    });
+    expect(error).not.toMatchObject({
+      message: expect.stringContaining("stacktrace")
+    });
+    expect(error).not.toMatchObject({
+      message: expect.stringContaining("super-secret-provider-key")
+    });
   });
 
   it("rejects bad provider schema", async () => {

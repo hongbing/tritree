@@ -3,6 +3,7 @@ import { badRequestResponse, isBadRequestError } from "@/lib/api/errors";
 import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
 import { getRepository } from "@/lib/db/repository";
 import { SkillUpsertSchema } from "@/lib/domain";
+import { externalStyleProviderAvailable } from "@/lib/skills/style-profile";
 
 export const runtime = "nodejs";
 
@@ -12,7 +13,10 @@ export async function GET() {
     const repository = getRepository();
     return NextResponse.json({
       skills: repository.listSkills(user.id),
-      creationRequestOptions: repository.listCreationRequestOptions(user.id)
+      creationRequestOptions: repository.listCreationRequestOptions(user.id),
+      styleProfile: {
+        externalStyleGenerationAvailable: externalStyleProviderAvailable()
+      }
     });
   } catch (error) {
     const response = authErrorResponse(error);

@@ -68,6 +68,7 @@ describe("/api/skills", () => {
     expect(response.status).toBe(200);
     expect(data.skills).toEqual([{ id: "system-analysis", title: "分析" }]);
     expect(data.creationRequestOptions).toEqual([{ id: "request-preserve", label: "保留我的原意" }]);
+    expect(data.styleProfile).toEqual({ externalStyleGenerationAvailable: false });
   });
 
   it("creates a user skill", async () => {

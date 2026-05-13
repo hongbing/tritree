@@ -460,6 +460,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   const isMobileLayoutRef = useRef(false);
   const mobileGenerationPanelOverrideRef = useRef(false);
   const loadRequestIdRef = useRef(0);
+  const canImportSkills = currentUser?.isAdmin === true;
 
   useEffect(() => {
     const requestId = loadRequestIdRef.current + 1;
@@ -1401,7 +1402,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
             onArchive={(skillId) => void archiveLibrarySkill(skillId)}
             onClose={() => setIsSkillLibraryOpen(false)}
             onCreate={createLibrarySkill}
-            onImport={importLibrarySkills}
+            onImport={canImportSkills ? importLibrarySkills : undefined}
             onUpdate={async (skillId, input) => Boolean(await updateLibrarySkill(skillId, input))}
             skills={skills}
           />
@@ -1643,7 +1644,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           onArchive={(skillId) => void archiveLibrarySkill(skillId)}
           onClose={() => setIsSkillLibraryOpen(false)}
           onCreate={createLibrarySkill}
-          onImport={importLibrarySkills}
+          onImport={canImportSkills ? importLibrarySkills : undefined}
           onUpdate={async (skillId, input) => Boolean(await updateLibrarySkill(skillId, input))}
           skills={skills}
         />

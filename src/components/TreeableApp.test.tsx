@@ -1670,6 +1670,35 @@ describe("TreeableApp", () => {
     expect(screen.getByRole("article", { name: "小红书风格" })).toBeInTheDocument();
   });
 
+  it("hides skill repository import controls from member users", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: activeState }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <TreeableApp
+        currentUser={{
+          id: "user-2",
+          username: "xiaolin",
+          displayName: "Xiaolin",
+          role: "member",
+          isAdmin: false
+        }}
+      />
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "1 个技能" }));
+    const skillPanel = screen.getByRole("complementary", { name: "本作品技能" });
+    await userEvent.click(within(skillPanel).getByRole("button", { name: "管理技能库" }));
+
+    expect(screen.getByRole("complementary", { name: "技能库" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Skill GitHub URL" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "导入" })).not.toBeInTheDocument();
+  });
+
   it("shows a generated branch draft before requesting missing next options", async () => {
     const draftOnlyState = {
       ...activeState,

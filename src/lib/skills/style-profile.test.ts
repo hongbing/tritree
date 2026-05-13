@@ -3,6 +3,8 @@ import type { Skill } from "@/lib/domain";
 import {
   ExternalStyleProviderUnavailableError,
   MY_STYLE_TITLE_PREFIX,
+  StyleProfileGenerationError,
+  buildStyleProfileUserPrompt,
   externalStyleProviderAvailable,
   fetchExternalStyleProfile,
   isPersonalStyleSkill,
@@ -69,6 +71,24 @@ describe("style profile helpers", () => {
     ).toThrow("生成的风格内容不完整。");
   });
 
+  it("normalizes final domain schema violations into style generation errors", () => {
+    expect(() =>
+      normalizeGeneratedStyleDraft({
+        title: "克制产品随笔",
+        description: "偏克制、具体。",
+        prompt: "句".repeat(100001)
+      })
+    ).toThrow(StyleProfileGenerationError);
+
+    expect(() =>
+      normalizeGeneratedStyleDraft({
+        title: "克制产品随笔",
+        description: "偏克制、具体。",
+        prompt: "句".repeat(100001)
+      })
+    ).toThrow("生成的风格内容不完整。");
+  });
+
   it("splits representative samples by blank lines and trims empty entries", () => {
     expect(splitRepresentativeSamples(" 第一段内容。\n\n\n第二段内容。\n  \n第三段内容。 ")).toEqual([
       "第一段内容。",
@@ -81,6 +101,16 @@ describe("style profile helpers", () => {
     expect(externalStyleProviderAvailable({})).toBe(false);
     expect(externalStyleProviderAvailable({ TRITREE_STYLE_PROFILE_URL: "   " })).toBe(false);
     expect(externalStyleProviderAvailable({ TRITREE_STYLE_PROFILE_URL: "https://style.example/generate" })).toBe(true);
+  });
+
+  it("builds a style profile prompt with numbered samples and style instructions", () => {
+    const prompt = buildStyleProfileUserPrompt(["第一段", "第二段"]);
+
+    expect(prompt).toContain("样本 1");
+    expect(prompt).toContain("第一段");
+    expect(prompt).toContain("样本 2");
+    expect(prompt).toContain("第二段");
+    expect(prompt).toContain("不把样本主题当成作者长期兴趣");
   });
 });
 
@@ -154,6 +184,31 @@ describe("fetchExternalStyleProfile", () => {
       ok: true,
       json: async () => ({ skillDraft: { title: "缺提示词" } })
     });
+
+    await expect(
+      fetchExternalStyleProfile({
+        env: { TRITREE_STYLE_PROFILE_URL: "https://style.example/generate" },
+        fetchImpl: fetchMock,
+        user: { id: "user-1", username: "awei", displayName: "Awei" }
+      })
+    ).rejects.toThrow("生成的风格内容不完整。");
+  });
+
+  it("normalizes provider JSON parsing failures into style generation errors", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => {
+        throw new SyntaxError("Unexpected token");
+      }
+    });
+
+    await expect(
+      fetchExternalStyleProfile({
+        env: { TRITREE_STYLE_PROFILE_URL: "https://style.example/generate" },
+        fetchImpl: fetchMock,
+        user: { id: "user-1", username: "awei", displayName: "Awei" }
+      })
+    ).rejects.toBeInstanceOf(StyleProfileGenerationError);
 
     await expect(
       fetchExternalStyleProfile({

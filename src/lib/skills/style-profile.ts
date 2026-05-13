@@ -56,7 +56,7 @@ export function normalizeGeneratedStyleDraft(value: unknown): SkillUpsert {
   }
 
   const title = withPersonalStylePrefix(parsed.data.title);
-  return SkillUpsertSchema.parse({
+  const normalized = SkillUpsertSchema.safeParse({
     title,
     category: "风格",
     description: parsed.data.description,
@@ -65,6 +65,11 @@ export function normalizeGeneratedStyleDraft(value: unknown): SkillUpsert {
     defaultEnabled: false,
     isArchived: false
   });
+  if (!normalized.success) {
+    throw new StyleProfileGenerationError("生成的风格内容不完整。", 502);
+  }
+
+  return normalized.data;
 }
 
 export function externalStyleProviderAvailable(env: Record<string, string | undefined> = process.env) {
@@ -107,7 +112,13 @@ export async function fetchExternalStyleProfile({
     );
   }
 
-  const data = (await response.json()) as { skillDraft?: unknown };
+  let data: { skillDraft?: unknown };
+  try {
+    data = (await response.json()) as { skillDraft?: unknown };
+  } catch {
+    throw new StyleProfileGenerationError("生成的风格内容不完整。", 502);
+  }
+
   return normalizeGeneratedStyleDraft(data.skillDraft);
 }
 

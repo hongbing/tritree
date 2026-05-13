@@ -74,7 +74,7 @@ describe("StyleProfileSetup", () => {
     renderSetup();
 
     expect(screen.getByRole("region", { name: "我的风格" })).toBeInTheDocument();
-    expect(screen.getByText("你还没有个人风格。选择一种方式创建后，会用于这次作品。")).toBeInTheDocument();
+    expect(screen.getByText("你还没有配置个人风格。建议先设置，让 Tritree 优先按你的表达习惯生成内容。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "手动填写" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "代表作样本" })).not.toBeInTheDocument();

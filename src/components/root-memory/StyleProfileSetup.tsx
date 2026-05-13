@@ -190,7 +190,9 @@ export function StyleProfileSetup({
           ) : hasPersonalStyles ? (
             <p className="style-profile-setup__summary">选择一种方式更新或创建个人风格。</p>
           ) : (
-            <p className="style-profile-setup__summary">你还没有个人风格。选择一种方式创建后，会用于这次作品。</p>
+            <p className="style-profile-setup__summary">
+              你还没有配置个人风格。建议先设置，让 Tritree 优先按你的表达习惯生成内容。
+            </p>
           )}
         </div>
         <button

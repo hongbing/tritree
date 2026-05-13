@@ -118,6 +118,63 @@ describe("MCP runtime config parsing", () => {
       .toBeInstanceOf(URL);
   });
 
+  it("expands environment placeholders in cwd and roots", () => {
+    const dir = makeTempDir();
+    const configPath = writeJsonConfig(dir, {
+      mcpServers: {
+        filesystem: {
+          command: "npx",
+          cwd: "${PROJECT_ROOT}/mcp",
+          roots: [{ uri: "file://${PROJECT_ROOT}/allowed", name: "${ROOT_NAME}" }]
+        }
+      }
+    });
+
+    const result = loadMcpServerDefinitions({
+      configPath,
+      env: {
+        PROJECT_ROOT: "/workspace/tritree",
+        ROOT_NAME: "Allowed Root"
+      }
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.servers.filesystem).toMatchObject({
+      cwd: "/workspace/tritree/mcp",
+      roots: [{ uri: "file:///workspace/tritree/allowed", name: "Allowed Root" }]
+    });
+  });
+
+  it("skips servers when cwd or roots contain missing environment placeholders", () => {
+    const dir = makeTempDir();
+    const configPath = writeJsonConfig(dir, {
+      mcpServers: {
+        missingCwd: {
+          command: "node",
+          cwd: "${SECRET_PROJECT_ROOT}/mcp"
+        },
+        missingRoot: {
+          command: "node",
+          roots: [{ uri: "file://${SECRET_PROJECT_ROOT}/allowed", name: "${SECRET_ROOT_NAME}" }]
+        }
+      }
+    });
+
+    const result = loadMcpServerDefinitions({
+      configPath,
+      env: {
+        SECRET_PROJECT_ROOT: undefined,
+        SECRET_ROOT_NAME: undefined
+      }
+    });
+
+    expect(result.servers).toEqual({});
+    expect(result.diagnostics.join("\n")).toContain("SECRET_PROJECT_ROOT is not configured");
+    expect(result.diagnostics.join("\n")).toContain("SECRET_ROOT_NAME is not configured");
+    expect(result.diagnostics.join("\n")).not.toContain("SECRET_PROJECT_ROOT=");
+    expect(result.diagnostics.join("\n")).not.toContain("SECRET_ROOT_NAME=");
+  });
+
   it("skips invalid servers with redacted diagnostics", () => {
     const dir = makeTempDir();
     const configPath = writeJsonConfig(dir, {

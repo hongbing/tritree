@@ -154,9 +154,9 @@ function parseStdioServerDefinition(
 
   const args = readStringArray(rawServer.args, `MCP server ${serverName} args`, env, diagnostics);
   const serverEnv = readStringMap(rawServer.env, `MCP server ${serverName} env`, env, diagnostics);
-  const cwd = readOptionalAbsolutePath(rawServer.cwd, `MCP server ${serverName} cwd`, diagnostics);
+  const cwd = readOptionalAbsolutePath(rawServer.cwd, `MCP server ${serverName} cwd`, env, diagnostics);
   const timeout = readOptionalTimeout(rawServer.timeout, `MCP server ${serverName} timeout`, diagnostics);
-  const roots = readRoots(rawServer.roots, `MCP server ${serverName} roots`, diagnostics);
+  const roots = readRoots(rawServer.roots, `MCP server ${serverName} roots`, env, diagnostics);
   if (diagnostics.length > 0) return { diagnostics };
 
   return {
@@ -198,7 +198,7 @@ function parseHttpServerDefinition(
     `MCP server ${serverName} connectTimeout`,
     diagnostics
   );
-  const roots = readRoots(rawServer.roots, `MCP server ${serverName} roots`, diagnostics);
+  const roots = readRoots(rawServer.roots, `MCP server ${serverName} roots`, env, diagnostics);
   if (diagnostics.length > 0 || !url) return { diagnostics };
 
   return {
@@ -273,13 +273,20 @@ function readRequestInit(
   return headers ? { headers } : {};
 }
 
-function readOptionalAbsolutePath(value: unknown, label: string, diagnostics: string[]) {
+function readOptionalAbsolutePath(value: unknown, label: string, env: StringEnv, diagnostics: string[]) {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || !path.isAbsolute(value)) {
+  if (typeof value !== "string") {
     diagnostics.push(`${label} must be an absolute path.`);
     return undefined;
   }
-  return value;
+
+  const expanded = expandString(value, env);
+  diagnostics.push(...expanded.diagnostics.map((message) => `${label}: ${message}`));
+  if (!path.isAbsolute(expanded.value)) {
+    diagnostics.push(`${label} must be an absolute path.`);
+    return undefined;
+  }
+  return expanded.value;
 }
 
 function readOptionalTimeout(value: unknown, label: string, diagnostics: string[]) {
@@ -294,6 +301,7 @@ function readOptionalTimeout(value: unknown, label: string, diagnostics: string[
 function readRoots(
   value: unknown,
   label: string,
+  env: StringEnv,
   diagnostics: string[]
 ): Array<{ uri: string; name?: string }> | undefined {
   if (value === undefined) return undefined;
@@ -308,7 +316,9 @@ function readRoots(
       diagnostics.push(`${label}[${index}] must include a file URI.`);
       continue;
     }
-    if (!root.uri.startsWith("file://")) {
+    const uri = expandString(root.uri, env);
+    diagnostics.push(...uri.diagnostics.map((message) => `${label}[${index}].uri: ${message}`));
+    if (!uri.value.startsWith("file://")) {
       diagnostics.push(`${label}[${index}].uri must be a file:// URI.`);
       continue;
     }
@@ -316,7 +326,10 @@ function readRoots(
       diagnostics.push(`${label}[${index}].name must be a string.`);
       continue;
     }
-    roots.push({ uri: root.uri, ...(root.name ? { name: root.name } : {}) });
+
+    const name = root.name === undefined ? undefined : expandString(root.name, env);
+    if (name) diagnostics.push(...name.diagnostics.map((message) => `${label}[${index}].name: ${message}`));
+    roots.push({ uri: uri.value, ...(name?.value ? { name: name.value } : {}) });
   }
   return roots;
 }

@@ -153,6 +153,40 @@ describe("MCP runtime config parsing", () => {
       .toBeInstanceOf(URL);
   });
 
+  it("accepts common MCP JSON type and top-level HTTP headers", () => {
+    const dir = makeTempDir();
+    const configPath = writeJsonConfig(dir, {
+      mcpServers: {
+        statusServer: {
+          type: "http",
+          url: "https://mcp.example.com/mcp",
+          headers: {
+            Authorization: "Bearer ${STATUS_MCP_TOKEN}"
+          }
+        }
+      }
+    });
+
+    const result = loadMcpServerDefinitions({
+      configPath,
+      env: {
+        STATUS_MCP_TOKEN: "status-secret"
+      }
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.servers.statusServer).toMatchObject({
+      type: "http",
+      requestInit: {
+        headers: {
+          Authorization: "Bearer status-secret"
+        }
+      }
+    });
+    expect(result.servers.statusServer && "url" in result.servers.statusServer ? result.servers.statusServer.url : null)
+      .toBeInstanceOf(URL);
+  });
+
   it("expands environment placeholders in cwd and roots", () => {
     const dir = makeTempDir();
     const configPath = writeJsonConfig(dir, {
@@ -210,7 +244,7 @@ describe("MCP runtime config parsing", () => {
     expect(result.diagnostics.join("\n")).not.toContain("SECRET_ROOT_NAME=");
   });
 
-  it("skips invalid server option shapes with diagnostics", () => {
+  it("skips only invalid transport option shapes with diagnostics", () => {
     const dir = makeTempDir();
     const configPath = writeJsonConfig(dir, {
       mcpServers: {
@@ -262,12 +296,18 @@ describe("MCP runtime config parsing", () => {
 
     const result = loadMcpServerDefinitions({ configPath, env: {} });
 
-    expect(result.servers).toEqual({});
+    expect(Object.keys(result.servers)).toEqual(["unsupportedRequestInit", "nonStringHeaders"]);
+    expect(result.servers.unsupportedRequestInit).toMatchObject({
+      requestInit: {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token"
+        }
+      }
+    });
     expect(result.diagnostics.join("\n")).toContain("lowTimeout");
     expect(result.diagnostics.join("\n")).toContain("highConnectTimeout");
-    expect(result.diagnostics.join("\n")).toContain("unsupported key method");
     expect(result.diagnostics.join("\n")).toContain("nonStringEnv env must be a string map");
-    expect(result.diagnostics.join("\n")).toContain("nonStringHeaders requestInit.headers must be a string map");
     expect(result.diagnostics.join("\n")).toContain("nonArrayArgs args must be an array of strings");
     expect(result.diagnostics.join("\n")).toContain("nonStringArgs args must be an array of strings");
     expect(result.diagnostics.join("\n")).toContain("malformedRoot");
@@ -307,12 +347,16 @@ describe("MCP runtime config parsing", () => {
 
     const result = loadMcpServerDefinitions({ configPath, env: {} });
 
-    expect(result.servers).toEqual({});
+    expect(result.servers).toEqual({
+      typoServer: {
+        command: "node",
+        argumentz: ["server.js"]
+      }
+    });
     expect(result.diagnostics.join("\n")).toContain("bad/name");
     expect(result.diagnostics.join("\n")).toContain("mixed");
     expect(result.diagnostics.join("\n")).toContain("relativeCwd");
     expect(result.diagnostics.join("\n")).toContain("ftpServer");
-    expect(result.diagnostics.join("\n")).toContain("argumentz");
     expect(result.diagnostics.join("\n")).toContain("MISSING_API_KEY is not configured");
     expect(result.diagnostics.join("\n")).not.toContain("API_KEY=");
   });

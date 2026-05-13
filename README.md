@@ -119,10 +119,8 @@ HTTP 示例：
   "mcpServers": {
     "remoteSearch": {
       "url": "https://mcp.example.com/mcp",
-      "requestInit": {
-        "headers": {
-          "Authorization": "Bearer ${REMOTE_SEARCH_MCP_TOKEN}"
-        }
+      "headers": {
+        "Authorization": "Bearer ${REMOTE_SEARCH_MCP_TOKEN}"
       }
     }
   }

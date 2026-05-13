@@ -50,8 +50,8 @@ type LoadServerDefinitionsResult = {
 const SERVER_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
 const ENV_PLACEHOLDER_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 const MAX_TIMEOUT_MS = 120_000;
-const STDIO_KEYS = new Set(["args", "command", "cwd", "disabled", "env", "roots", "timeout"]);
-const HTTP_KEYS = new Set(["connectTimeout", "disabled", "requestInit", "roots", "timeout", "url"]);
+const STDIO_NORMALIZED_KEYS = new Set(["args", "command", "cwd", "disabled", "env", "roots", "timeout"]);
+const HTTP_NORMALIZED_KEYS = new Set(["connectTimeout", "disabled", "headers", "requestInit", "roots", "timeout", "url"]);
 
 export function defaultMcpConfigPath(cwd = process.cwd()) {
   return path.join(cwd, ".tritree", "mcp.json");
@@ -170,7 +170,7 @@ function parseStdioServerDefinition(
   rawServer: Record<string, unknown>,
   env: StringEnv
 ): { diagnostics: string[]; server?: MastraMCPServerDefinition } {
-  const diagnostics = unknownKeyDiagnostics(serverName, rawServer, STDIO_KEYS);
+  const diagnostics: string[] = [];
   const command = expandString(rawServer.command as string, env);
   if (!command.value.trim()) diagnostics.push(`MCP server ${serverName} command must not be empty.`);
   diagnostics.push(...command.diagnostics.map((message) => `MCP server ${serverName}: ${message}`));
@@ -180,11 +180,13 @@ function parseStdioServerDefinition(
   const cwd = readOptionalAbsolutePath(rawServer.cwd, `MCP server ${serverName} cwd`, env, diagnostics);
   const timeout = readOptionalTimeout(rawServer.timeout, `MCP server ${serverName} timeout`, diagnostics);
   const roots = readRoots(rawServer.roots, `MCP server ${serverName} roots`, env, diagnostics);
+  const passthrough = readPassthroughServerOptions(rawServer, STDIO_NORMALIZED_KEYS, `MCP server ${serverName}`, env, diagnostics);
   if (diagnostics.length > 0) return { diagnostics };
 
   return {
     diagnostics: [],
     server: {
+      ...passthrough,
       command: command.value,
       ...(args ? { args } : {}),
       ...(cwd ? { cwd } : {}),
@@ -200,7 +202,7 @@ function parseHttpServerDefinition(
   rawServer: Record<string, unknown>,
   env: StringEnv
 ): { diagnostics: string[]; server?: MastraMCPServerDefinition } {
-  const diagnostics = unknownKeyDiagnostics(serverName, rawServer, HTTP_KEYS);
+  const diagnostics: string[] = [];
   const rawUrl = expandString(String(rawServer.url), env);
   diagnostics.push(...rawUrl.diagnostics.map((message) => `MCP server ${serverName}: ${message}`));
 
@@ -215,6 +217,7 @@ function parseHttpServerDefinition(
   }
 
   const requestInit = readRequestInit(rawServer.requestInit, `MCP server ${serverName} requestInit`, env, diagnostics);
+  const headers = readStringMap(rawServer.headers, `MCP server ${serverName} headers`, env, diagnostics);
   const timeout = readOptionalTimeout(rawServer.timeout, `MCP server ${serverName} timeout`, diagnostics);
   const connectTimeout = readOptionalTimeout(
     rawServer.connectTimeout,
@@ -222,14 +225,16 @@ function parseHttpServerDefinition(
     diagnostics
   );
   const roots = readRoots(rawServer.roots, `MCP server ${serverName} roots`, env, diagnostics);
+  const passthrough = readPassthroughServerOptions(rawServer, HTTP_NORMALIZED_KEYS, `MCP server ${serverName}`, env, diagnostics);
   if (diagnostics.length > 0 || !url) return { diagnostics };
 
   return {
     diagnostics: [],
     server: {
+      ...passthrough,
       url,
       ...(connectTimeout ? { connectTimeout } : {}),
-      ...(requestInit ? { requestInit } : {}),
+      ...mergeHttpHeaders(requestInit, headers),
       ...(roots ? { roots } : {}),
       ...(timeout ? { timeout } : {})
     }
@@ -283,17 +288,28 @@ function readRequestInit(
   label: string,
   env: StringEnv,
   diagnostics: string[]
-): { headers?: Record<string, string> } | undefined {
+): RequestInit | undefined {
   if (value === undefined) return undefined;
-  if (!isRecord(value)) {
+  const expanded = expandConfigValue(value, label, env, diagnostics);
+  if (!isRecord(expanded)) {
     diagnostics.push(`${label} must be an object.`);
     return undefined;
   }
 
-  const unknownKeys = Object.keys(value).filter((key) => key !== "headers");
-  for (const key of unknownKeys) diagnostics.push(`${label} has unsupported key ${key}.`);
-  const headers = readStringMap(value.headers, `${label}.headers`, env, diagnostics);
-  return headers ? { headers } : {};
+  return expanded as RequestInit;
+}
+
+function readPassthroughServerOptions(
+  rawServer: Record<string, unknown>,
+  normalizedKeys: Set<string>,
+  label: string,
+  env: StringEnv,
+  diagnostics: string[]
+) {
+  const passthrough = Object.fromEntries(
+    Object.entries(rawServer).filter(([key]) => !normalizedKeys.has(key))
+  );
+  return expandConfigValue(passthrough, label, env, diagnostics) as Record<string, unknown>;
 }
 
 function readOptionalAbsolutePath(value: unknown, label: string, env: StringEnv, diagnostics: string[]) {
@@ -379,10 +395,39 @@ function expandString(value: string, env: StringEnv) {
   return { diagnostics, value: expanded };
 }
 
-function unknownKeyDiagnostics(serverName: string, value: Record<string, unknown>, allowedKeys: Set<string>) {
-  return Object.keys(value)
-    .filter((key) => !allowedKeys.has(key))
-    .map((key) => `MCP server ${serverName} has unsupported key ${key}.`);
+function expandConfigValue(value: unknown, label: string, env: StringEnv, diagnostics: string[]): unknown {
+  if (typeof value === "string") {
+    const expanded = expandString(value, env);
+    diagnostics.push(...expanded.diagnostics.map((message) => `${label}: ${message}`));
+    return expanded.value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item, index) => expandConfigValue(item, `${label}[${index}]`, env, diagnostics));
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        expandConfigValue(item, `${label}.${key}`, env, diagnostics)
+      ])
+    );
+  }
+  return value;
+}
+
+function mergeHttpHeaders(requestInit: RequestInit | undefined, headers: Record<string, string> | undefined) {
+  if (!headers) return requestInit ? { requestInit } : {};
+  if (!requestInit) return { requestInit: { headers } };
+  const existingHeaders = isRecord(requestInit.headers) ? requestInit.headers : {};
+  return {
+    requestInit: {
+      ...requestInit,
+      headers: {
+        ...headers,
+        ...existingHeaders
+      }
+    }
+  };
 }
 
 function hashConfig(value: string) {

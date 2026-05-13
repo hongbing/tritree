@@ -148,6 +148,31 @@ describe("StyleProfileSetup", () => {
     expect(onSavedSkill).toHaveBeenCalledWith(expect.objectContaining({ id: "style-1" }));
   });
 
+  it("preserves external generation failure recovery and retries the external request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: "外部风格服务暂时不可用。" })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSetup({ externalStyleGenerationAvailable: true });
+
+    await userEvent.click(screen.getByRole("button", { name: "一键生成我的风格" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("外部风格服务暂时不可用。");
+    expect(screen.getByRole("button", { name: "重试生成" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "改为手动创建" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "重试生成" }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/skills/style/generate-external",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
   it("preserves input and offers recovery after generation failure", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,

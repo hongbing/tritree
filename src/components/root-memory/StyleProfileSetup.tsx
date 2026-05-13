@@ -156,7 +156,11 @@ export function StyleProfileSetup({
           <div className="style-profile-setup__actions">
             {externalStyleGenerationAvailable ? (
               <button className="primary-action" disabled={isBusy} onClick={() => void generateExternal()} type="button">
-                {isGenerating && generationMode === "external" ? "正在一键生成..." : "一键生成我的风格"}
+                {isGenerating && generationMode === "external"
+                  ? "正在一键生成..."
+                  : error && generationMode === "external"
+                    ? "重试生成"
+                    : "一键生成我的风格"}
               </button>
             ) : null}
             <button

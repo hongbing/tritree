@@ -44,7 +44,6 @@ import {
   CreationRequestOptionSchema,
   CreationRequestOptionUpsertSchema,
   DEFAULT_CREATION_REQUEST_OPTIONS,
-  DEFAULT_SYSTEM_SKILLS,
   DraftSummarySchema,
   DraftSchema,
   DEFAULT_ARTIFACT_TYPE_ID,
@@ -64,6 +63,7 @@ import {
   stripSkillRuntimeMetadata,
   type InstalledSkillImport
 } from "@/lib/skills/skill-installer";
+import { loadConfiguredSystemSkills, type ConfiguredSystemSkill } from "@/lib/system-skills";
 import { createDatabase, defaultDbPath } from "./client";
 
 type UserRow = {
@@ -400,16 +400,24 @@ function activePathFor(nodes: TreeNode[], currentNode: TreeNode | null) {
 export function createTreeableRepository(
   dbPath = defaultDbPath(),
   {
-    skillInstallRoot = defaultSkillInstallRoot()
+    skillInstallRoot = defaultSkillInstallRoot(),
+    systemSkillConfigPath
   }: {
     skillInstallRoot?: string;
+    systemSkillConfigPath?: string;
   } = {}
 ) {
+  const configuredSystemSkills = loadConfiguredSystemSkills({ configPath: systemSkillConfigPath });
   const db = createDatabase(dbPath);
-  cleanupStoredSkillRuntimePrompts();
-  ensureSystemSkills();
-  backfillMergedSystemSkillsForLegacySessions();
-  ensureDefaultCreationRequestOptions();
+  try {
+    cleanupStoredSkillRuntimePrompts();
+    ensureSystemSkills(configuredSystemSkills);
+    backfillMergedSystemSkillsForLegacySessions();
+    ensureDefaultCreationRequestOptions();
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 
   function cleanupStoredSkillRuntimePrompts() {
     const timestamp = now();
@@ -421,16 +429,19 @@ export function createTreeableRepository(
     }
   }
 
-  function ensureSystemSkills() {
+  function ensureSystemSkills(systemSkills: ConfiguredSystemSkill[]) {
     const timestamp = now();
-    for (const skill of DEFAULT_SYSTEM_SKILLS) {
+    for (const skill of systemSkills) {
       const parsed = SkillUpsertSchema.parse(skill);
-      const existing = db.prepare("SELECT id FROM skills WHERE id = ?").get(skill.id);
+      const existing = db.prepare("SELECT * FROM skills WHERE id = ?").get(skill.id) as SkillRow | undefined;
       if (existing) {
+        if (existing.user_id !== null || !existing.is_system) {
+          throw new Error(`System skill config id ${skill.id} conflicts with an existing non-system skill.`);
+        }
         db.prepare(
           `
             UPDATE skills
-            SET title = ?, category = ?, description = ?, prompt = ?, applies_to = ?, is_system = 1, default_enabled = ?, is_archived = ?, updated_at = ?
+            SET user_id = NULL, title = ?, category = ?, description = ?, prompt = ?, applies_to = ?, is_system = 1, default_enabled = ?, is_archived = ?, updated_at = ?
             WHERE id = ?
           `
         ).run(
@@ -464,9 +475,39 @@ export function createTreeableRepository(
         );
       }
     }
+
+    const configuredIds = systemSkills.map((skill) => skill.id);
+    const placeholders = configuredIds.map(() => "?").join(", ");
+    db.prepare(
+      `
+        UPDATE skills
+        SET is_archived = 1, updated_at = ?
+        WHERE user_id IS NULL
+          AND is_system = 1
+          AND is_archived = 0
+          AND id NOT IN (${placeholders})
+      `
+    ).run(timestamp, ...configuredIds);
   }
 
   function backfillMergedSystemSkillsForLegacySessions() {
+    const mergedPlaceholders = MERGED_SYSTEM_SKILL_IDS.map(() => "?").join(", ");
+    const activeMergedRows = db
+      .prepare(
+        `
+          SELECT id
+          FROM skills
+          WHERE id IN (${mergedPlaceholders})
+            AND user_id IS NULL
+            AND is_system = 1
+            AND is_archived = 0
+        `
+      )
+      .all(...MERGED_SYSTEM_SKILL_IDS) as Array<{ id: string }>;
+    const activeMergedIdSet = new Set(activeMergedRows.map((row) => row.id));
+    const activeMergedSkillIds = MERGED_SYSTEM_SKILL_IDS.filter((skillId) => activeMergedIdSet.has(skillId));
+    if (activeMergedSkillIds.length === 0) return;
+
     const legacyPlaceholders = LEGACY_SYSTEM_SKILL_IDS.map(() => "?").join(", ");
     const sessionRows = db
       .prepare(
@@ -489,7 +530,7 @@ export function createTreeableRepository(
     );
 
     for (const row of sessionRows) {
-      for (const skillId of MERGED_SYSTEM_SKILL_IDS) {
+      for (const skillId of activeMergedSkillIds) {
         insert.run(row.session_id, skillId, timestamp);
       }
     }

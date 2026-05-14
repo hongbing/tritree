@@ -55,6 +55,13 @@ ANTHROPIC_MODEL=your_model_name
 TRITREE_DB_PATH=.tritree/tritree.sqlite
 ```
 
+复制系统技能配置：
+
+```bash
+mkdir -p .tritree
+cp config/system-skills.example.json .tritree/system-skills.json
+```
+
 启动开发服务器：
 
 ```bash
@@ -126,6 +133,8 @@ npm run typecheck    # TypeScript 类型检查
 ## 自托管提示
 
 数据默认存储在项目根目录 `.tritree/tritree.sqlite`，可通过 `TRITREE_DB_PATH` 修改；旧变量 `TREEABLE_DB_PATH` 仍兼容。生产环境请显式配置 `NEXTAUTH_SECRET`，并定期备份 `.tritree/`。子路径部署、OIDC、外部 MCP 工具、外部风格生成和 Skill 执行隔离都支持按需开启，相关变量可参考 `.env.example`。
+
+系统默认 Skills 完全来自配置文件。默认读取 `.tritree/system-skills.json`；也可以用 `TRITREE_SYSTEM_SKILLS_CONFIG_PATH=/absolute/path/to/system-skills.json` 指向其他 JSON 文件。配置缺失、JSON 无效、`systemSkills` 为空或技能字段不合法时，应用在首次读取仓库时会直接报错，避免静默使用旧提示词。
 
 ## License
 

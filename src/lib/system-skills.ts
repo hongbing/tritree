@@ -58,9 +58,16 @@ export function loadConfiguredSystemSkills({
     throw new Error(`System skills config ${resolvedPath} was not found.`);
   }
 
+  let rawText: string;
+  try {
+    rawText = readFile(resolvedPath);
+  } catch (error) {
+    throw new Error(`System skills config ${resolvedPath} could not be read: ${errorMessage(error)}.`);
+  }
+
   let rawConfig: unknown;
   try {
-    rawConfig = JSON.parse(readFile(resolvedPath));
+    rawConfig = JSON.parse(rawText);
   } catch (error) {
     throw new Error(`System skills config ${resolvedPath} is not valid JSON: ${errorMessage(error)}.`);
   }

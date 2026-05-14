@@ -79,6 +79,22 @@ describe("system skill config loader", () => {
     ).toThrow("is not valid JSON");
   });
 
+  it("reports read failures separately from invalid JSON", () => {
+    const loadUnreadableConfig = () =>
+      loadConfiguredSystemSkills({
+        configPath: "/workspace/tritree/.tritree/system-skills.json",
+        exists: () => true,
+        readFile: () => {
+          throw new Error("EACCES");
+        }
+      });
+
+    expect(loadUnreadableConfig).toThrow(
+      "System skills config /workspace/tritree/.tritree/system-skills.json could not be read"
+    );
+    expect(loadUnreadableConfig).toThrow("EACCES");
+  });
+
   it("requires a non-empty systemSkills array", () => {
     expect(() =>
       loadConfiguredSystemSkills({

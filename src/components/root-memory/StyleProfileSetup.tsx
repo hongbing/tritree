@@ -8,6 +8,7 @@ import {
   normalizeGeneratedStyleDraft
 } from "@/lib/skills/style-profile";
 import { createNdjsonParser } from "@/lib/stream/ndjson";
+import { apiPath } from "@/lib/web-base-path";
 
 type GenerationMode = "external" | "samples";
 type SaveMode = "create" | "update";
@@ -107,12 +108,12 @@ export function StyleProfileSetup({
       return;
     }
 
-    await requestGeneration("samples", "/api/skills/style/generate-from-samples", { samples });
+    await requestGeneration("samples", apiPath("/api/skills/style/generate-from-samples"), { samples });
   }
 
   async function generateExternal() {
     setStep("external");
-    await requestGeneration("external", "/api/skills/style/generate-external");
+    await requestGeneration("external", apiPath("/api/skills/style/generate-external"));
   }
 
   async function requestGeneration(mode: GenerationMode, url: string, body?: unknown) {

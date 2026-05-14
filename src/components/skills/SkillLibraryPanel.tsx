@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MAX_SKILL_PROMPT_LENGTH, type Skill, type SkillCategory, type SkillUpsert } from "@/lib/domain";
 
-const categories: SkillCategory[] = ["方向", "约束", "风格", "平台", "检查"];
-
 const emptyForm: SkillUpsert = {
   title: "",
   category: "约束",
@@ -178,21 +176,6 @@ export function SkillLibraryPanel({
               ref={titleInputRef}
               value={form.title}
             />
-          </label>
-          <label>
-            <span>分类</span>
-            <select
-              aria-label="分类"
-              disabled={isSaving}
-              onChange={(event) => setForm((current) => ({ ...current, category: event.target.value as SkillCategory }))}
-              value={form.category}
-            >
-              {categories.map((category) => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
-              ))}
-            </select>
           </label>
           <fieldset aria-label="作用方式" className="skill-editor__effect">
             <legend>作用方式</legend>

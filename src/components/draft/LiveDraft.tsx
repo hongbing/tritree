@@ -386,8 +386,6 @@ export function LiveDraft({
     });
   }
 
-  function generateImage() {}
-
   function captureDisplayBodySelection(event: ReactMouseEvent<HTMLElement>) {
     if (!canUseSelectionRewrite || !displayContent) return;
     const selection = window.getSelection();

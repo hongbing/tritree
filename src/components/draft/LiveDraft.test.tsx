@@ -544,7 +544,7 @@ describe("LiveDraft", () => {
     expect(onRewriteSelection).not.toHaveBeenCalled();
   });
 
-  it("shows a no-op generate image button with the image prompt", async () => {
+  it("shows the image prompt without a generate image button", () => {
     render(
       <LiveDraft
         draft={{ title: "Draft", body: "Draft body", hashtags: ["#draft"], imagePrompt: "draft image" }}
@@ -553,9 +553,8 @@ describe("LiveDraft", () => {
       />
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "生成图片" }));
-
     expect(screen.getByText("draft image")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "生成图片" })).not.toBeInTheDocument();
   });
 
   it("toggles inline diff markup inside the current draft view", async () => {

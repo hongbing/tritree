@@ -332,7 +332,12 @@ export async function streamTreeNextStep({
       }
 
       const output = await resolveStructuredStreamOutput(stream, latestPartial);
-      return DirectorNextStepOutputSchema.parse(output);
+      try {
+        return DirectorNextStepOutputSchema.parse(output);
+      } catch (parseError) {
+        logAiResponse("next-step", "stream-parse-failed", output);
+        throw parseError;
+      }
     });
     logAiResponse("next-step", "stream", output);
     return output;
@@ -422,7 +427,12 @@ export async function streamTreeDraft({
       }
 
       const output = await resolveStructuredStreamOutput(stream, latestPartial);
-      return DirectorDraftOutputSchema.parse(output);
+      try {
+        return DirectorDraftOutputSchema.parse(output);
+      } catch (parseError) {
+        logAiResponse("draft", "stream-parse-failed", output);
+        throw parseError;
+      }
     });
     logAiResponse("draft", "stream", output);
     return output;
@@ -500,7 +510,12 @@ export async function streamTreeOptions({
       }
 
       const output = await resolveStructuredStreamOutput(stream, latestPartial);
-      return DirectorOptionsOutputSchema.parse(output);
+      try {
+        return DirectorOptionsOutputSchema.parse(output);
+      } catch (parseError) {
+        logAiResponse("options", "stream-parse-failed", output);
+        throw parseError;
+      }
     });
     logAiResponse("options", "stream", output);
     return output;
@@ -575,7 +590,7 @@ function finalSubmitToolName(target: RuntimeSubmitTarget) {
       : SUBMIT_TREE_OPTIONS_TOOL_NAME;
 }
 
-function logAiResponse(target: "draft" | "next-step" | "options", mode: "generate" | "stream", response: unknown) {
+function logAiResponse(target: "draft" | "next-step" | "options", mode: "generate" | "stream" | "stream-parse-failed", response: unknown) {
   logTritreeAiResponse("ai-response", target, {
     mode,
     response
@@ -854,6 +869,7 @@ async function parseRuntimeReActStreamOutput<TOutput>(
         target,
         error: summarizeErrorForLog(error)
       });
+      logAiResponse(target as "draft" | "next-step" | "options", "stream-parse-failed", summary.submittedOutput);
       throw error;
     }
   }
@@ -885,6 +901,7 @@ async function parseRuntimeReActStreamOutput<TOutput>(
     target,
     error: summarizeErrorForLog(streamError)
   });
+  logAiResponse(target as "draft" | "next-step" | "options", "stream-parse-failed", summary.latestPartial);
   throw streamError;
 }
 

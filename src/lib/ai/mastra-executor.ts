@@ -646,7 +646,7 @@ async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
       tools
     });
     return withAgentMessages(output, agentMessages);
-  });
+  }, { hasRuntimeTools: true });
 }
 
 function withAgentMessages<TOutput>(output: TOutput, agentMessages: AgentMessage[]): TOutput & DirectorAgentTrace {
@@ -896,36 +896,11 @@ async function parseRuntimeReActStreamOutput<TOutput>(
     });
   }
 
-  if (summary.rawText.trim() && (target === "draft" || target === "options")) {
-    try {
-      const rawParsed = parseRuntimeMarkdownOutput(summary.rawText, target);
-      const parsed = schema.parse(rawParsed);
-      logTritreeAiDebug("react-stream", "parse-raw-text-success", {
-        target,
-        output: summarizePartialObjectForLog(parsed)
-      });
-      return parsed;
-    } catch (rawError) {
-      logTritreeAiDebug("react-stream", "parse-raw-text-failed", {
-        target,
-        error: summarizeErrorForLog(rawError)
-      });
-    }
-
-    try {
-      const jsonParsed = parseRuntimeRawTextJson(summary.rawText);
-      const parsed = schema.parse(jsonParsed);
-      logTritreeAiDebug("react-stream", "parse-raw-json-success", {
-        target,
-        output: summarizePartialObjectForLog(parsed)
-      });
-      return parsed;
-    } catch (jsonError) {
-      logTritreeAiDebug("react-stream", "parse-raw-json-failed", {
-        target,
-        error: summarizeErrorForLog(jsonError)
-      });
-    }
+  if (summary.rawText.trim()) {
+    logTritreeAiDebug("react-stream", "parse-raw-text-skipped", {
+      target,
+      reason: `Runtime final output must be submitted with ${finalSubmitToolName(target)}.`
+    });
   }
 
   logTritreeAiDebug("react-stream", "parse-failed", {
@@ -1073,7 +1048,8 @@ async function resolveLooseStreamOutput(stream: StructuredObjectStreamResult) {
 async function withStructuredOutputRetries<T>(
   messages: MastraConversationMessage[],
   target: "draft" | "next-step" | "options",
-  run: (messages: MastraConversationMessage[]) => Promise<T>
+  run: (messages: MastraConversationMessage[]) => Promise<T>,
+  options?: { hasRuntimeTools?: boolean }
 ): Promise<T> {
   let attemptMessages = messages;
 
@@ -1090,7 +1066,8 @@ async function withStructuredOutputRetries<T>(
         structuredOutputRepairMessage({
           error,
           retryNumber: retryIndex + 1,
-          target
+          target,
+          hasRuntimeTools: options?.hasRuntimeTools
         })
       ];
     }
@@ -1102,17 +1079,23 @@ async function withStructuredOutputRetries<T>(
 function structuredOutputRepairMessage({
   error,
   retryNumber,
-  target
+  target,
+  hasRuntimeTools: runtimeTools
 }: {
   error: unknown;
   retryNumber: number;
   target: "draft" | "next-step" | "options";
+  hasRuntimeTools?: boolean;
 }): MastraConversationMessage {
+  const submitToolName = finalSubmitToolName(target);
+  const runtimeReminder = runtimeTools
+    ? `\n必须调用 ${submitToolName} 工具提交最终结果，不要直接输出 JSON 或 Markdown 文本。`
+    : "";
   return {
     role: "user",
     content: [
       `上一轮最终输出没有通过 Tritree 固定结构校验。请根据原始任务、已启用 Skills 和已经获得的工具结果，重新生成一个完整合法的最终结果。`,
-      `结构修复重试 ${retryNumber}/${MAX_STRUCTURED_OUTPUT_RETRIES}。不要解释错误原因，不要输出诊断报告。`,
+      `结构修复重试 ${retryNumber}/${MAX_STRUCTURED_OUTPUT_RETRIES}。不要解释错误原因，不要输出诊断报告。${runtimeReminder}`,
       "结构问题：",
       structuredOutputIssueSummary(error),
       "最终结构要求：",

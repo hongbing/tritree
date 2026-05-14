@@ -4,6 +4,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hashPassword } from "@/lib/auth/password";
+import { createDatabase } from "./client";
 import { createTreeableRepository } from "./repository";
 import type { BranchOption, DirectorOutput, OptionGenerationMode } from "@/lib/domain";
 import { SYSTEM_SKILLS_CONFIG_PATH_ENV, type ConfiguredSystemSkill } from "@/lib/system-skills";
@@ -928,6 +929,35 @@ describe("Treeable repository", () => {
       defaultEnabled: false
     }));
     expect(reopened.defaultEnabledSkillIds()).toEqual(["system-reviewer"]);
+  });
+
+  it("rejects configured system skill ids that collide with non-system skills", async () => {
+    const dbPath = testDbPath();
+    const sqlite = createDatabase(dbPath);
+    sqlite
+      .prepare(
+        `
+          INSERT INTO skills (id, user_id, title, category, description, prompt, applies_to, is_system, default_enabled, is_archived, created_at, updated_at)
+          VALUES (?, NULL, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)
+        `
+      )
+      .run(
+        "system-writer",
+        "Imported writer",
+        "风格",
+        "Imported non-system skill.",
+        "Do not promote me.",
+        "writer",
+        "2026-05-01T00:00:00.000Z",
+        "2026-05-01T00:00:00.000Z"
+      );
+    sqlite.close();
+
+    const configPath = writeSystemSkillConfig(repositorySystemSkills);
+
+    expect(() => createTreeableRepository(dbPath, { systemSkillConfigPath: configPath })).toThrow(
+      "System skill config id system-writer conflicts with an existing non-system skill."
+    );
   });
 
   it("archives global system skills that were removed from config", async () => {

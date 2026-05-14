@@ -407,12 +407,17 @@ export function createTreeableRepository(
     systemSkillConfigPath?: string;
   } = {}
 ) {
-  const db = createDatabase(dbPath);
   const configuredSystemSkills = loadConfiguredSystemSkills({ configPath: systemSkillConfigPath });
-  cleanupStoredSkillRuntimePrompts();
-  ensureSystemSkills(configuredSystemSkills);
-  backfillMergedSystemSkillsForLegacySessions();
-  ensureDefaultCreationRequestOptions();
+  const db = createDatabase(dbPath);
+  try {
+    cleanupStoredSkillRuntimePrompts();
+    ensureSystemSkills(configuredSystemSkills);
+    backfillMergedSystemSkillsForLegacySessions();
+    ensureDefaultCreationRequestOptions();
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 
   function cleanupStoredSkillRuntimePrompts() {
     const timestamp = now();
@@ -428,8 +433,11 @@ export function createTreeableRepository(
     const timestamp = now();
     for (const skill of systemSkills) {
       const parsed = SkillUpsertSchema.parse(skill);
-      const existing = db.prepare("SELECT id FROM skills WHERE id = ?").get(skill.id);
+      const existing = db.prepare("SELECT * FROM skills WHERE id = ?").get(skill.id) as SkillRow | undefined;
       if (existing) {
+        if (existing.user_id !== null || !existing.is_system) {
+          throw new Error(`System skill config id ${skill.id} conflicts with an existing non-system skill.`);
+        }
         db.prepare(
           `
             UPDATE skills

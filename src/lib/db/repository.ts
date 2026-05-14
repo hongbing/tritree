@@ -44,7 +44,6 @@ import {
   CreationRequestOptionSchema,
   CreationRequestOptionUpsertSchema,
   DEFAULT_CREATION_REQUEST_OPTIONS,
-  DEFAULT_SYSTEM_SKILLS,
   DraftSummarySchema,
   DraftSchema,
   DEFAULT_ARTIFACT_TYPE_ID,
@@ -64,6 +63,7 @@ import {
   stripSkillRuntimeMetadata,
   type InstalledSkillImport
 } from "@/lib/skills/skill-installer";
+import { loadConfiguredSystemSkills, type ConfiguredSystemSkill } from "@/lib/system-skills";
 import { createDatabase, defaultDbPath } from "./client";
 
 type UserRow = {
@@ -400,14 +400,17 @@ function activePathFor(nodes: TreeNode[], currentNode: TreeNode | null) {
 export function createTreeableRepository(
   dbPath = defaultDbPath(),
   {
-    skillInstallRoot = defaultSkillInstallRoot()
+    skillInstallRoot = defaultSkillInstallRoot(),
+    systemSkillConfigPath
   }: {
     skillInstallRoot?: string;
+    systemSkillConfigPath?: string;
   } = {}
 ) {
   const db = createDatabase(dbPath);
+  const configuredSystemSkills = loadConfiguredSystemSkills({ configPath: systemSkillConfigPath });
   cleanupStoredSkillRuntimePrompts();
-  ensureSystemSkills();
+  ensureSystemSkills(configuredSystemSkills);
   backfillMergedSystemSkillsForLegacySessions();
   ensureDefaultCreationRequestOptions();
 
@@ -421,16 +424,16 @@ export function createTreeableRepository(
     }
   }
 
-  function ensureSystemSkills() {
+  function ensureSystemSkills(systemSkills: ConfiguredSystemSkill[]) {
     const timestamp = now();
-    for (const skill of DEFAULT_SYSTEM_SKILLS) {
+    for (const skill of systemSkills) {
       const parsed = SkillUpsertSchema.parse(skill);
       const existing = db.prepare("SELECT id FROM skills WHERE id = ?").get(skill.id);
       if (existing) {
         db.prepare(
           `
             UPDATE skills
-            SET title = ?, category = ?, description = ?, prompt = ?, applies_to = ?, is_system = 1, default_enabled = ?, is_archived = ?, updated_at = ?
+            SET user_id = NULL, title = ?, category = ?, description = ?, prompt = ?, applies_to = ?, is_system = 1, default_enabled = ?, is_archived = ?, updated_at = ?
             WHERE id = ?
           `
         ).run(
@@ -464,6 +467,18 @@ export function createTreeableRepository(
         );
       }
     }
+
+    const configuredIds = systemSkills.map((skill) => skill.id);
+    const placeholders = configuredIds.map(() => "?").join(", ");
+    db.prepare(
+      `
+        UPDATE skills
+        SET is_archived = 1, updated_at = ?
+        WHERE user_id IS NULL
+          AND is_system = 1
+          AND id NOT IN (${placeholders})
+      `
+    ).run(timestamp, ...configuredIds);
   }
 
   function backfillMergedSystemSkillsForLegacySessions() {

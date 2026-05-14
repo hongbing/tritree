@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   BranchOptionSchema,
-  DEFAULT_SYSTEM_SKILLS,
   DirectorOptionsOutputSchema,
   DirectorNextStepOutputSchema,
   DirectorOutputSchema,
@@ -468,90 +467,6 @@ describe("SkillSchema", () => {
     ]);
   });
 
-  it("assigns the merged system skills to writing and review effect groups", () => {
-    expect(DEFAULT_SYSTEM_SKILLS.find((skill) => skill.id === "system-writer")?.appliesTo).toBe("writer");
-    expect(DEFAULT_SYSTEM_SKILLS.find((skill) => skill.id === "system-reviewer")?.appliesTo).toBe("editor");
-  });
-
-  it("ships only the merged writer and reviewer skills as default enabled system skills", () => {
-    expect(DEFAULT_SYSTEM_SKILLS.filter((skill) => !skill.isArchived).map((skill) => skill.id)).toEqual([
-      "system-writer",
-      "system-reviewer"
-    ]);
-    expect(DEFAULT_SYSTEM_SKILLS.filter((skill) => skill.defaultEnabled).map((skill) => skill.id)).toEqual([
-      "system-writer",
-      "system-reviewer"
-    ]);
-
-    const archivedLegacySkills = DEFAULT_SYSTEM_SKILLS.filter((skill) =>
-      [
-        "system-content-workflow",
-        "system-analysis",
-        "system-expand",
-        "system-rewrite",
-        "system-polish",
-        "system-correct",
-        "system-style-shift",
-        "system-compress",
-        "system-restructure",
-        "system-audience",
-        "system-logic-review",
-        "system-reader-entry",
-        "system-final-pass",
-        "system-concrete-examples",
-        "system-no-hype-title",
-        "system-claim-risk",
-        "system-title-opening-promise",
-        "system-natural-short-sentences"
-      ].includes(skill.id)
-    ).map((skill) => ({ id: skill.id, defaultEnabled: skill.defaultEnabled, isArchived: skill.isArchived }));
-
-    expect(archivedLegacySkills).toHaveLength(18);
-    expect(archivedLegacySkills).toEqual(expect.arrayContaining([
-      { id: "system-content-workflow", defaultEnabled: false, isArchived: true },
-      { id: "system-analysis", defaultEnabled: false, isArchived: true },
-      { id: "system-expand", defaultEnabled: false, isArchived: true },
-      { id: "system-rewrite", defaultEnabled: false, isArchived: true },
-      { id: "system-polish", defaultEnabled: false, isArchived: true },
-      { id: "system-correct", defaultEnabled: false, isArchived: true },
-      { id: "system-style-shift", defaultEnabled: false, isArchived: true },
-      { id: "system-compress", defaultEnabled: false, isArchived: true },
-      { id: "system-restructure", defaultEnabled: false, isArchived: true },
-      { id: "system-audience", defaultEnabled: false, isArchived: true },
-      { id: "system-logic-review", defaultEnabled: false, isArchived: true },
-      { id: "system-reader-entry", defaultEnabled: false, isArchived: true },
-      { id: "system-final-pass", defaultEnabled: false, isArchived: true },
-      { id: "system-concrete-examples", defaultEnabled: false, isArchived: true },
-      { id: "system-no-hype-title", defaultEnabled: false, isArchived: true },
-      { id: "system-claim-risk", defaultEnabled: false, isArchived: true },
-      { id: "system-title-opening-promise", defaultEnabled: false, isArchived: true },
-      { id: "system-natural-short-sentences", defaultEnabled: false, isArchived: true }
-    ]));
-  });
-
-  it("keeps merged system prompts as creator decision guidance", () => {
-    const writer = DEFAULT_SYSTEM_SKILLS.find((skill) => skill.id === "system-writer");
-    const reviewer = DEFAULT_SYSTEM_SKILLS.find((skill) => skill.id === "system-reviewer");
-
-    expect(writer?.prompt).toContain("写作者");
-    expect(writer?.prompt).toContain("种子或零散想法");
-    expect(writer?.prompt).toContain("组织材料");
-    expect(writer?.prompt).toContain("自然、清楚");
-    expect(writer?.prompt).toContain("保留用户已经确认过的表达");
-
-    expect(reviewer?.prompt).toContain("审核者");
-    expect(reviewer?.prompt).toContain("一个问题和三个答案");
-    expect(reviewer?.prompt).toContain("主线");
-    expect(reviewer?.prompt).toContain("读者");
-    expect(reviewer?.prompt).toContain("逻辑断点");
-    expect(reviewer?.prompt).toContain("发布前");
-  });
-
-  it("keeps every default system skill valid for runtime parsing", () => {
-    DEFAULT_SYSTEM_SKILLS.forEach((skill) => {
-      expect(() => SkillUpsertSchema.parse(skill)).not.toThrow();
-    });
-  });
 });
 
 describe("SessionStateSchema", () => {

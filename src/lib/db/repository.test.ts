@@ -2,13 +2,46 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hashPassword } from "@/lib/auth/password";
 import { createTreeableRepository } from "./repository";
 import type { BranchOption, DirectorOutput, OptionGenerationMode } from "@/lib/domain";
+import { SYSTEM_SKILLS_CONFIG_PATH_ENV, type ConfiguredSystemSkill } from "@/lib/system-skills";
 
 function testDbPath() {
   return path.join(mkdtempSync(path.join(tmpdir(), "treeable-")), "test.sqlite");
+}
+
+const exampleSystemSkillsConfigPath = path.resolve("config/system-skills.example.json");
+
+const repositorySystemSkills: ConfiguredSystemSkill[] = [
+  {
+    id: "system-writer",
+    title: "系统写作者",
+    category: "风格",
+    description: "负责生成和改写草稿，控制改动幅度并保留创作者原意。",
+    prompt: "你是写作者。负责把 seed、当前草稿、用户选择和已启用技能写成下一版草稿。",
+    appliesTo: "writer",
+    defaultEnabled: true,
+    isArchived: false
+  },
+  {
+    id: "system-reviewer",
+    title: "系统审核者",
+    category: "检查",
+    description: "负责诊断主线、读者、逻辑和发布前风险，并提出下一步选择。",
+    prompt: "你是审核者。负责判断当前作品最需要创作者澄清、选择或推进什么。",
+    appliesTo: "editor",
+    defaultEnabled: true,
+    isArchived: false
+  }
+];
+
+function writeSystemSkillConfig(skills: ConfiguredSystemSkill[]) {
+  const root = mkdtempSync(path.join(tmpdir(), "tritree-system-skills-"));
+  const configPath = path.join(root, "system-skills.json");
+  writeFileSync(configPath, JSON.stringify({ systemSkills: skills }, null, 2));
+  return configPath;
 }
 
 type Repository = ReturnType<typeof createTreeableRepository>;
@@ -197,6 +230,14 @@ function createHistoricalGeneratedChild(
 }
 
 describe("Treeable repository", () => {
+  beforeEach(() => {
+    vi.stubEnv(SYSTEM_SKILLS_CONFIG_PATH_ENV, exampleSystemSkillsConfigPath);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("creates the first local user as the initial administrator", async () => {
     const repo = createTreeableRepository(testDbPath());
 
@@ -840,7 +881,7 @@ describe("Treeable repository", () => {
     expect(secondSkills.find((skill) => skill.id === "system-writer")?.defaultEnabled).toBe(true);
   });
 
-  it("hides merged system skills from the visible skill list", async () => {
+  it("seeds system skills from the configured file", async () => {
     const repo = createTreeableRepository(testDbPath());
     const user = await createTestUser(repo, "writer");
 
@@ -848,8 +889,65 @@ describe("Treeable repository", () => {
       "system-reviewer",
       "system-writer"
     ]);
-    expect(repo.listSkills(user.id, { includeArchived: true }).find((skill) => skill.id === "system-analysis")?.isArchived).toBe(true);
     expect(repo.defaultEnabledSkillIds()).toEqual(["system-reviewer", "system-writer"]);
+  });
+
+  it("updates configured system skills when the config file changes", async () => {
+    const dbPath = testDbPath();
+    const configPath = writeSystemSkillConfig(repositorySystemSkills);
+    const first = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
+    const user = await createTestUser(first, "writer");
+
+    expect(first.listSkills(user.id).find((skill) => skill.id === "system-writer")?.prompt).toContain("seed");
+
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          systemSkills: [
+            {
+              ...repositorySystemSkills[0],
+              title: "配置写作者",
+              prompt: "配置文件里的新版写作者提示词。",
+              defaultEnabled: false
+            },
+            repositorySystemSkills[1]
+          ]
+        },
+        null,
+        2
+      )
+    );
+
+    const reopened = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
+    const updated = reopened.listSkills(user.id).find((skill) => skill.id === "system-writer");
+
+    expect(updated).toEqual(expect.objectContaining({
+      title: "配置写作者",
+      prompt: "配置文件里的新版写作者提示词。",
+      defaultEnabled: false
+    }));
+    expect(reopened.defaultEnabledSkillIds()).toEqual(["system-reviewer"]);
+  });
+
+  it("archives global system skills that were removed from config", async () => {
+    const dbPath = testDbPath();
+    const configPath = writeSystemSkillConfig(repositorySystemSkills);
+    const first = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
+    const user = await createTestUser(first, "writer");
+
+    expect(first.listSkills(user.id).map((skill) => skill.id)).toContain("system-writer");
+
+    writeFileSync(
+      configPath,
+      JSON.stringify({ systemSkills: [repositorySystemSkills[1]] }, null, 2)
+    );
+
+    const reopened = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
+
+    expect(reopened.listSkills(user.id).map((skill) => skill.id)).not.toContain("system-writer");
+    expect(reopened.listSkills(user.id, { includeArchived: true }).find((skill) => skill.id === "system-writer")?.isArchived).toBe(true);
+    expect(reopened.defaultEnabledSkillIds()).toEqual(["system-reviewer"]);
   });
 
   it("backfills merged system skills for sessions that referenced legacy system skills", async () => {
@@ -883,6 +981,23 @@ describe("Treeable repository", () => {
 
     const sqlite = new DatabaseSync(dbPath);
     sqlite
+      .prepare(
+        `
+          INSERT INTO skills (id, title, category, description, prompt, applies_to, is_system, default_enabled, is_archived, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0, ?, ?)
+        `
+      )
+      .run(
+        "system-analysis",
+        "理清主线",
+        "方向",
+        "旧系统技能。",
+        "判断作品真正要表达什么。",
+        "editor",
+        "2026-05-01T00:00:00.000Z",
+        "2026-05-01T00:00:00.000Z"
+      );
+    sqlite
       .prepare("INSERT INTO session_enabled_skills (session_id, skill_id, created_at) VALUES (?, ?, ?)")
       .run(state.session.id, "system-analysis", "2026-05-01T00:00:00.000Z");
     sqlite.close();
@@ -905,8 +1020,8 @@ describe("Treeable repository", () => {
     const repo = createTreeableRepository(testDbPath());
     const user = await createTestUser(repo, "writer");
 
-    const logicSkill = repo.listSkills(user.id, { includeArchived: true }).find((skill) => skill.id === "system-logic-review");
-    expect(logicSkill?.appliesTo).toBe("editor");
+    const reviewerSkill = repo.listSkills(user.id).find((skill) => skill.id === "system-reviewer");
+    expect(reviewerSkill?.appliesTo).toBe("editor");
 
     const custom = repo.createSkill(user.id, {
       title: "朋友圈短句",
@@ -1157,7 +1272,7 @@ describe("Treeable repository", () => {
     const repo = createTreeableRepository(dbPath);
     const user = await createTestUser(repo, "writer");
 
-    expect(repo.listSkills(user.id).find((skill) => skill.id === "legacy-system")?.appliesTo).toBe("both");
+    expect(repo.listSkills(user.id, { includeArchived: true }).find((skill) => skill.id === "legacy-system")?.appliesTo).toBe("both");
   });
 
   it("stores editable creation request quick buttons in sqlite", async () => {
@@ -1392,7 +1507,7 @@ describe("Treeable repository", () => {
     const user = await createTestUser(repo, "writer");
 
     expect(() =>
-      repo.updateSkill(user.id, "system-analysis", {
+      repo.updateSkill(user.id, "system-writer", {
         title: "用户分析",
         category: "方向",
         description: "修改系统技能。",

@@ -17,7 +17,7 @@ import { Decoration, EditorView, keymap } from "@codemirror/view";
 import { createPortal } from "react-dom";
 import { Copy, ImagePlus, Send, Sparkles, X } from "lucide-react";
 import { DEFAULT_ARTIFACT_TYPE_ID, type ArtifactTypeId, type Draft, type PublishPackage } from "@/lib/domain";
-import { buildArtifactDelivery, getArtifactType } from "@/lib/artifacts";
+import { buildArtifactDelivery, getArtifactType, type PublishPlatform } from "@/lib/artifacts";
 import { resolveDraftTitle } from "@/lib/seed-draft";
 
 type GenerationStage = "draft" | "options";
@@ -96,12 +96,8 @@ export function LiveDraft({
   const [isGeneratedDiffEditing, setIsGeneratedDiffEditing] = useState(false);
   const [editingMode, setEditingMode] = useState<"normal" | null>(null);
   const [isPublishPanelOpen, setIsPublishPanelOpen] = useState(false);
-  const [activePublishPlatform, setActivePublishPlatform] = useState<PublishPlatform>("weibo");
-  const [publishTexts, setPublishTexts] = useState<PublishTextByPlatform>({
-    weibo: "",
-    xiaohongshu: "",
-    moments: ""
-  });
+  const [activePublishPlatform, setActivePublishPlatform] = useState<PublishPlatform | null>(null);
+  const [publishTexts, setPublishTexts] = useState<PublishTextByPlatform>({});
   const [publishXiaohongshuTitle, setPublishXiaohongshuTitle] = useState("");
   const [publishImagePrompt, setPublishImagePrompt] = useState("");
   const [artifactDeliveryText, setArtifactDeliveryText] = useState("");
@@ -116,6 +112,8 @@ export function LiveDraft({
   const baseEditableDraft = comparisonDrafts?.to ?? content;
   const artifactType = getArtifactType(artifactTypeId);
   const isSocialArtifact = artifactType.showPublishAssistant;
+  const publishPlatforms = artifactType.publishPlatforms;
+  const effectivePublishPlatform = activePublishPlatform ?? publishPlatforms[0] ?? null;
   const hasVisibleStreamingImagePrompt = Boolean(
     content?.imagePrompt.trim() && previousDraft && content.imagePrompt !== previousDraft.imagePrompt
   );
@@ -482,16 +480,18 @@ export function LiveDraft({
       action === "artifactDelivery"
         ? artifactDeliveryText.trim()
         : action === "weibo"
-        ? publishTexts.weibo.trim()
+        ? (publishTexts.weibo ?? "").trim()
         : action === "xiaohongshu"
-          ? publishTexts.xiaohongshu.trim()
+          ? (publishTexts.xiaohongshu ?? "").trim()
           : action === "moments"
-            ? publishTexts.moments.trim()
-            : action === "title" && activePublishPlatform === "xiaohongshu"
+            ? (publishTexts.moments ?? "").trim()
+            : action === "title" && effectivePublishPlatform === "xiaohongshu"
               ? publishXiaohongshuTitle.trim()
               : action === "imagePrompt"
                 ? publishImagePrompt.trim()
-                : publishCopyValue(content, activePublishPlatform, action);
+                : effectivePublishPlatform
+                  ? publishCopyValue(content, effectivePublishPlatform, action)
+                  : "";
     if (!value) return;
 
     try {
@@ -544,11 +544,11 @@ export function LiveDraft({
   }
 
   function setPublishFieldsFromDraft(nextDraft: Draft | null) {
-    setPublishTexts({
-      weibo: nextDraft ? formatPublishText(nextDraft, "weibo") : "",
-      xiaohongshu: nextDraft ? formatPublishText(nextDraft, "xiaohongshu") : "",
-      moments: nextDraft ? formatPublishText(nextDraft, "moments") : ""
-    });
+    const texts: PublishTextByPlatform = {};
+    for (const platform of publishPlatforms) {
+      texts[platform] = nextDraft ? formatPublishText(nextDraft, platform) : "";
+    }
+    setPublishTexts(texts);
     setPublishXiaohongshuTitle(nextDraft ? resolveDraftTitle(nextDraft.title, nextDraft.body).trim() : "");
     setPublishImagePrompt(nextDraft?.imagePrompt.trim() ?? "");
   }
@@ -606,7 +606,7 @@ export function LiveDraft({
         </div>
       </div>
       {headerPanel ? <div className="draft-panel__popover">{headerPanel}</div> : null}
-      {isPublishPanelOpen && content ? isSocialArtifact ? (
+      {isPublishPanelOpen && content ? isSocialArtifact && effectivePublishPlatform ? (
         <aside aria-label="发布助手" className="draft-publish-panel" role="dialog">
           <div className="draft-publish-panel__header">
             <div>
@@ -622,24 +622,26 @@ export function LiveDraft({
               <X aria-hidden="true" size={14} />
             </button>
           </div>
-          <div aria-label="发布平台" className="draft-publish-tabs" role="group">
-            {(["weibo", "xiaohongshu", "moments"] as const).map((platform) => (
-              <button
-                aria-pressed={activePublishPlatform === platform}
-                key={platform}
-                onClick={() => {
-                  setActivePublishPlatform(platform);
-                  setPublishCopyError("");
-                  setCopiedPublishAction(null);
-                }}
-                type="button"
-              >
-                {publishPlatformLabel(platform)}
-              </button>
-            ))}
-          </div>
-          <section className="draft-publish-preview" aria-label={`${publishPlatformLabel(activePublishPlatform)}版预览`}>
-            {activePublishPlatform === "xiaohongshu" ? (
+          {publishPlatforms.length > 1 ? (
+            <div aria-label="发布平台" className="draft-publish-tabs" role="group">
+              {publishPlatforms.map((platform) => (
+                <button
+                  aria-pressed={effectivePublishPlatform === platform}
+                  key={platform}
+                  onClick={() => {
+                    setActivePublishPlatform(platform);
+                    setPublishCopyError("");
+                    setCopiedPublishAction(null);
+                  }}
+                  type="button"
+                >
+                  {publishPlatformLabel(platform)}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <section className="draft-publish-preview" aria-label={`${publishPlatformLabel(effectivePublishPlatform)}版预览`}>
+            {effectivePublishPlatform === "xiaohongshu" ? (
               <>
                 <div className="draft-publish-preview__meta">
                   <span>小红书版预览</span>
@@ -657,7 +659,7 @@ export function LiveDraft({
                 />
                 <div className="draft-publish-preview__meta">
                   <span>小红书正文</span>
-                  <span>约 {publishTexts.xiaohongshu.length} 字</span>
+                  <span>约 {(publishTexts.xiaohongshu ?? "").length} 字</span>
                 </div>
                 <textarea
                   aria-label="小红书正文"
@@ -669,14 +671,14 @@ export function LiveDraft({
                     setCopiedPublishAction(null);
                   }}
                   rows={6}
-                  value={publishTexts.xiaohongshu}
+                  value={publishTexts.xiaohongshu ?? ""}
                 />
               </>
-            ) : activePublishPlatform === "moments" ? (
+            ) : effectivePublishPlatform === "moments" ? (
               <>
                 <div className="draft-publish-preview__meta">
                   <span>朋友圈版预览</span>
-                  <span>约 {publishTexts.moments.length} 字</span>
+                  <span>约 {(publishTexts.moments ?? "").length} 字</span>
                 </div>
                 <textarea
                   aria-label="朋友圈文案"
@@ -688,14 +690,14 @@ export function LiveDraft({
                     setCopiedPublishAction(null);
                   }}
                   rows={7}
-                  value={publishTexts.moments}
+                  value={publishTexts.moments ?? ""}
                 />
               </>
             ) : (
               <>
                 <div className="draft-publish-preview__meta">
                   <span>微博版预览</span>
-                  <span>约 {publishTexts.weibo.length} 字</span>
+                  <span>约 {(publishTexts.weibo ?? "").length} 字</span>
                 </div>
                 <textarea
                   aria-label="微博发布文案"
@@ -707,7 +709,7 @@ export function LiveDraft({
                     setCopiedPublishAction(null);
                   }}
                   rows={7}
-                  value={publishTexts.weibo}
+                  value={publishTexts.weibo ?? ""}
                 />
               </>
             )}
@@ -734,18 +736,18 @@ export function LiveDraft({
             />
           </section>
           <div className="draft-publish-actions">
-            {[publishPrimaryActionFor(activePublishPlatform), ...secondaryPublishActionsFor(content, activePublishPlatform)].map(
+            {[publishPrimaryActionFor(effectivePublishPlatform), ...secondaryPublishActionsFor(content, effectivePublishPlatform)].map(
               (action) => (
                 <button
                   className={
-                    action === publishPrimaryActionFor(activePublishPlatform) ? "draft-publish-actions__primary" : undefined
+                    action === publishPrimaryActionFor(effectivePublishPlatform) ? "draft-publish-actions__primary" : undefined
                   }
                   key={action}
                   onClick={() => void copyPublishText(action)}
                   type="button"
                 >
                   <Copy aria-hidden="true" size={13} />
-                  <span>{copiedPublishAction === action ? "已复制" : publishCopyLabel(activePublishPlatform, action)}</span>
+                  <span>{copiedPublishAction === action ? "已复制" : publishCopyLabel(effectivePublishPlatform, action)}</span>
                 </button>
               )
             )}
@@ -755,11 +757,11 @@ export function LiveDraft({
               {publishCopyError}
             </p>
           ) : null}
-          <div className="draft-publish-checks" aria-label={`${publishPlatformLabel(activePublishPlatform)}发布检查`}>
+          <div className="draft-publish-checks" aria-label={`${publishPlatformLabel(effectivePublishPlatform)}发布检查`}>
             {buildPublishChecks(
               content,
-              activePublishPlatform,
-              publishTexts[activePublishPlatform],
+              effectivePublishPlatform,
+              publishTexts[effectivePublishPlatform],
               publishImagePrompt,
               publishXiaohongshuTitle
             ).map((check) => (
@@ -1469,7 +1471,6 @@ type DiffToken = {
 
 type DiffField = "title" | "body" | "hashtags" | "imagePrompt";
 type LiveDiffStreamingField = Extract<DiffField, "body" | "imagePrompt">;
-type PublishPlatform = "weibo" | "xiaohongshu" | "moments";
 type PublishCopyAction =
   | "artifactDelivery"
   | "weibo"
@@ -1483,7 +1484,7 @@ type PublishCheck = {
   text: string;
   tone: "ok" | "warn" | "neutral";
 };
-type PublishTextByPlatform = Record<PublishPlatform, string>;
+type PublishTextByPlatform = Partial<Record<PublishPlatform, string>>;
 type SelectionMode = "actions" | "edit";
 type SelectionAnchor = { left: number; top: number };
 type SelectionRect = Pick<DOMRect, "bottom" | "height" | "left" | "right" | "top" | "width" | "x" | "y">;

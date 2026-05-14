@@ -8,6 +8,12 @@ import { resolveDraftTitle } from "@/lib/seed-draft";
 
 export { DEFAULT_ARTIFACT_TYPE_ID };
 
+export type PublishPlatform = "weibo" | "xiaohongshu" | "moments";
+
+export const ALL_PUBLISH_PLATFORMS: PublishPlatform[] = ["weibo", "xiaohongshu", "moments"];
+
+export const PUBLISH_PLATFORMS_ENV = "TRITREE_PUBLISH_PLATFORMS";
+
 export type ArtifactCheck = {
   text: string;
   tone: "neutral" | "ok" | "warn";
@@ -33,6 +39,7 @@ export type ArtifactType = {
   id: ArtifactTypeId;
   label: string;
   optionInstructions: string;
+  publishPlatforms: PublishPlatform[];
   showImagePrompt: boolean;
   showPublishAssistant: boolean;
   showTopics: boolean;
@@ -55,6 +62,7 @@ const ARTIFACT_TYPES = [
     actionDialogLabel: "发布助手",
     actionDialogTitle: "发布助手",
     actionCopy: "生成适合平台的复制版本",
+    publishPlatforms: ALL_PUBLISH_PLATFORMS,
     showTopics: true,
     showImagePrompt: true,
     showPublishAssistant: true,
@@ -75,6 +83,7 @@ const ARTIFACT_TYPES = [
     actionDialogLabel: "交付助手",
     actionDialogTitle: "PRD 交付稿",
     actionCopy: "复制 Markdown 前检查章节完整性。",
+    publishPlatforms: [],
     showTopics: false,
     showImagePrompt: false,
     showPublishAssistant: false,
@@ -97,8 +106,9 @@ export function listArtifactTypes() {
   return ARTIFACT_TYPES;
 }
 
-export function listConfiguredArtifactTypes(env: Record<string, string | undefined> = process.env) {
+export function listConfiguredArtifactTypes(env: Record<string, string | undefined> = process.env): ArtifactType[] {
   const configured = env[ARTIFACT_TYPES_ENV]?.trim();
+
   if (!configured || configured.toLowerCase() === "all") return ARTIFACT_TYPES;
 
   const selectedTypes = configured
@@ -114,9 +124,31 @@ export function listConfiguredArtifactTypes(env: Record<string, string | undefin
   return selectedTypes.length > 0 ? selectedTypes : ARTIFACT_TYPES;
 }
 
+export function listConfiguredPublishPlatforms(env: Record<string, string | undefined> = process.env): PublishPlatform[] {
+  const configured = env[PUBLISH_PLATFORMS_ENV]?.trim();
+
+  if (!configured || configured.toLowerCase() === "all") return ALL_PUBLISH_PLATFORMS;
+
+  const validPlatforms = new Set<string>(ALL_PUBLISH_PLATFORMS);
+  const selectedPlatforms = configured
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part): part is PublishPlatform => validPlatforms.has(part));
+
+  return selectedPlatforms.length > 0 ? selectedPlatforms : ALL_PUBLISH_PLATFORMS;
+}
+
 export function getArtifactType(typeId: string | null | undefined): ArtifactType {
   const parsed = ArtifactTypeIdSchema.safeParse(typeId);
-  return artifactTypeById.get(parsed.success ? parsed.data : DEFAULT_ARTIFACT_TYPE_ID) ?? ARTIFACT_TYPES[0];
+  const base = artifactTypeById.get(parsed.success ? parsed.data : DEFAULT_ARTIFACT_TYPE_ID) ?? ARTIFACT_TYPES[0];
+  if (!base.showPublishAssistant) return base;
+
+  const platforms = listConfiguredPublishPlatforms();
+  if (platforms.length === ALL_PUBLISH_PLATFORMS.length && platforms.every((p, i) => p === ALL_PUBLISH_PLATFORMS[i])) {
+    return base;
+  }
+  return { ...base, publishPlatforms: platforms };
 }
 
 export function formatArtifactInstructionsForDirector(typeId: string | null | undefined) {

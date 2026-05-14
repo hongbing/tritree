@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   ARTIFACT_TYPES_ENV,
   DEFAULT_ARTIFACT_TYPE_ID,
+  PUBLISH_PLATFORMS_ENV,
   buildArtifactDelivery,
   formatArtifactInstructionsForDirector,
   getArtifactType,
   listConfiguredArtifactTypes,
+  listConfiguredPublishPlatforms,
   listArtifactTypes
 } from "./artifacts";
 
@@ -31,6 +33,14 @@ describe("artifact type registry", () => {
       "social-post",
       "prd"
     ]);
+  });
+
+  it("filters enabled publish platforms from environment configuration", () => {
+    expect(listConfiguredPublishPlatforms({})).toEqual(["weibo", "xiaohongshu", "moments"]);
+    expect(listConfiguredPublishPlatforms({ [PUBLISH_PLATFORMS_ENV]: "all" })).toEqual(["weibo", "xiaohongshu", "moments"]);
+    expect(listConfiguredPublishPlatforms({ [PUBLISH_PLATFORMS_ENV]: "xiaohongshu" })).toEqual(["xiaohongshu"]);
+    expect(listConfiguredPublishPlatforms({ [PUBLISH_PLATFORMS_ENV]: "xiaohongshu,moments" })).toEqual(["xiaohongshu", "moments"]);
+    expect(listConfiguredPublishPlatforms({ [PUBLISH_PLATFORMS_ENV]: "unknown" })).toEqual(["weibo", "xiaohongshu", "moments"]);
   });
 
   it("formats PRD-specific director instructions", () => {

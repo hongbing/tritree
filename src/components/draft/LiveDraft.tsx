@@ -17,13 +17,14 @@ import { Decoration, EditorView, keymap } from "@codemirror/view";
 import { createPortal } from "react-dom";
 import { Copy, Send, Sparkles, X } from "lucide-react";
 import { DEFAULT_ARTIFACT_TYPE_ID, type ArtifactTypeId, type Draft, type PublishPackage } from "@/lib/domain";
-import { buildArtifactDelivery, getArtifactType, type PublishPlatform } from "@/lib/artifacts";
+import { buildArtifactDelivery, getArtifactType, type ArtifactType, type PublishPlatform } from "@/lib/artifacts";
 import { resolveDraftTitle } from "@/lib/seed-draft";
 
 type GenerationStage = "draft" | "options";
 type GenerationPhase = "preparing" | "thinking" | "streaming";
 
 export function LiveDraft({
+  artifactType: propsArtifactType,
   artifactTypeId = DEFAULT_ARTIFACT_TYPE_ID,
   canCompareDrafts = false,
   comparisonDrafts = null,
@@ -50,6 +51,7 @@ export function LiveDraft({
   previousDraft = null,
   thinkingText = ""
 }: {
+  artifactType?: ArtifactType;
   artifactTypeId?: ArtifactTypeId;
   canCompareDrafts?: boolean;
   comparisonDrafts?: { from: Draft; to: Draft } | null;
@@ -110,7 +112,7 @@ export function LiveDraft({
   const [imagePrompt, setImagePrompt] = useState(() => initialEditableDraft?.imagePrompt ?? "");
   const thinkingPreRef = useRef<HTMLPreElement | null>(null);
   const baseEditableDraft = comparisonDrafts?.to ?? content;
-  const artifactType = getArtifactType(artifactTypeId);
+  const artifactType = propsArtifactType ?? getArtifactType(artifactTypeId);
   const isSocialArtifact = artifactType.showPublishAssistant;
   const publishPlatforms = artifactType.publishPlatforms;
   const effectivePublishPlatform = activePublishPlatform ?? publishPlatforms[0] ?? null;

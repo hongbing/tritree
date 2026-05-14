@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { badRequestResponse, isBadRequestError } from "@/lib/api/errors";
 import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
-import { listConfiguredArtifactTypes } from "@/lib/artifacts";
+import { listConfiguredArtifactTypes, listConfiguredPublishPlatforms } from "@/lib/artifacts";
 import { getRepository } from "@/lib/db/repository";
 import { SkillUpsertSchema } from "@/lib/domain";
 import { externalStyleProviderAvailable } from "@/lib/skills/style-profile";
@@ -12,8 +12,14 @@ export async function GET() {
   try {
     const user = await requireCurrentUser();
     const repository = getRepository();
+    const configuredPublishPlatforms = listConfiguredPublishPlatforms();
+    const artifactTypes = listConfiguredArtifactTypes().map((artifactType) =>
+      artifactType.showPublishAssistant
+        ? { ...artifactType, publishPlatforms: configuredPublishPlatforms }
+        : artifactType
+    );
     return NextResponse.json({
-      artifactTypes: listConfiguredArtifactTypes(),
+      artifactTypes,
       skills: repository.listSkills(user.id),
       creationRequestOptions: repository.listCreationRequestOptions(user.id),
       styleProfile: {

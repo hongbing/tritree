@@ -201,6 +201,10 @@ function normalizeArtifactTypesResponse(value: unknown): ArtifactType[] {
     const artifactType = artifactTypeById.get(item.id as ArtifactTypeId);
     if (!artifactType || seenArtifactTypeIds.has(artifactType.id)) return [];
     seenArtifactTypeIds.add(artifactType.id);
+    // 保留服务端返回的 publishPlatforms（已经过服务端环境变量过滤）
+    if (Array.isArray(item.publishPlatforms)) {
+      return [{ ...artifactType, publishPlatforms: item.publishPlatforms as ArtifactType["publishPlatforms"] }];
+    }
     return [artifactType];
   });
 
@@ -1793,6 +1797,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           ref={mobileDraftRegionRef}
         >
           <LiveDraft
+            artifactType={artifactTypes.find((t) => t.id === (sessionState?.session.artifactTypeId ?? DEFAULT_ARTIFACT_TYPE_ID))}
             artifactTypeId={sessionState?.session.artifactTypeId ?? DEFAULT_ARTIFACT_TYPE_ID}
             canCompareDrafts={comparisonEntries.length >= 2}
             comparisonDrafts={comparisonDrafts}

@@ -768,9 +768,15 @@ async function consumeRuntimeReActStream<TPartial>(
       const visibleDelta = formattedProgress.delta;
       const partial = structuredObjectFromStreamChunk(chunk);
 
+      const chunkPayloadForLog = isObjectRecord(chunk) && isObjectRecord((chunk as Record<string, unknown>).payload)
+        ? (chunk as Record<string, unknown>).payload as Record<string, unknown>
+        : isObjectRecord(chunk) ? chunk as Record<string, unknown> : {};
+      const chunkToolNameForLog = toolNameFromPayload(chunkPayloadForLog);
       logTritreeAiDebug("react-stream", "chunk", {
         type: streamChunkTypeForLog(chunk),
         keys: streamChunkKeysForLog(chunk),
+        toolName: chunkToolNameForLog || undefined,
+        isFinalSubmit: chunkToolNameForLog ? isFinalSubmitToolName(chunkToolNameForLog) : undefined,
         reasoningChars: reasoningDelta.length,
         textChars: textDelta.length,
         textPolicy,
@@ -876,6 +882,7 @@ async function parseRuntimeReActStreamOutput<TOutput>(
         error: summarizeErrorForLog(error)
       });
       logAiResponse(target as "draft" | "next-step" | "options", "stream-parse-failed", summary.submittedOutput);
+      logZodIssues(target, "submit", error);
       throw error;
     }
   }
@@ -894,13 +901,7 @@ async function parseRuntimeReActStreamOutput<TOutput>(
       target,
       error: summarizeErrorForLog(error)
     });
-  }
-
-  if (summary.rawText.trim()) {
-    logTritreeAiDebug("react-stream", "parse-raw-text-skipped", {
-      target,
-      reason: `Runtime final output must be submitted with ${finalSubmitToolName(target)}.`
-    });
+    logZodIssues(target, "structured", error);
   }
 
   logTritreeAiDebug("react-stream", "parse-failed", {
@@ -909,6 +910,24 @@ async function parseRuntimeReActStreamOutput<TOutput>(
   });
   logAiResponse(target as "draft" | "next-step" | "options", "stream-parse-failed", summary.latestPartial);
   throw streamError;
+}
+
+function logZodIssues(target: RuntimeSubmitTarget, stage: string, error: unknown) {
+  const issues = zodIssuesFromError(error);
+  if (issues.length === 0) return;
+  console.info(
+    `[treeable:generate-draft-stream:zod-issues:${target}:${stage}]`,
+    JSON.stringify(
+      issues.map((issue) => ({
+        path: issue.path.length > 0 ? issue.path.join(".") : "root",
+        code: issue.code,
+        message: issue.message,
+        received: "received" in issue ? issue.received : undefined
+      })),
+      null,
+      2
+    )
+  );
 }
 
 function parseRuntimeRawTextJson(rawText: string) {

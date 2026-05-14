@@ -918,6 +918,7 @@ async function parseRuntimeReActStreamOutput<TOutput>(
     target,
     error: summarizeErrorForLog(streamError)
   });
+  logRuntimeStreamParseFailure(target, summary, streamError);
   logAiResponse(target as "draft" | "next-step" | "options", "stream-parse-failed", summary.latestPartial);
   throw streamError;
 }
@@ -948,6 +949,48 @@ function logZodIssues(target: RuntimeSubmitTarget, stage: string, error: unknown
       2
     )
   );
+}
+
+function logRuntimeStreamParseFailure(target: RuntimeSubmitTarget, summary: RuntimeToolStreamSummary, error: unknown) {
+  console.info(
+    `[tritree:ai-response:${target}:stream-parse-failed-details]`,
+    stringifyDiagnosticValue({
+      agentMessageCount: summary.agentMessages.length,
+      agentMessages: summary.agentMessages,
+      error: summarizeErrorForLog(error),
+      latestPartial: summary.latestPartial ?? null,
+      rawTextChars: summary.rawText.length,
+      rawTextPreview: truncateText(summary.rawText, 12000),
+      submittedOutput: summary.submittedOutput ?? null,
+      target
+    })
+  );
+}
+
+function stringifyDiagnosticValue(value: unknown) {
+  const seen = new WeakSet<object>();
+  const text = JSON.stringify(
+    value,
+    (_key, item) => {
+      if (typeof item === "bigint") return item.toString();
+      if (item instanceof Error) {
+        return {
+          message: item.message,
+          name: item.name,
+          stack: item.stack
+        };
+      }
+
+      if (item && typeof item === "object") {
+        if (seen.has(item)) return "[Circular]";
+        seen.add(item);
+      }
+
+      return item;
+    },
+    2
+  );
+  return text ?? String(value);
 }
 
 function parseRuntimeRawTextJson(rawText: string) {

@@ -2004,6 +2004,60 @@ describe("tree director compatibility generators", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  it("logs raw runtime stream diagnostics when next-step parsing fails without a final output", async () => {
+    const runSkillCommand = {
+      id: "run_skill_command",
+      description: "Run an installed skill command.",
+      execute: vi.fn()
+    };
+    const stream = vi.fn(async () => ({
+      fullStream: async function* () {
+        yield { type: "reasoning-delta", payload: { text: "先看工具结果。" } };
+        yield {
+          type: "tool-result",
+          payload: {
+            toolCallId: "tool-1",
+            toolName: "run_skill_command",
+            result: {
+              exitCode: 0,
+              ok: true,
+              stdout: JSON.stringify({ statuses: [{ text: "转发微博内容" }] })
+            }
+          }
+        };
+        yield { type: "text-delta", payload: { text: "我已经完成分析，但没有调用最终提交工具。" } };
+      },
+      object: Promise.resolve(undefined)
+    }));
+    mocks.createSkillRuntimeTools.mockResolvedValueOnce({
+      toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
+      tools: { run_skill_command: runSkillCommand }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate: vi.fn()
+      };
+    });
+
+    await expect(
+      streamTreeNextStep({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" }
+      })
+    ).rejects.toThrow("submit_tree_next_step");
+
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[tritree:ai-response:next-step:stream-parse-failed-details]",
+      expect.stringContaining("我已经完成分析，但没有调用最终提交工具。")
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[tritree:ai-response:next-step:stream-parse-failed-details]",
+      expect.stringContaining("agentMessages")
+    );
+  });
+
   it("suppresses noisy thinking text after the final submit tool has been called", async () => {
     const runSkillCommand = {
       id: "run_skill_command",

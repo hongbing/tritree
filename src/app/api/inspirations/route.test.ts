@@ -1,6 +1,10 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthApiError } from "@/lib/auth/current-user";
-import { INSPIRATION_TOKEN_ENV, INSPIRATION_URL_ENV, MOCK_INSPIRATIONS_ENV } from "@/lib/inspirations";
+import { DEFAULTS_CONFIG_PATH_ENV } from "@/lib/defaults";
+import { INSPIRATION_TOKEN_ENV, INSPIRATION_URL_ENV } from "@/lib/inspirations";
 import { GET } from "./route";
 
 const mocks = vi.hoisted(() => ({
@@ -19,7 +23,39 @@ const currentUser = {
 
 const originalInspirationUrl = process.env[INSPIRATION_URL_ENV];
 const originalInspirationToken = process.env[INSPIRATION_TOKEN_ENV];
-const originalMockInspirations = process.env[MOCK_INSPIRATIONS_ENV];
+const originalDefaultsConfigPath = process.env[DEFAULTS_CONFIG_PATH_ENV];
+
+function writeDefaultsConfig() {
+  const root = mkdtempSync(path.join(tmpdir(), "tritree-api-inspirations-"));
+  const configPath = path.join(root, "defaults.json");
+  writeFileSync(
+    configPath,
+    JSON.stringify(
+      {
+        systemSkills: [
+          {
+            id: "system-writer",
+            title: "系统写作者",
+            category: "风格",
+            description: "负责生成草稿。",
+            prompt: "写出下一版草稿。",
+            appliesTo: "writer",
+            defaultEnabled: true,
+            isArchived: false
+          }
+        ],
+        creationRequestOptions: [],
+        inspirations: [
+          { id: "social-idea", title: "社媒灵感", detail: "写一条社媒内容。", artifactTypeIds: ["social-post"] },
+          { id: "prd-idea", title: "PRD 灵感", detail: "写一份 PRD。", artifactTypeIds: ["prd"] }
+        ]
+      },
+      null,
+      2
+    )
+  );
+  return configPath;
+}
 
 vi.mock("server-only", () => ({}));
 
@@ -34,7 +70,7 @@ vi.mock("@/lib/auth/current-user", async () => {
 beforeEach(() => {
   delete process.env[INSPIRATION_URL_ENV];
   delete process.env[INSPIRATION_TOKEN_ENV];
-  delete process.env[MOCK_INSPIRATIONS_ENV];
+  delete process.env[DEFAULTS_CONFIG_PATH_ENV];
   mocks.requireCurrentUser.mockReset();
   mocks.requireCurrentUser.mockResolvedValue(currentUser);
   vi.restoreAllMocks();
@@ -53,10 +89,10 @@ afterEach(() => {
     process.env[INSPIRATION_TOKEN_ENV] = originalInspirationToken;
   }
 
-  if (originalMockInspirations === undefined) {
-    delete process.env[MOCK_INSPIRATIONS_ENV];
+  if (originalDefaultsConfigPath === undefined) {
+    delete process.env[DEFAULTS_CONFIG_PATH_ENV];
   } else {
-    process.env[MOCK_INSPIRATIONS_ENV] = originalMockInspirations;
+    process.env[DEFAULTS_CONFIG_PATH_ENV] = originalDefaultsConfigPath;
   }
 });
 
@@ -70,31 +106,16 @@ describe("/api/inspirations", () => {
     expect(await response.json()).toEqual({ error: "请先登录。" });
   });
 
-  it("returns an empty list when no external inspiration endpoint is configured", async () => {
-    const response = await GET(new Request("http://test.local/api/inspirations?artifactTypeId=social-post"));
-    const data = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(data).toEqual({ inspirations: [] });
-  });
-
-  it("returns local debug inspirations when mock mode is enabled", async () => {
-    process.env[MOCK_INSPIRATIONS_ENV] = "1";
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+  it("returns configured default inspirations when no external inspiration endpoint is configured", async () => {
+    process.env[DEFAULTS_CONFIG_PATH_ENV] = writeDefaultsConfig();
 
     const response = await GET(new Request("http://test.local/api/inspirations?artifactTypeId=social-post"));
     const data = await response.json();
 
     expect(response.status).toBe(200);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(data.inspirations[0]).toEqual(
-      expect.objectContaining({
-        id: expect.stringMatching(/^mock-/),
-        title: expect.any(String),
-        detail: expect.any(String)
-      })
-    );
+    expect(data).toEqual({
+      inspirations: [{ id: "social-idea", title: "社媒灵感", detail: "写一条社媒内容。", artifactTypeIds: ["social-post"] }]
+    });
   });
 
   it("returns normalized inspirations from the configured endpoint", async () => {

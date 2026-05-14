@@ -6,7 +6,7 @@ import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RootMemorySetup } from "./RootMemorySetup";
 import { listArtifactTypes } from "@/lib/artifacts";
-import { DEFAULT_CREATION_REQUEST_OPTIONS, type CreationRequestOption, type Skill, type SkillUpsert } from "@/lib/domain";
+import type { CreationRequestOption, Skill, SkillUpsert } from "@/lib/domain";
 
 const skills: Skill[] = [
   {
@@ -62,7 +62,19 @@ function requestOption(option: { id: string; label: string }, sortOrder = 0): Cr
   };
 }
 
-const defaultRequestOptions = DEFAULT_CREATION_REQUEST_OPTIONS.map((option, index) => requestOption(option, index));
+const defaultRequestOptionSeeds = [
+  { id: "default-preserve-my-meaning", label: "保留我的原意" },
+  { id: "default-dont-expand-much", label: "不要扩写太多" },
+  { id: "default-moments", label: "适合发微博" },
+  { id: "default-short-version", label: "先给短版" },
+  { id: "default-first-time-reader", label: "写给新手" },
+  { id: "default-no-ad-tone", label: "别太像广告" },
+  { id: "default-friend-tone", label: "像发给朋友" },
+  { id: "default-experienced-reader", label: "写给懂行的人" },
+  { id: "default-english", label: "改成英文" }
+];
+
+const defaultRequestOptions = defaultRequestOptionSeeds.map((option, index) => requestOption(option, index));
 
 function styleStreamResponse(events: unknown[]) {
   const encoder = new TextEncoder();

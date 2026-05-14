@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
 import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
-import {
-  ExternalInspirationProviderUnavailableError,
-  InspirationProviderError,
-  fetchExternalInspirations
-} from "@/lib/inspirations";
+import { InspirationProviderError, fetchExternalInspirations } from "@/lib/inspirations";
 
 export const runtime = "nodejs";
 
@@ -17,9 +13,6 @@ export async function GET(request: Request) {
   } catch (error) {
     const authResponse = authErrorResponse(error);
     if (authResponse) return authResponse;
-    if (error instanceof ExternalInspirationProviderUnavailableError) {
-      return NextResponse.json({ inspirations: [] });
-    }
     if (error instanceof InspirationProviderError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

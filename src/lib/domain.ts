@@ -47,18 +47,6 @@ export const SkillSchema = SkillUpsertSchema.extend({
   updatedAt: z.string()
 });
 
-export const DEFAULT_CREATION_REQUEST_OPTIONS = [
-  { id: "default-preserve-my-meaning", label: "保留我的原意" },
-  { id: "default-dont-expand-much", label: "不要扩写太多" },
-  { id: "default-moments", label: "适合发微博" },
-  { id: "default-short-version", label: "先给短版" },
-  { id: "default-first-time-reader", label: "写给新手" },
-  { id: "default-no-ad-tone", label: "别太像广告" },
-  { id: "default-friend-tone", label: "像发给朋友" },
-  { id: "default-experienced-reader", label: "写给懂行的人" },
-  { id: "default-english", label: "改成英文" }
-] as const;
-
 export const CreationRequestOptionUpsertSchema = z.object({
   label: z.string().trim().min(1).max(40),
   sortOrder: z.number().int().nonnegative().optional()

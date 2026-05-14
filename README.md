@@ -55,11 +55,11 @@ ANTHROPIC_MODEL=your_model_name
 TRITREE_DB_PATH=.tritree/tritree.sqlite
 ```
 
-复制系统技能配置：
+复制默认内容配置：
 
 ```bash
 mkdir -p .tritree
-cp config/system-skills.example.json .tritree/system-skills.json
+cp config/defaults.example.json .tritree/defaults.json
 ```
 
 启动开发服务器：
@@ -80,7 +80,7 @@ npm run dev
 
 ## 灵感接口
 
-新 seed 页面可以显示外部灵感列表。配置 `TRITREE_INSPIRATION_URL` 后，Tritree 会通过后端代理请求该接口；如需认证，可配置 `TRITREE_INSPIRATION_TOKEN`，请求会带上 `Authorization: Bearer <token>`。请求会附加当前作品类型，例如 `?artifactTypeId=social-post` 或 `?artifactTypeId=prd`。
+新 seed 页面可以显示灵感列表。默认灵感来自 `.tritree/defaults.json` 里的 `inspirations`；配置 `TRITREE_INSPIRATION_URL` 后，Tritree 会改为通过后端代理请求外部接口。如需认证，可配置 `TRITREE_INSPIRATION_TOKEN`，请求会带上 `Authorization: Bearer <token>`。请求会附加当前作品类型，例如 `?artifactTypeId=social-post` 或 `?artifactTypeId=prd`。
 
 接口返回：
 
@@ -96,8 +96,6 @@ npm run dev
   ]
 }
 ```
-
-本地调试时可设置 `TRITREE_MOCK_INSPIRATIONS=1`，无需外部接口也会在新 seed 页面显示模拟灵感。
 
 ## 作品类型配置
 
@@ -134,7 +132,7 @@ npm run typecheck    # TypeScript 类型检查
 
 数据默认存储在项目根目录 `.tritree/tritree.sqlite`，可通过 `TRITREE_DB_PATH` 修改；旧变量 `TREEABLE_DB_PATH` 仍兼容。生产环境请显式配置 `NEXTAUTH_SECRET`，并定期备份 `.tritree/`。子路径部署、OIDC、外部 MCP 工具、外部风格生成和 Skill 执行隔离都支持按需开启，相关变量可参考 `.env.example`。
 
-系统默认 Skills 完全来自配置文件。默认读取 `.tritree/system-skills.json`；也可以用 `TRITREE_SYSTEM_SKILLS_CONFIG_PATH=/absolute/path/to/system-skills.json` 指向其他 JSON 文件。配置缺失、JSON 无效、`systemSkills` 为空或技能字段不合法时，应用在首次读取仓库时会直接报错，避免静默使用旧提示词。
+系统默认 Skills、创作要求快捷按钮和默认灵感都来自默认内容配置。默认读取 `.tritree/defaults.json`；也可以用 `TRITREE_DEFAULTS_CONFIG_PATH=/absolute/path/to/defaults.json` 指向其他 JSON 文件。配置缺失、JSON 无效、`systemSkills` 为空或任一字段不合法时，应用会直接报错，不回退到代码里的旧默认值。
 
 ## License
 

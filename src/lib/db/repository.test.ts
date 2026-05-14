@@ -7,13 +7,13 @@ import { hashPassword } from "@/lib/auth/password";
 import { createDatabase } from "./client";
 import { createTreeableRepository } from "./repository";
 import type { BranchOption, DirectorOutput, OptionGenerationMode } from "@/lib/domain";
-import { SYSTEM_SKILLS_CONFIG_PATH_ENV, type ConfiguredSystemSkill } from "@/lib/system-skills";
+import { DEFAULTS_CONFIG_PATH_ENV, type ConfiguredDefaults, type ConfiguredSystemSkill } from "@/lib/defaults";
 
 function testDbPath() {
   return path.join(mkdtempSync(path.join(tmpdir(), "treeable-")), "test.sqlite");
 }
 
-const exampleSystemSkillsConfigPath = path.resolve("config/system-skills.example.json");
+const exampleDefaultsConfigPath = path.resolve("config/defaults.example.json");
 
 const repositorySystemSkills: ConfiguredSystemSkill[] = [
   {
@@ -38,10 +38,26 @@ const repositorySystemSkills: ConfiguredSystemSkill[] = [
   }
 ];
 
-function writeSystemSkillConfig(skills: ConfiguredSystemSkill[]) {
-  const root = mkdtempSync(path.join(tmpdir(), "tritree-system-skills-"));
-  const configPath = path.join(root, "system-skills.json");
-  writeFileSync(configPath, JSON.stringify({ systemSkills: skills }, null, 2));
+const repositoryCreationRequestOptions: ConfiguredDefaults["creationRequestOptions"] = [
+  { id: "default-preserve-my-meaning", label: "保留我的原意" },
+  { id: "default-dont-expand-much", label: "不要扩写太多" },
+  { id: "default-moments", label: "适合发微博" },
+  { id: "default-short-version", label: "先给短版" },
+  { id: "default-first-time-reader", label: "写给新手" },
+  { id: "default-no-ad-tone", label: "别太像广告" },
+  { id: "default-friend-tone", label: "像发给朋友" },
+  { id: "default-experienced-reader", label: "写给懂行的人" },
+  { id: "default-english", label: "改成英文" }
+];
+
+function writeDefaultsConfig({
+  systemSkills = repositorySystemSkills,
+  creationRequestOptions = repositoryCreationRequestOptions,
+  inspirations = []
+}: Partial<ConfiguredDefaults> = {}) {
+  const root = mkdtempSync(path.join(tmpdir(), "tritree-defaults-"));
+  const configPath = path.join(root, "defaults.json");
+  writeFileSync(configPath, JSON.stringify({ systemSkills, creationRequestOptions, inspirations }, null, 2));
   return configPath;
 }
 
@@ -232,7 +248,7 @@ function createHistoricalGeneratedChild(
 
 describe("Treeable repository", () => {
   beforeEach(() => {
-    vi.stubEnv(SYSTEM_SKILLS_CONFIG_PATH_ENV, exampleSystemSkillsConfigPath);
+    vi.stubEnv(DEFAULTS_CONFIG_PATH_ENV, exampleDefaultsConfigPath);
   });
 
   afterEach(() => {
@@ -868,6 +884,29 @@ describe("Treeable repository", () => {
     expect(repo.resetCreationRequestOptions(user.id).map((option) => option.label)).toEqual(options.map((option) => option.label));
   });
 
+  it("copies creation request quick buttons from configured defaults", async () => {
+    const configPath = writeDefaultsConfig({
+      creationRequestOptions: [
+        { id: "default-keep-facts", label: "保留事实边界" },
+        { id: "default-buyer-reader", label: "写给采购负责人" }
+      ]
+    });
+    const repo = createTreeableRepository(testDbPath(), { defaultsConfigPath: configPath });
+    const user = await createTestUser(repo, "writer");
+
+    expect(repo.listCreationRequestOptions(user.id).map((option) => option.label)).toEqual([
+      "保留事实边界",
+      "写给采购负责人"
+    ]);
+
+    const options = repo.listCreationRequestOptions(user.id);
+    repo.updateCreationRequestOption(user.id, options[0].id, { label: "用户改过" });
+    expect(repo.resetCreationRequestOptions(user.id).map((option) => option.label)).toEqual([
+      "保留事实边界",
+      "写给采购负责人"
+    ]);
+  });
+
   it("seeds system skills idempotently", async () => {
     const dbPath = testDbPath();
     const first = createTreeableRepository(dbPath);
@@ -895,8 +934,8 @@ describe("Treeable repository", () => {
 
   it("updates configured system skills when the config file changes", async () => {
     const dbPath = testDbPath();
-    const configPath = writeSystemSkillConfig(repositorySystemSkills);
-    const first = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
+    const configPath = writeDefaultsConfig({ systemSkills: repositorySystemSkills });
+    const first = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
     const user = await createTestUser(first, "writer");
 
     expect(first.listSkills(user.id).find((skill) => skill.id === "system-writer")?.prompt).toContain("seed");
@@ -913,14 +952,16 @@ describe("Treeable repository", () => {
               defaultEnabled: false
             },
             repositorySystemSkills[1]
-          ]
+          ],
+          creationRequestOptions: repositoryCreationRequestOptions,
+          inspirations: []
         },
         null,
         2
       )
     );
 
-    const reopened = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
+    const reopened = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
     const updated = reopened.listSkills(user.id).find((skill) => skill.id === "system-writer");
 
     expect(updated).toEqual(expect.objectContaining({
@@ -953,27 +994,27 @@ describe("Treeable repository", () => {
       );
     sqlite.close();
 
-    const configPath = writeSystemSkillConfig(repositorySystemSkills);
+    const configPath = writeDefaultsConfig({ systemSkills: repositorySystemSkills });
 
-    expect(() => createTreeableRepository(dbPath, { systemSkillConfigPath: configPath })).toThrow(
+    expect(() => createTreeableRepository(dbPath, { defaultsConfigPath: configPath })).toThrow(
       "System skill config id system-writer conflicts with an existing non-system skill."
     );
   });
 
   it("archives global system skills that were removed from config", async () => {
     const dbPath = testDbPath();
-    const configPath = writeSystemSkillConfig(repositorySystemSkills);
-    const first = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
+    const configPath = writeDefaultsConfig({ systemSkills: repositorySystemSkills });
+    const first = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
     const user = await createTestUser(first, "writer");
 
     expect(first.listSkills(user.id).map((skill) => skill.id)).toContain("system-writer");
 
     writeFileSync(
       configPath,
-      JSON.stringify({ systemSkills: [repositorySystemSkills[1]] }, null, 2)
+      JSON.stringify({ systemSkills: [repositorySystemSkills[1]], creationRequestOptions: repositoryCreationRequestOptions, inspirations: [] }, null, 2)
     );
 
-    const reopened = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
+    const reopened = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
 
     expect(reopened.listSkills(user.id).map((skill) => skill.id)).not.toContain("system-writer");
     expect(reopened.listSkills(user.id, { includeArchived: true }).find((skill) => skill.id === "system-writer")?.isArchived).toBe(true);
@@ -982,8 +1023,8 @@ describe("Treeable repository", () => {
 
   it("backfills merged system skills for sessions that referenced legacy system skills", async () => {
     const dbPath = testDbPath();
-    const configPath = writeSystemSkillConfig(repositorySystemSkills);
-    const repo = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
+    const configPath = writeDefaultsConfig({ systemSkills: repositorySystemSkills });
+    const repo = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
     const user = await createTestUser(repo, "writer");
     const root = repo.saveRootMemory(user.id, {
       seed: "写一篇解释为什么要写作的文章",
@@ -1033,7 +1074,7 @@ describe("Treeable repository", () => {
       .run(state.session.id, "system-analysis", "2026-05-01T00:00:00.000Z");
     sqlite.close();
 
-    const reopened = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
+    const reopened = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
     const reopenedState = reopened.getSessionState(user.id, state.session.id);
 
     expect(reopenedState?.enabledSkillIds).toEqual(["system-writer", "system-reviewer"]);
@@ -1049,8 +1090,8 @@ describe("Treeable repository", () => {
 
   it("backfills only active configured merged system skills for legacy sessions", async () => {
     const dbPath = testDbPath();
-    const configPath = writeSystemSkillConfig([repositorySystemSkills[1]]);
-    const repo = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
+    const configPath = writeDefaultsConfig({ systemSkills: [repositorySystemSkills[1]] });
+    const repo = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
     const user = await createTestUser(repo, "writer");
     const root = repo.saveRootMemory(user.id, {
       seed: "写一篇解释为什么要写作的文章",
@@ -1100,7 +1141,7 @@ describe("Treeable repository", () => {
       .run(state.session.id, "system-analysis", "2026-05-01T00:00:00.000Z");
     sqlite.close();
 
-    const reopened = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
+    const reopened = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
     const reopenedState = reopened.getSessionState(user.id, state.session.id);
 
     expect(reopenedState?.enabledSkillIds).toEqual(["system-reviewer"]);

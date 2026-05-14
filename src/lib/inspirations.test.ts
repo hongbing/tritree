@@ -1,57 +1,95 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
-  ExternalInspirationProviderUnavailableError,
-  MOCK_INSPIRATIONS_ENV,
   InspirationProviderError,
   externalInspirationProviderAvailable,
   fetchExternalInspirations
 } from "./inspirations";
+import { DEFAULTS_CONFIG_PATH_ENV, type ConfiguredDefaults } from "./defaults";
+
+const defaultSystemSkills: ConfiguredDefaults["systemSkills"] = [
+  {
+    id: "system-writer",
+    title: "系统写作者",
+    category: "风格",
+    description: "负责生成草稿。",
+    prompt: "写出下一版草稿。",
+    appliesTo: "writer",
+    defaultEnabled: true,
+    isArchived: false
+  }
+];
+
+function writeDefaultsConfig(inspirations: ConfiguredDefaults["inspirations"]) {
+  const root = mkdtempSync(path.join(tmpdir(), "tritree-default-inspirations-"));
+  const configPath = path.join(root, "defaults.json");
+  writeFileSync(
+    configPath,
+    JSON.stringify({ systemSkills: defaultSystemSkills, creationRequestOptions: [], inspirations }, null, 2)
+  );
+  return configPath;
+}
 
 describe("inspiration helpers", () => {
   it("detects external provider availability from URL configuration", () => {
     expect(externalInspirationProviderAvailable({})).toBe(false);
     expect(externalInspirationProviderAvailable({ TRITREE_INSPIRATION_URL: "   " })).toBe(false);
-    expect(externalInspirationProviderAvailable({ [MOCK_INSPIRATIONS_ENV]: "1" })).toBe(true);
     expect(externalInspirationProviderAvailable({ TRITREE_INSPIRATION_URL: "https://ideas.example/list" })).toBe(true);
   });
 });
 
 describe("fetchExternalInspirations", () => {
-  it("throws unavailable when the provider URL is missing", async () => {
-    await expect(fetchExternalInspirations({ env: {} })).rejects.toBeInstanceOf(
-      ExternalInspirationProviderUnavailableError
-    );
-  });
-
-  it("returns mock inspirations without calling fetch when local debug mode is enabled", async () => {
+  it("returns configured default inspirations without calling fetch when the provider URL is missing", async () => {
     const fetchMock = vi.fn();
+    const configPath = writeDefaultsConfig([
+      {
+        id: "idea-social",
+        title: "社媒灵感",
+        detail: "写一条社媒内容。",
+        artifactTypeIds: ["social-post"]
+      },
+      {
+        id: "idea-prd",
+        title: "PRD 灵感",
+        detail: "写一份 PRD。",
+        artifactTypeIds: ["prd"]
+      }
+    ]);
 
     const inspirations = await fetchExternalInspirations({
-      env: { [MOCK_INSPIRATIONS_ENV]: "true" },
+      env: { [DEFAULTS_CONFIG_PATH_ENV]: configPath },
       fetchImpl: fetchMock
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(inspirations.length).toBeGreaterThan(3);
-    expect(inspirations[0]).toEqual(
-      expect.objectContaining({
-        id: expect.stringMatching(/^mock-/),
-        title: expect.any(String),
-        detail: expect.any(String)
-      })
-    );
+    expect(inspirations.map((inspiration) => inspiration.title)).toEqual(["社媒灵感", "PRD 灵感"]);
   });
 
-  it("filters mock inspirations by artifact type", async () => {
+  it("filters configured default inspirations by artifact type", async () => {
+    const configPath = writeDefaultsConfig([
+      {
+        id: "idea-social",
+        title: "社媒灵感",
+        detail: "写一条社媒内容。",
+        artifactTypeIds: ["social-post"]
+      },
+      {
+        id: "idea-prd",
+        title: "PRD 灵感",
+        detail: "写一份 PRD。",
+        artifactTypeIds: ["prd"]
+      }
+    ]);
+
     const inspirations = await fetchExternalInspirations({
-      env: { [MOCK_INSPIRATIONS_ENV]: "1" },
+      env: { [DEFAULTS_CONFIG_PATH_ENV]: configPath },
       artifactTypeId: "prd",
       fetchImpl: vi.fn()
     });
 
-    expect(inspirations.length).toBeGreaterThan(0);
-    expect(inspirations.every((inspiration) => inspiration.artifactTypeIds?.includes("prd"))).toBe(true);
-    expect(inspirations.map((inspiration) => inspiration.title)).not.toContain("AI 产品经理的真实困境");
+    expect(inspirations.map((inspiration) => inspiration.title)).toEqual(["PRD 灵感"]);
   });
 
   it("calls the configured provider and normalizes inspiration items", async () => {

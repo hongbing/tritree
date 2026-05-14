@@ -6,7 +6,6 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, FileText, Plus, RotateCcw, 
 import { StyleProfileSetup } from "@/components/root-memory/StyleProfileSetup";
 import { SkillPicker } from "@/components/skills/SkillPicker";
 import {
-  DEFAULT_CREATION_REQUEST_OPTIONS,
   DEFAULT_ARTIFACT_TYPE_ID,
   type ArtifactTypeId,
   type CreationRequestOption,
@@ -42,18 +41,6 @@ function inspirationAppliesToArtifactType(inspiration: Inspiration, artifactType
   if (inspiration.artifactTypeIds?.length) return inspiration.artifactTypeIds.includes(artifactTypeId);
   if (inspiration.artifactTypeId) return inspiration.artifactTypeId === artifactTypeId;
   return true;
-}
-
-function defaultCreationRequestOptions(): CreationRequestOption[] {
-  const timestamp = new Date(0).toISOString();
-
-  return DEFAULT_CREATION_REQUEST_OPTIONS.map((option, index) => ({
-    ...option,
-    sortOrder: index,
-    isArchived: false,
-    createdAt: timestamp,
-    updatedAt: timestamp
-  }));
 }
 
 export function RootMemorySetup({
@@ -99,7 +86,7 @@ export function RootMemorySetup({
   const [seed, setSeed] = useState(initialSeed);
   const [creationRequest, setCreationRequest] = useState(initialCreationRequest);
   const [creationRequestOptions, setCreationRequestOptions] = useState<CreationRequestOption[]>(
-    initialCreationRequestOptions ?? defaultCreationRequestOptions()
+    initialCreationRequestOptions ?? []
   );
   const [isManagingRequestOptions, setIsManagingRequestOptions] = useState(false);
   const [areAllRequestOptionsVisible, setAreAllRequestOptionsVisible] = useState(false);
@@ -133,7 +120,7 @@ export function RootMemorySetup({
   const hasInspirations = visibleInspirations.length > 0;
 
   useEffect(() => {
-    setCreationRequestOptions(initialCreationRequestOptions ?? defaultCreationRequestOptions());
+    setCreationRequestOptions(initialCreationRequestOptions ?? []);
   }, [initialCreationRequestOptions]);
 
   useEffect(() => {

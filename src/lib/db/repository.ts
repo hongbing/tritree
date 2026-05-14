@@ -43,7 +43,6 @@ import {
   CUSTOM_OPTION_ID_PREFIX,
   CreationRequestOptionSchema,
   CreationRequestOptionUpsertSchema,
-  DEFAULT_CREATION_REQUEST_OPTIONS,
   DraftSummarySchema,
   DraftSchema,
   DEFAULT_ARTIFACT_TYPE_ID,
@@ -63,7 +62,11 @@ import {
   stripSkillRuntimeMetadata,
   type InstalledSkillImport
 } from "@/lib/skills/skill-installer";
-import { loadConfiguredSystemSkills, type ConfiguredSystemSkill } from "@/lib/system-skills";
+import {
+  loadConfiguredDefaults,
+  type ConfiguredCreationRequestOption,
+  type ConfiguredSystemSkill
+} from "@/lib/defaults";
 import { createDatabase, defaultDbPath } from "./client";
 
 type UserRow = {
@@ -175,18 +178,6 @@ type CreationRequestOptionRow = {
   created_at: string;
   updated_at: string;
 };
-
-const OLD_CREATION_REQUEST_OPTION_ORDER = [
-  "default-preserve-my-meaning",
-  "default-dont-expand-much",
-  "default-first-time-reader",
-  "default-friend-tone",
-  "default-english",
-  "default-no-ad-tone",
-  "default-experienced-reader",
-  "default-moments",
-  "default-short-version"
-];
 
 const MAX_NODE_AGENT_MESSAGES_JSON_CHARS = 48000;
 
@@ -401,19 +392,19 @@ export function createTreeableRepository(
   dbPath = defaultDbPath(),
   {
     skillInstallRoot = defaultSkillInstallRoot(),
-    systemSkillConfigPath
+    defaultsConfigPath
   }: {
     skillInstallRoot?: string;
-    systemSkillConfigPath?: string;
+    defaultsConfigPath?: string;
   } = {}
 ) {
-  const configuredSystemSkills = loadConfiguredSystemSkills({ configPath: systemSkillConfigPath });
+  const configuredDefaults = loadConfiguredDefaults({ configPath: defaultsConfigPath });
   const db = createDatabase(dbPath);
   try {
     cleanupStoredSkillRuntimePrompts();
-    ensureSystemSkills(configuredSystemSkills);
+    ensureSystemSkills(configuredDefaults.systemSkills);
     backfillMergedSystemSkillsForLegacySessions();
-    ensureDefaultCreationRequestOptions();
+    ensureDefaultCreationRequestOptions(configuredDefaults.creationRequestOptions);
   } catch (error) {
     db.close();
     throw error;
@@ -536,28 +527,25 @@ export function createTreeableRepository(
     }
   }
 
-  function ensureDefaultCreationRequestOptions() {
+  function ensureDefaultCreationRequestOptions(creationRequestOptions: ConfiguredCreationRequestOption[]) {
     const timestamp = now();
 
-    DEFAULT_CREATION_REQUEST_OPTIONS.forEach((option, index) => {
+    creationRequestOptions.forEach((option, index) => {
+      const sortOrder = option.sortOrder ?? index;
       const existing = db.prepare("SELECT * FROM creation_request_options WHERE id = ?").get(option.id) as
         | CreationRequestOptionRow
         | undefined;
       if (existing) {
-        const legacyDefaultLabels: Record<string, string> = {
-          "default-first-time-reader": "写给第一次接触的人",
-          "default-moments": "适合发朋友圈"
-        };
-
-        if (existing.label === legacyDefaultLabels[option.id]) {
-          db.prepare(
-            `
-              UPDATE creation_request_options
-              SET label = ?, updated_at = ?
-              WHERE id = ?
-            `
-          ).run(option.label, timestamp, option.id);
+        if (existing.user_id !== null) {
+          throw new Error(`Defaults config creation request option id ${option.id} conflicts with an existing user option.`);
         }
+        db.prepare(
+          `
+            UPDATE creation_request_options
+            SET user_id = NULL, label = ?, sort_order = ?, is_archived = 0, updated_at = ?
+            WHERE id = ?
+          `
+        ).run(option.label, sortOrder, timestamp, option.id);
         return;
       }
 
@@ -566,33 +554,39 @@ export function createTreeableRepository(
           INSERT INTO creation_request_options (id, label, sort_order, is_archived, created_at, updated_at)
           VALUES (?, ?, ?, 0, ?, ?)
         `
-      ).run(option.id, option.label, index, timestamp, timestamp);
+      ).run(option.id, option.label, sortOrder, timestamp, timestamp);
     });
-    migrateDefaultCreationRequestOptionOrderIfUntouched(timestamp);
+
+    archiveRemovedDefaultCreationRequestOptions(creationRequestOptions, timestamp);
   }
 
-  function migrateDefaultCreationRequestOptionOrderIfUntouched(timestamp: string) {
-    const defaultIds = DEFAULT_CREATION_REQUEST_OPTIONS.map((option) => option.id);
-    const placeholders = defaultIds.map(() => "?").join(", ");
-    const rows = db
-      .prepare(
+  function archiveRemovedDefaultCreationRequestOptions(
+    creationRequestOptions: ConfiguredCreationRequestOption[],
+    timestamp: string
+  ) {
+    if (creationRequestOptions.length === 0) {
+      db.prepare(
         `
-          SELECT id, is_archived
-          FROM creation_request_options
-          WHERE id IN (${placeholders})
-          ORDER BY sort_order, created_at, rowid
+          UPDATE creation_request_options
+          SET is_archived = 1, updated_at = ?
+          WHERE user_id IS NULL
+            AND is_archived = 0
         `
-      )
-      .all(...defaultIds) as Array<Pick<CreationRequestOptionRow, "id" | "is_archived">>;
+      ).run(timestamp);
+      return;
+    }
 
-    if (rows.length !== defaultIds.length || rows.some((row) => Boolean(row.is_archived))) return;
-    const currentDefaultOrder = rows.map((row) => row.id);
-    if (currentDefaultOrder.join("|") !== OLD_CREATION_REQUEST_OPTION_ORDER.join("|")) return;
-
-    const updateSortOrder = db.prepare("UPDATE creation_request_options SET sort_order = ?, updated_at = ? WHERE id = ?");
-    DEFAULT_CREATION_REQUEST_OPTIONS.forEach((option, index) => {
-      updateSortOrder.run(index, timestamp, option.id);
-    });
+    const configuredIds = creationRequestOptions.map((option) => option.id);
+    const placeholders = configuredIds.map(() => "?").join(", ");
+    db.prepare(
+      `
+        UPDATE creation_request_options
+        SET is_archived = 1, updated_at = ?
+        WHERE user_id IS NULL
+          AND is_archived = 0
+          AND id NOT IN (${placeholders})
+      `
+    ).run(timestamp, ...configuredIds);
   }
 
   function ensureUserCreationRequestOptions(userId: string) {
@@ -602,13 +596,13 @@ export function createTreeableRepository(
     if (row) return;
 
     const timestamp = now();
-    DEFAULT_CREATION_REQUEST_OPTIONS.forEach((option, index) => {
+    configuredDefaults.creationRequestOptions.forEach((option, index) => {
       db.prepare(
         `
           INSERT INTO creation_request_options (id, user_id, label, sort_order, is_archived, created_at, updated_at)
           VALUES (?, ?, ?, ?, 0, ?, ?)
         `
-      ).run(nanoid(), userId, option.label, index, timestamp, timestamp);
+      ).run(nanoid(), userId, option.label, option.sortOrder ?? index, timestamp, timestamp);
     });
   }
 
@@ -723,13 +717,13 @@ export function createTreeableRepository(
     return withTransaction(db, () => {
       db.prepare("UPDATE creation_request_options SET is_archived = 1, updated_at = ? WHERE user_id = ?").run(timestamp, userId);
 
-      DEFAULT_CREATION_REQUEST_OPTIONS.forEach((option, index) => {
+      configuredDefaults.creationRequestOptions.forEach((option, index) => {
         db.prepare(
           `
             INSERT INTO creation_request_options (id, user_id, label, sort_order, is_archived, created_at, updated_at)
             VALUES (?, ?, ?, ?, 0, ?, ?)
           `
-        ).run(nanoid(), userId, option.label, index, timestamp, timestamp);
+        ).run(nanoid(), userId, option.label, option.sortOrder ?? index, timestamp, timestamp);
       });
 
       return listCreationRequestOptions(userId);

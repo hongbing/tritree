@@ -8,7 +8,6 @@ import {
   SessionStateSchema,
   type BranchOption,
   type ArtifactTypeId,
-  DEFAULT_CREATION_REQUEST_OPTIONS,
   DEFAULT_ARTIFACT_TYPE_ID,
   CUSTOM_OPTION_ID_PREFIX,
   type CreationRequestOption,
@@ -60,17 +59,6 @@ type TreeableAppProps = {
   startNewDraft?: boolean;
 };
 
-function defaultCreationRequestOptions(): CreationRequestOption[] {
-  const timestamp = new Date(0).toISOString();
-
-  return DEFAULT_CREATION_REQUEST_OPTIONS.map((option, index) => ({
-    ...option,
-    sortOrder: index,
-    isArchived: false,
-    createdAt: timestamp,
-    updatedAt: timestamp
-  }));
-}
 type DraftStreamField = "title" | "body" | "hashtags" | "imagePrompt";
 type LiveDraftStreamingField = "body" | "imagePrompt";
 type StreamingDraftEntry = { nodeId: string; draft: Draft; previousDraft?: Draft | null; streamingField: DraftStreamField | null };
@@ -489,9 +477,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   const [sessionState, setSessionState] = useState<SessionState | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [artifactTypes, setArtifactTypes] = useState<ArtifactType[]>(() => listArtifactTypes());
-  const [creationRequestOptions, setCreationRequestOptions] = useState<CreationRequestOption[]>(
-    defaultCreationRequestOptions
-  );
+  const [creationRequestOptions, setCreationRequestOptions] = useState<CreationRequestOption[]>([]);
   const [inspirations, setInspirations] = useState<Inspiration[]>([]);
   const [message, setMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -612,7 +598,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       const nextArtifactTypes = normalizeArtifactTypesResponse(skillsData.artifactTypes);
       setSkills(skillsData.skills);
       setArtifactTypes(nextArtifactTypes);
-      setCreationRequestOptions(skillsData.creationRequestOptions ?? defaultCreationRequestOptions());
+      setCreationRequestOptions(skillsData.creationRequestOptions ?? []);
       setIsExternalStyleGenerationAvailable(Boolean(skillsData.styleProfile?.externalStyleGenerationAvailable));
 
       const response = await fetch(apiPath("/api/root-memory"));

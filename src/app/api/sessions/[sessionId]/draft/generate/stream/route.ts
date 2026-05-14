@@ -6,7 +6,7 @@ import {
   streamDirectorDraft,
   streamDirectorNextStep
 } from "@/lib/ai/director-stream";
-import { badRequestResponse, isBadRequestError, publicServerErrorMessage } from "@/lib/api/errors";
+import { badRequestResponse, isAbortError, isBadRequestError, publicServerErrorMessage } from "@/lib/api/errors";
 import { focusSessionStateForNode, summarizeSessionForDirector } from "@/lib/app-state";
 import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
 import { getRepository } from "@/lib/db/repository";
@@ -172,6 +172,7 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
         });
         send({ type: "done", state: nextState });
       } catch (error) {
+        if (request.signal.aborted || isAbortError(error)) return;
         console.error("[treeable:generate-draft-stream]", error);
         send({ type: "error", error: publicServerErrorMessage(error, "无法生成下一版草稿。") });
       } finally {

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { streamOptionsForNode } from "@/lib/api/options-stream";
 import { logTritreeAiDebug, summarizeTritreeStreamEventForLog } from "@/lib/ai/debug-log";
-import { badRequestResponse, isBadRequestError, publicServerErrorMessage } from "@/lib/api/errors";
+import { badRequestResponse, isAbortError, isBadRequestError, publicServerErrorMessage } from "@/lib/api/errors";
 import { focusSessionStateForNode } from "@/lib/app-state";
 import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
 import { getRepository } from "@/lib/db/repository";
@@ -91,6 +91,7 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
           userId: user.id
         });
       } catch (error) {
+        if (request.signal.aborted || isAbortError(error)) return;
         console.error("[treeable:generate-options]", error);
         send({ type: "error", error: publicServerErrorMessage(error, "无法生成下一步选项。") });
       } finally {

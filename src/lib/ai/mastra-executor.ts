@@ -932,6 +932,10 @@ async function parseRuntimeReActStreamOutput<TOutput>(
       });
       return parsed;
     } catch (error) {
+      if (summary.abortSignalAborted) {
+        throw runtimeStreamAbortError(summary);
+      }
+
       logTritreeAiDebug("react-stream", "parse-submit-failed", {
         target,
         error: summarizeErrorForLog(error)
@@ -940,6 +944,15 @@ async function parseRuntimeReActStreamOutput<TOutput>(
       logZodIssues(target, "submit", error);
       throw error;
     }
+  }
+
+  if (shouldTreatRuntimeStreamAsAborted(summary)) {
+    const error = runtimeStreamAbortError(summary);
+    logTritreeAiDebug("react-stream", "parse-aborted", {
+      target,
+      error: summarizeErrorForLog(error)
+    });
+    throw error;
   }
 
   try {
@@ -975,6 +988,24 @@ async function parseRuntimeReActStreamOutput<TOutput>(
   logRuntimeStreamParseFailure(target, summary, streamError);
   logAiResponse(target as "draft" | "next-step" | "options", "stream-parse-failed", summary.latestPartial);
   throw streamError;
+}
+
+function shouldTreatRuntimeStreamAsAborted(summary: RuntimeToolStreamSummary) {
+  if (!summary.abortSignalAborted || summary.submittedOutput !== undefined) return false;
+  return hasAbortStreamChunk(summary) || (summary.latestPartial === null && !summary.rawText.trim());
+}
+
+function hasAbortStreamChunk(summary: RuntimeToolStreamSummary) {
+  return summary.streamChunks.some((chunk) => chunk.type === "abort");
+}
+
+function runtimeStreamAbortError(summary: RuntimeToolStreamSummary) {
+  const message = summary.abortSignalReason
+    ? `AI stream aborted before final output. Reason: ${summary.abortSignalReason}`
+    : "AI stream aborted before final output.";
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
 }
 
 function finalSubmitToolRequiredError(target: RuntimeSubmitTarget) {

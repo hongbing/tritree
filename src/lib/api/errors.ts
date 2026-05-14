@@ -13,6 +13,15 @@ export function badRequestResponse(error: unknown) {
   return NextResponse.json({ error: "请求不是有效的 JSON。" }, { status: 400 });
 }
 
+export function isAbortError(error: unknown) {
+  if (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError") {
+    return true;
+  }
+
+  if (!error || typeof error !== "object" || !("name" in error)) return false;
+  return error.name === "AbortError" || error.name === "ResponseAborted";
+}
+
 export function publicServerErrorMessage(error: unknown, fallback: string) {
   const details = publicErrorDetails(error);
 

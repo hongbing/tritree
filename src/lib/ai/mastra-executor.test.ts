@@ -2074,6 +2074,70 @@ describe("tree director compatibility generators", () => {
     );
   });
 
+  it("treats aborted empty runtime streams as cancellation instead of parse failures", async () => {
+    const runSkillCommand = {
+      id: "run_skill_command",
+      description: "Run an installed skill command.",
+      execute: vi.fn()
+    };
+    const abortController = new AbortController();
+    abortController.abort({ message: "", name: "ResponseAborted" });
+    const stream = vi.fn(async () => ({
+      fullStream: async function* () {
+        yield {
+          type: "start",
+          runId: "run-1",
+          from: "agent",
+          payload: { id: "agent-1", messageId: "message-1" }
+        };
+        yield {
+          runId: "run-1",
+          from: "agent",
+          type: "step-start",
+          payload: { request: {}, warnings: [], messageId: "message-1" }
+        };
+        yield { type: "abort", runId: "run-1", from: "agent", payload: {} };
+        yield {
+          type: "finish",
+          runId: "run-1",
+          from: "agent",
+          payload: { messageId: "message-1", stepResult: {}, metadata: {}, messages: [] }
+        };
+      },
+      object: Promise.resolve(undefined),
+      objectStream: async function* () {}
+    }));
+    mocks.createSkillRuntimeTools.mockResolvedValueOnce({
+      toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
+      tools: { run_skill_command: runSkillCommand }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate: vi.fn()
+      };
+    });
+
+    await expect(
+      streamTreeDraft({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" },
+        signal: abortController.signal
+      })
+    ).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(stream).toHaveBeenCalledTimes(1);
+    expect(
+      consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-response:draft:stream-parse-failed-details]")
+    ).toEqual([]);
+    expect(
+      consoleInfoSpy.mock.calls.filter(
+        ([label, payload]) => label === "[tritree:ai-response:draft]" && String(payload).includes("stream-parse-failed")
+      )
+    ).toEqual([]);
+  });
+
   it("suppresses noisy thinking text after the final submit tool has been called", async () => {
     const runSkillCommand = {
       id: "run_skill_command",

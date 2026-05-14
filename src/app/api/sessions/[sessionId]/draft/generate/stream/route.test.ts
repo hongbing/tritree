@@ -400,6 +400,33 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
     expect(streamDirectorDraftMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ signal: request.signal }));
   });
 
+  it("closes silently when the client aborts during streaming generation", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const abortController = new AbortController();
+    getRepositoryMock.mockReturnValue({
+      getSessionState: vi.fn().mockReturnValue(state)
+    });
+    streamDirectorNextStepMock.mockImplementation(async () => {
+      abortController.abort(Object.assign(new Error(""), { name: "ResponseAborted" }));
+      throw new Error("root: Required");
+    });
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/draft/generate/stream", {
+        method: "POST",
+        body: JSON.stringify({ nodeId: "node-2" }),
+        signal: abortController.signal
+      }),
+      { params: Promise.resolve({ sessionId: "session-1" }) }
+    );
+    const text = await response.text();
+
+    expect(text).toBe("");
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+
+    consoleErrorSpy.mockRestore();
+  });
+
   it("does not persist again if another request saved the node draft before completion", async () => {
     const finalOutput = {
       roundIntent: "扩写",

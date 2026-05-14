@@ -2208,6 +2208,82 @@ button:disabled {
   box-shadow: 0 10px 22px rgba(37, 99, 235, 0.11);
 }
 
+.tree-viewport-shell {
+  position: relative;
+  min-width: 0;
+  min-height: 300px;
+  height: 100%;
+}
+
+.tree-operation-hint {
+  position: absolute;
+  bottom: 14px;
+  left: 16px;
+  z-index: 4;
+  display: grid;
+  gap: 6px;
+  max-width: min(300px, calc(100% - 32px));
+  padding: 9px 10px;
+  color: #334155;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  pointer-events: none;
+  background: rgba(248, 250, 252, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.1);
+  backdrop-filter: blur(12px);
+}
+
+.tree-operation-hint--collapsed {
+  width: max-content;
+  padding: 5px;
+}
+
+.tree-operation-hint__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tree-operation-hint__title {
+  color: #0f172a;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.tree-operation-hint__toggle {
+  min-width: 38px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 8px;
+  color: #0f172a;
+  font-size: 0.72rem;
+  font-weight: 850;
+  pointer-events: auto;
+  background: #ffffff;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 7px;
+}
+
+.tree-operation-hint__toggle:hover {
+  color: #075985;
+  border-color: rgba(14, 116, 144, 0.28);
+}
+
+.tree-operation-hint__body {
+  display: grid;
+  gap: 5px;
+}
+
+.tree-operation-hint__body p {
+  margin: 0;
+}
+
 .tree-viewport {
   min-width: 0;
   min-height: 300px;
@@ -4512,6 +4588,11 @@ button:disabled {
     grid-template-rows: 300px auto;
   }
 
+  .tree-viewport-shell {
+    min-height: 0;
+    height: 300px;
+  }
+
   .mobile-panel--tree > .canvas-region {
     grid-template-rows: auto;
   }
@@ -4527,7 +4608,14 @@ button:disabled {
 
   .tree-viewport {
     min-height: 0;
-    height: auto;
+    height: 100%;
+  }
+
+  .tree-operation-hint {
+    bottom: 12px;
+    left: 12px;
+    max-width: calc(100% - 24px);
+    font-size: 0.72rem;
   }
 
   .branch-option-tray {

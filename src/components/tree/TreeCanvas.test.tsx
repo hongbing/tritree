@@ -194,6 +194,112 @@ describe("TreeCanvas", () => {
     expect(screen.queryByText("等待中")).not.toBeInTheDocument();
   });
 
+  it("shows a default-expanded lower-left tree instruction hint", () => {
+    render(<TreeCanvas currentNode={currentNode} isBusy={false} onChoose={vi.fn()} pendingChoice={null} selectedPath={[]} />);
+
+    const hint = screen.getByRole("note", { name: "树图说明" });
+
+    expect(hint).toHaveTextContent("树图说明");
+    expect(hint).toHaveTextContent("画布中每个节点代表创作过程中的快照");
+    expect(hint).toHaveTextContent("点击节点可以切换到对应的历史快照版本");
+    expect(hint).toHaveTextContent("拖动画布空白处可以查看前后的分支");
+    expect(hint).not.toHaveTextContent("每个圆点：");
+    expect(hint).not.toHaveTextContent("点击圆点：");
+    expect(hint).not.toHaveTextContent("底部卡片");
+    expect(hint).not.toHaveTextContent("下方选方向");
+    expect(hint).not.toHaveTextContent("生成下一版");
+    expect(hint).not.toHaveTextContent("灰色分支");
+    expect(hint).not.toHaveTextContent("没选过的其他思路");
+    expect(hint).not.toHaveTextContent("点击节点查看草稿");
+    expect(hint).not.toHaveTextContent("拖动/左右键浏览");
+    expect(screen.getByRole("button", { name: "收起树图说明" })).toBeInTheDocument();
+  });
+
+  it("collapses and reopens the tree operation hint", () => {
+    render(<TreeCanvas currentNode={currentNode} isBusy={false} onChoose={vi.fn()} pendingChoice={null} selectedPath={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "收起树图说明" }));
+
+    expect(screen.queryByText(/历史快照/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开树图说明" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开树图说明" }));
+
+    expect(screen.getByRole("note", { name: "树图说明" })).toHaveTextContent("画布中每个节点代表创作过程中的快照");
+  });
+
+  it("starts the tree explanation collapsed on mobile", () => {
+    render(
+      <TreeCanvas
+        currentNode={currentNode}
+        isBusy={false}
+        isMobileLayout
+        onChoose={vi.fn()}
+        pendingChoice={null}
+        selectedPath={[]}
+      />
+    );
+
+    expect(screen.queryByText(/历史快照/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开树图说明" })).toBeInTheDocument();
+  });
+
+  it("collapses the tree explanation when the layout switches to mobile before the user touches it", () => {
+    const { rerender } = render(
+      <TreeCanvas currentNode={currentNode} isBusy={false} onChoose={vi.fn()} pendingChoice={null} selectedPath={[]} />
+    );
+
+    expect(screen.getByRole("note", { name: "树图说明" })).toHaveTextContent("画布中每个节点代表创作过程中的快照");
+
+    rerender(
+      <TreeCanvas
+        currentNode={currentNode}
+        isBusy={false}
+        isMobileLayout
+        onChoose={vi.fn()}
+        pendingChoice={null}
+        selectedPath={[]}
+      />
+    );
+
+    expect(screen.queryByText(/历史快照/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开树图说明" })).toBeInTheDocument();
+  });
+
+  it("keeps the tree instruction hint in the lower-left of the tree viewport", () => {
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    const shellRule = css.match(/\.tree-viewport-shell\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const hintRule = css.match(/\.tree-operation-hint\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const collapsedRule = css.match(/\.tree-operation-hint--collapsed\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const mobileRule = css.match(/@media \(max-width: 640px\)\s*\{(?<body>[\s\S]+)\}\s*$/)?.groups?.body ?? "";
+
+    expect(shellRule).toContain("position: relative");
+    expect(hintRule).toContain("bottom: 14px");
+    expect(hintRule).toContain("left: 16px");
+    expect(hintRule).toContain("max-width:");
+    expect(hintRule).toContain("overflow-wrap: anywhere");
+    expect(collapsedRule).toContain("width:");
+    expect(mobileRule).toContain(".tree-operation-hint");
+    expect(mobileRule).toContain("bottom: 12px");
+    expect(mobileRule).toContain("left: 12px");
+  });
+
+  it("does not reserve tree viewport space in options-only mode", () => {
+    const { container } = render(
+      <TreeCanvas
+        currentNode={currentNode}
+        display="options"
+        isBusy={false}
+        onChoose={vi.fn()}
+        pendingChoice={null}
+        selectedPath={[]}
+      />
+    );
+
+    expect(container.querySelector(".tree-viewport-shell")).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "回答当前问题" })).toBeInTheDocument();
+  });
+
   it("keeps three primary slots while options stream in", () => {
     const { rerender } = render(
       <BranchOptionTray isBusy={false} onChoose={vi.fn()} options={[]} pendingChoice={null} visibleCount={0} />

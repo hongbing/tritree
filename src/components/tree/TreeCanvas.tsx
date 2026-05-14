@@ -664,8 +664,10 @@ export function TreeCanvas({
     startY: number;
   } | null>(null);
   const suppressNextClickRef = useRef(false);
+  const operationHintTouchedRef = useRef(false);
   const [canvasWidth, setCanvasWidth] = useState(760);
   const [isDraggingTree, setIsDraggingTree] = useState(false);
+  const [isOperationHintExpanded, setIsOperationHintExpanded] = useState(!isMobileLayout);
   const [visibleOptionCount, setVisibleOptionCount] = useState(0);
   const renderedHistoryCount = useMemo(() => selectedPath.filter(shouldRenderTreeNode).length, [selectedPath]);
   const inactiveRouteDepth = useMemo(
@@ -694,6 +696,12 @@ export function TreeCanvas({
     graphCurrentNode && !graphCurrentNode.isTerminal && !currentNodeHasChildren && effectiveVisibleOptionCount < currentPrimaryOptionCount
   );
   const stableGraphCurrentNode = useStableTreeGraphNode(graphCurrentNode);
+
+  function toggleOperationHint() {
+    operationHintTouchedRef.current = true;
+    setIsOperationHintExpanded((expanded) => !expanded);
+  }
+
   const graph = useMemo(
     () =>
       createForceTreeGraph({
@@ -741,6 +749,12 @@ export function TreeCanvas({
 
     return () => resizeObserver.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (!operationHintTouchedRef.current) {
+      setIsOperationHintExpanded(!isMobileLayout);
+    }
+  }, [isMobileLayout]);
 
   useEffect(() => {
     const nodeId = currentNode?.id ?? null;
@@ -1119,61 +1133,67 @@ export function TreeCanvas({
   return (
     <div className={clsx("tree-canvas", `tree-canvas--${display}`, isComparisonMode && "tree-canvas--comparison")} ref={containerRef}>
       {shouldShowTree ? (
-        <div
-          aria-label="长任务树图浏览区"
-          className={clsx(
-            "tree-viewport",
-            isTreeScrollable && "tree-viewport--scrollable",
-            isDraggingTree && "tree-viewport--dragging"
-          )}
-          data-pan-axis="x"
-          onClickCapture={handleTreeViewportClick}
-          onKeyDown={handleTreeViewportKeyDown}
-          onPointerCancel={finishTreeViewportDrag}
-          onPointerDown={handleTreeViewportPointerDown}
-          onPointerMove={handleTreeViewportPointerMove}
-          onPointerUp={finishTreeViewportDrag}
-          ref={treeViewportRef}
-          role="region"
-          tabIndex={0}
-        >
-          <svg
-            aria-label="AI 内容方向示意图"
-            className="mind-map-svg"
-            height={branchLayout.height}
-            ref={svgRef}
-            role="img"
-            style={{ height: branchLayout.height, minHeight: 300, width: branchLayout.width }}
-            viewBox={`0 0 ${branchLayout.width} ${branchLayout.height}`}
-            width={branchLayout.width}
+        <div className="tree-viewport-shell">
+          <div
+            aria-label="长任务树图浏览区"
+            className={clsx(
+              "tree-viewport",
+              isTreeScrollable && "tree-viewport--scrollable",
+              isDraggingTree && "tree-viewport--dragging"
+            )}
+            data-pan-axis="x"
+            onClickCapture={handleTreeViewportClick}
+            onKeyDown={handleTreeViewportKeyDown}
+            onPointerCancel={finishTreeViewportDrag}
+            onPointerDown={handleTreeViewportPointerDown}
+            onPointerMove={handleTreeViewportPointerMove}
+            onPointerUp={finishTreeViewportDrag}
+            ref={treeViewportRef}
+            role="region"
+            tabIndex={0}
+          >
+            <svg
+              aria-label="AI 内容方向示意图"
+              className="mind-map-svg"
+              height={branchLayout.height}
+              ref={svgRef}
+              role="img"
+              style={{ height: branchLayout.height, minHeight: 300, width: branchLayout.width }}
+              viewBox={`0 0 ${branchLayout.width} ${branchLayout.height}`}
+              width={branchLayout.width}
+            />
+          </div>
+          <TreeOperationHint
+            isExpanded={isOperationHintExpanded}
+            onToggle={toggleOperationHint}
           />
-        </div>
-      ) : null}
-      {shouldShowTree && isTreeScrollable ? (
-        <div aria-label="树图浏览控制" className="tree-scroll-controls" role="group">
-          <button
-            aria-label="查看较早节点"
-            className="tree-scroll-control"
-            onClick={() => scrollTreeBy(-Math.max(220, canvasWidth * 0.68), 0)}
-            title="查看较早节点"
-            type="button"
-          >
-            <ChevronLeft aria-hidden="true" size={16} strokeWidth={2.4} />
-          </button>
-          <button
-            aria-label="回到最新节点"
-            className="tree-scroll-control tree-scroll-control--primary"
-            onClick={() => scrollTreeToLatest()}
-            title="回到最新节点"
-            type="button"
-          >
-            <ChevronRight aria-hidden="true" size={16} strokeWidth={2.4} />
-          </button>
-        </div>
-      ) : null}
-      {shouldShowTree && isComparisonMode ? (
-        <div className="tree-comparison-hint" role="status">
-          对比模式 · 选择起点
+          {isTreeScrollable ? (
+            <div aria-label="树图浏览控制" className="tree-scroll-controls" role="group">
+              <button
+                aria-label="查看较早节点"
+                className="tree-scroll-control"
+                onClick={() => scrollTreeBy(-Math.max(220, canvasWidth * 0.68), 0)}
+                title="查看较早节点"
+                type="button"
+              >
+                <ChevronLeft aria-hidden="true" size={16} strokeWidth={2.4} />
+              </button>
+              <button
+                aria-label="回到最新节点"
+                className="tree-scroll-control tree-scroll-control--primary"
+                onClick={() => scrollTreeToLatest()}
+                title="回到最新节点"
+                type="button"
+              >
+                <ChevronRight aria-hidden="true" size={16} strokeWidth={2.4} />
+              </button>
+            </div>
+          ) : null}
+          {isComparisonMode ? (
+            <div className="tree-comparison-hint" role="status">
+              对比模式 · 选择起点
+            </div>
+          ) : null}
         </div>
       ) : null}
       {!currentNode && !pendingBranch ? (
@@ -1194,6 +1214,52 @@ export function TreeCanvas({
           visibleCount={effectiveVisibleOptionCount}
         />
       ) : null}
+    </div>
+  );
+}
+
+function TreeOperationHint({
+  isExpanded,
+  onToggle
+}: {
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  if (!isExpanded) {
+    return (
+      <div aria-label="树图说明" className="tree-operation-hint tree-operation-hint--collapsed" role="note">
+        <button
+          aria-expanded="false"
+          aria-label="展开树图说明"
+          className="tree-operation-hint__toggle"
+          onClick={onToggle}
+          type="button"
+        >
+          树图说明
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div aria-label="树图说明" className="tree-operation-hint" role="note">
+      <div className="tree-operation-hint__header">
+        <strong className="tree-operation-hint__title">树图说明</strong>
+        <button
+          aria-expanded="true"
+          aria-label="收起树图说明"
+          className="tree-operation-hint__toggle"
+          onClick={onToggle}
+          type="button"
+        >
+          收起
+        </button>
+      </div>
+      <div className="tree-operation-hint__body">
+        <p>画布中每个节点代表创作过程中的快照。</p>
+        <p>点击节点可以切换到对应的历史快照版本。</p>
+        <p>拖动画布空白处可以查看前后的分支。</p>
+      </div>
     </div>
   );
 }

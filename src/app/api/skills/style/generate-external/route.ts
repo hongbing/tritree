@@ -5,7 +5,7 @@ import { StyleProfileGenerationError, fetchExternalStyleProfile } from "@/lib/sk
 
 export const runtime = "nodejs";
 
-export async function POST(_request?: Request) {
+export async function POST(_request: Request) {
   try {
     const user = await requireCurrentUser();
     const styleProfileUser = {

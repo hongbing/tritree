@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
+import { existsSync, readFileSync } from "fs";
+import path from "path";
 import { z } from "zod";
 
 import { SkillUpsertSchema } from "@/lib/domain";

@@ -56,7 +56,7 @@ export function StyleProfileSetup({
   const selectedPersonalStyle = personalStyleSkills.find((skill) => selectedSkillIds.includes(skill.id)) ?? null;
   const collapsedPersonalStyle = selectedPersonalStyle ?? personalStyleSkills[0] ?? null;
   const sampleFieldIdPrefix = useId();
-  const [isExpanded, setIsExpanded] = useState(!hasPersonalStyles);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [step, setStep] = useState<SetupStep>("choose");
   const [sampleTexts, setSampleTexts] = useState<string[]>(initialSampleTexts);
   const [generationMode, setGenerationMode] = useState<GenerationMode>("samples");
@@ -315,32 +315,32 @@ export function StyleProfileSetup({
         </button>
       ) : (
         <header className="style-profile-setup__header">
-          <div>
-            <p className="eyebrow">我的风格</p>
-            {selectedPersonalStyle && !isExpanded ? (
-              <p className="style-profile-setup__summary">正在使用：{selectedPersonalStyle.title}</p>
-            ) : collapsedPersonalStyle && !isExpanded ? (
-              <p className="style-profile-setup__summary">已有个人风格：{collapsedPersonalStyle.title}</p>
-            ) : hasPersonalStyles ? (
-              <p className="style-profile-setup__summary">选择一种方式更新或创建个人风格。</p>
-            ) : (
-              <p className="style-profile-setup__summary">
-                你还没有配置个人风格。建议先设置，让 Tritree 优先按你的表达习惯生成内容。
-              </p>
-            )}
-          </div>
-          {!isExpanded ? (
-            <button
-              aria-expanded={isExpanded}
-              className={hasPersonalStyles ? "style-profile-setup__update-button" : "secondary-button"}
-              disabled={isBusy}
-              onClick={toggleExpanded}
-              type="button"
-            >
-              {hasPersonalStyles ? "更新" : "设置"}
-            </button>
-          ) : null}
-        </header>
+        <div>
+          <p className="eyebrow">我的风格</p>
+          {selectedPersonalStyle && !isExpanded ? (
+            <p className="style-profile-setup__summary">正在使用：{selectedPersonalStyle.title}</p>
+          ) : collapsedPersonalStyle && !isExpanded ? (
+            <p className="style-profile-setup__summary">已有个人风格：{collapsedPersonalStyle.title}</p>
+          ) : hasPersonalStyles ? (
+            <p className="style-profile-setup__summary">选择一种方式更新或创建个人风格。</p>
+          ) : (
+            <p className="style-profile-setup__summary style-profile-setup__summary--unset">
+              还没有个人风格，建议先设置 →
+            </p>
+          )}
+        </div>
+        {!isExpanded ? (
+          <button
+            aria-expanded={isExpanded}
+            className={hasPersonalStyles ? "style-profile-setup__update-button" : "style-profile-setup__set-button"}
+            disabled={isBusy}
+            onClick={toggleExpanded}
+            type="button"
+          >
+            {hasPersonalStyles ? "更新" : "立即设置"}
+          </button>
+        ) : null}
+      </header>
       )}
 
       {isExpanded ? (

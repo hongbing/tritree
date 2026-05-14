@@ -756,8 +756,9 @@ button:disabled {
 }
 
 .style-profile-setup--inline.style-profile-setup--unset {
-  background: rgba(240, 253, 250, 0.58);
-  border-color: rgba(20, 184, 166, 0.2);
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.96), rgba(255, 247, 237, 0.92));
+  border-color: rgba(217, 119, 6, 0.5);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1), 0 6px 18px rgba(180, 83, 9, 0.1);
 }
 
 .style-profile-setup--inline.style-profile-setup--set {
@@ -818,9 +819,8 @@ button:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .style-profile-setup--inline .style-profile-setup__header {
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
 }
 
@@ -829,10 +829,25 @@ button:disabled {
   font-size: 0.68rem;
 }
 
+.style-profile-setup--inline.style-profile-setup--unset .eyebrow {
+  color: #b45309;
+}
+
 .style-profile-setup--inline .style-profile-setup__summary {
   margin: 0;
   font-size: 0.78rem;
   line-height: 1.35;
+}
+
+.style-profile-setup--inline .style-profile-setup__summary--unset {
+  font-size: 0.82rem;
+}
+
+.style-profile-setup--inline .style-profile-setup__set-button {
+  min-height: 30px;
+  padding: 5px 11px;
+  font-size: 0.82rem;
+  flex-shrink: 0;
 }
 
 .style-profile-setup--inline .style-profile-setup__body {
@@ -874,11 +889,46 @@ button:disabled {
   justify-content: space-between;
   gap: 12px;
 }
-
 .style-profile-setup__summary {
   color: #64748b;
   font-size: 0.9rem;
   margin: 4px 0 0;
+}
+
+.style-profile-setup__summary--unset {
+  color: #92400e;
+  font-weight: 800;
+}
+.style-profile-setup__set-button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  padding: 6px 13px;
+  color: #ffffff;
+  background: #d97706;
+  border: 1px solid #d97706;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 850;
+  line-height: 1;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, opacity 160ms ease;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(180, 83, 9, 0.32);
+}
+
+.style-profile-setup__set-button:hover:not(:disabled) {
+  background: #b45309;
+  border-color: #b45309;
+  box-shadow: 0 6px 16px rgba(180, 83, 9, 0.42);
+}
+
+.style-profile-setup__set-button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .style-profile-setup__update-button {
@@ -1377,9 +1427,9 @@ button:disabled {
   display: grid;
   gap: 10px;
   margin: 12px 0;
-  padding: 12px;
-  background: #fffbeb;
-  border: 1px solid rgba(217, 119, 6, 0.24);
+  padding: 12px 12px 6px;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.26);
   border-radius: 8px;
 }
 
@@ -1388,7 +1438,7 @@ button:disabled {
   gap: 8px;
   overflow-x: auto;
   overflow-y: hidden;
-  padding-bottom: 4px;
+  padding-bottom: 10px;
   scroll-padding-inline: 2px;
   scroll-snap-type: x proximity;
   -webkit-overflow-scrolling: touch;
@@ -1406,7 +1456,7 @@ button:disabled {
   color: #334155;
   text-align: left;
   background: rgba(255, 255, 255, 0.84);
-  border: 1px solid rgba(217, 119, 6, 0.24);
+  border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 8px;
   scroll-snap-align: start;
 }

@@ -1139,7 +1139,7 @@ describe("tree director compatibility generators", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
-  it("rejects runtime final JSON text when the final submit tool is not called", async () => {
+  it("retries runtime final JSON text until the final submit tool is called", async () => {
     const runSkillCommand = {
       id: "run_skill_command",
       description: "Run an installed skill command.",
@@ -1153,25 +1153,40 @@ describe("tree director compatibility generators", () => {
         { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
       ],
     };
-    const stream = vi.fn(async () => ({
-      fullStream: async function* () {
-        yield { type: "reasoning-delta", payload: { text: "先判断工具结果。" } };
-        yield {
-          type: "tool-result",
-          payload: {
-            toolCallId: "tool-1",
-            toolName: "run_skill_command",
-            result: {
-              exitCode: 0,
-              ok: true,
-              stdout: JSON.stringify({ feeds: [{ displayTitle: "青岛三天两晚攻略" }] })
+    const stream = vi
+      .fn()
+      .mockResolvedValueOnce({
+        fullStream: async function* () {
+          yield { type: "reasoning-delta", payload: { text: "先判断工具结果。" } };
+          yield {
+            type: "tool-result",
+            payload: {
+              toolCallId: "tool-1",
+              toolName: "run_skill_command",
+              result: {
+                exitCode: 0,
+                ok: true,
+                stdout: JSON.stringify({ feeds: [{ displayTitle: "青岛三天两晚攻略" }] })
+              }
             }
-          }
-        };
-        yield { type: "text-delta", payload: { text: `\`\`\`json\n${JSON.stringify(finalObject)}\n\`\`\`` } };
-      },
-      object: Promise.resolve(undefined)
-    }));
+          };
+          yield { type: "text-delta", payload: { text: `\`\`\`json\n${JSON.stringify(finalObject)}\n\`\`\`` } };
+        },
+        object: Promise.resolve(undefined)
+      })
+      .mockResolvedValueOnce({
+        fullStream: async function* () {
+          yield {
+            type: "tool-call",
+            payload: {
+              toolCallId: "submit-1",
+              toolName: "submit_tree_options",
+              args: finalObject
+            }
+          };
+        },
+        object: Promise.resolve(undefined)
+      });
     const generate = vi.fn(async () => ({ object: finalObject }));
     mocks.createSkillRuntimeTools.mockResolvedValueOnce({
       toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
@@ -1192,14 +1207,102 @@ describe("tree director compatibility generators", () => {
         env: { KIMI_API_KEY: "token" },
         onReasoningText: (event) => progressEvents.push(event)
       })
-    ).rejects.toThrow("Required");
+    ).resolves.toMatchObject({
+      roundIntent: finalObject.roundIntent,
+      options: finalObject.options
+    });
 
-    expect(stream).toHaveBeenCalledTimes(3);
+    expect(stream).toHaveBeenCalledTimes(2);
+    const retryMessages = stream.mock.calls[1]?.[0] as Array<{ content: string; role: string }>;
+    expect(retryMessages.at(-1)?.content).toContain("必须调用 submit_tree_options");
     expect(generate).not.toHaveBeenCalled();
     expect(progressEvents.map((event) => event.accumulatedText).join("\n")).toContain("先判断工具结果。");
     expect(progressEvents.map((event) => event.accumulatedText).join("\n")).toContain("[工具]");
     expect(progressEvents.map((event) => event.accumulatedText).join("\n")).not.toContain("roundIntent");
     expect(progressEvents.map((event) => event.accumulatedText).join("\n")).not.toContain("```json");
+  });
+
+  it("retries runtime draft JSON text until the final submit tool is called", async () => {
+    const runSkillCommand = {
+      id: "run_skill_command",
+      description: "Run an installed skill command.",
+      execute: vi.fn()
+    };
+    const finalObject = {
+      roundIntent: "继续成稿",
+      draft: {
+        title: "青岛反攻略",
+        body: "第一段继续写完整。",
+        hashtags: ["#青岛"],
+        imagePrompt: "青岛老城街道"
+      },
+    };
+    const stream = vi
+      .fn()
+      .mockResolvedValueOnce({
+        fullStream: async function* () {
+          yield {
+            type: "tool-result",
+            payload: {
+              toolCallId: "tool-1",
+              toolName: "run_skill_command",
+              result: {
+                exitCode: 0,
+                ok: true,
+                stdout: JSON.stringify({ feeds: [{ displayTitle: "青岛三天两晚攻略" }] })
+              }
+            }
+          };
+          yield { type: "text-delta", payload: { text: `\`\`\`json\n${JSON.stringify(finalObject)}\n\`\`\`` } };
+        },
+        object: Promise.resolve(undefined)
+      })
+      .mockResolvedValueOnce({
+        fullStream: async function* () {
+          yield {
+            type: "tool-call",
+            payload: {
+              toolCallId: "submit-1",
+              toolName: "submit_tree_draft",
+              args: finalObject
+            }
+          };
+        },
+        object: Promise.resolve(undefined)
+      });
+    const generate = vi.fn();
+    mocks.createSkillRuntimeTools.mockResolvedValueOnce({
+      toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
+      tools: { run_skill_command: runSkillCommand }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate
+      };
+    });
+    const progressEvents: Array<{ delta: string; accumulatedText: string }> = [];
+
+    await expect(
+      streamTreeDraft({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" },
+        onReasoningText: (event) => progressEvents.push(event)
+      })
+    ).resolves.toMatchObject({
+      roundIntent: finalObject.roundIntent,
+      draft: finalObject.draft
+    });
+
+    expect(stream).toHaveBeenCalledTimes(2);
+    const retryMessages = stream.mock.calls[1]?.[0] as Array<{ content: string; role: string }>;
+    expect(retryMessages.at(-1)?.content).toContain("必须调用 submit_tree_draft");
+    expect(generate).not.toHaveBeenCalled();
+    const visibleProgress = progressEvents.map((event) => event.accumulatedText).join("\n");
+    expect(visibleProgress).not.toContain("roundIntent");
+    expect(visibleProgress).not.toContain("青岛反攻略");
+    expect(visibleProgress).not.toContain("```json");
   });
 
   it("rejects runtime markdown final options when the final submit tool is not called", async () => {
@@ -1261,7 +1364,7 @@ describe("tree director compatibility generators", () => {
         env: { KIMI_API_KEY: "token" },
         onReasoningText: (event) => progressEvents.push(event)
       })
-    ).rejects.toThrow("Required");
+    ).rejects.toThrow("submit_tree_options");
 
     expect(stream).toHaveBeenCalledTimes(3);
     expect(generate).not.toHaveBeenCalled();
@@ -1328,7 +1431,7 @@ describe("tree director compatibility generators", () => {
         env: { KIMI_API_KEY: "token" },
         onReasoningText: (event) => progressEvents.push(event)
       })
-    ).rejects.toThrow("Required");
+    ).rejects.toThrow("submit_tree_options");
 
     expect(stream).toHaveBeenCalledTimes(3);
     expect(generate).not.toHaveBeenCalled();

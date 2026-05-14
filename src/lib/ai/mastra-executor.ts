@@ -904,12 +904,31 @@ async function parseRuntimeReActStreamOutput<TOutput>(
     logZodIssues(target, "structured", error);
   }
 
+  if (summary.rawText.trim()) {
+    streamError = finalSubmitToolRequiredError(target);
+    logTritreeAiDebug("react-stream", "parse-final-submit-missing", {
+      target,
+      error: summarizeErrorForLog(streamError)
+    });
+    logZodIssues(target, "missing-submit", streamError);
+  }
+
   logTritreeAiDebug("react-stream", "parse-failed", {
     target,
     error: summarizeErrorForLog(streamError)
   });
   logAiResponse(target as "draft" | "next-step" | "options", "stream-parse-failed", summary.latestPartial);
   throw streamError;
+}
+
+function finalSubmitToolRequiredError(target: RuntimeSubmitTarget) {
+  return new ZodError([
+    {
+      code: "custom",
+      path: [],
+      message: `必须调用 ${finalSubmitToolName(target)} 工具提交最终结果，不能把最终 JSON、Markdown 或正文写成普通文本。`
+    }
+  ]);
 }
 
 function logZodIssues(target: RuntimeSubmitTarget, stage: string, error: unknown) {

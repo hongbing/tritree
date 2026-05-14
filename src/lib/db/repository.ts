@@ -476,12 +476,30 @@ export function createTreeableRepository(
         SET is_archived = 1, updated_at = ?
         WHERE user_id IS NULL
           AND is_system = 1
+          AND is_archived = 0
           AND id NOT IN (${placeholders})
       `
     ).run(timestamp, ...configuredIds);
   }
 
   function backfillMergedSystemSkillsForLegacySessions() {
+    const mergedPlaceholders = MERGED_SYSTEM_SKILL_IDS.map(() => "?").join(", ");
+    const activeMergedRows = db
+      .prepare(
+        `
+          SELECT id
+          FROM skills
+          WHERE id IN (${mergedPlaceholders})
+            AND user_id IS NULL
+            AND is_system = 1
+            AND is_archived = 0
+        `
+      )
+      .all(...MERGED_SYSTEM_SKILL_IDS) as Array<{ id: string }>;
+    const activeMergedIdSet = new Set(activeMergedRows.map((row) => row.id));
+    const activeMergedSkillIds = MERGED_SYSTEM_SKILL_IDS.filter((skillId) => activeMergedIdSet.has(skillId));
+    if (activeMergedSkillIds.length === 0) return;
+
     const legacyPlaceholders = LEGACY_SYSTEM_SKILL_IDS.map(() => "?").join(", ");
     const sessionRows = db
       .prepare(
@@ -504,7 +522,7 @@ export function createTreeableRepository(
     );
 
     for (const row of sessionRows) {
-      for (const skillId of MERGED_SYSTEM_SKILL_IDS) {
+      for (const skillId of activeMergedSkillIds) {
         insert.run(row.session_id, skillId, timestamp);
       }
     }

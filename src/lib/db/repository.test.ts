@@ -952,7 +952,8 @@ describe("Treeable repository", () => {
 
   it("backfills merged system skills for sessions that referenced legacy system skills", async () => {
     const dbPath = testDbPath();
-    const repo = createTreeableRepository(dbPath);
+    const configPath = writeSystemSkillConfig(repositorySystemSkills);
+    const repo = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
     const user = await createTestUser(repo, "writer");
     const root = repo.saveRootMemory(user.id, {
       seed: "写一篇解释为什么要写作的文章",
@@ -1002,7 +1003,7 @@ describe("Treeable repository", () => {
       .run(state.session.id, "system-analysis", "2026-05-01T00:00:00.000Z");
     sqlite.close();
 
-    const reopened = createTreeableRepository(dbPath);
+    const reopened = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
     const reopenedState = reopened.getSessionState(user.id, state.session.id);
 
     expect(reopenedState?.enabledSkillIds).toEqual(["system-writer", "system-reviewer"]);
@@ -1014,6 +1015,73 @@ describe("Treeable repository", () => {
     check.close();
 
     expect(rows.map((row) => row.skill_id)).toEqual(["system-analysis", "system-reviewer", "system-writer"]);
+  });
+
+  it("backfills only active configured merged system skills for legacy sessions", async () => {
+    const dbPath = testDbPath();
+    const configPath = writeSystemSkillConfig([repositorySystemSkills[1]]);
+    const repo = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
+    const user = await createTestUser(repo, "writer");
+    const root = repo.saveRootMemory(user.id, {
+      seed: "写一篇解释为什么要写作的文章",
+      domains: ["创作"],
+      tones: ["平静"],
+      styles: ["观点型"],
+      personas: ["实践者"]
+    });
+
+    const state = createSessionDraftWithOptions(repo, {
+      userId: user.id,
+      rootMemoryId: root.id,
+      enabledSkillIds: [],
+      output: {
+        roundIntent: "Start",
+        options: [
+          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
+          { id: "b", label: "B", description: "B", impact: "B", kind: "deepen" },
+          { id: "c", label: "C", description: "C", impact: "C", kind: "reframe" }
+        ],
+        draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
+        finishAvailable: false,
+        publishPackage: null
+      }
+    });
+
+    const sqlite = new DatabaseSync(dbPath);
+    sqlite
+      .prepare(
+        `
+          INSERT INTO skills (id, title, category, description, prompt, applies_to, is_system, default_enabled, is_archived, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0, ?, ?)
+        `
+      )
+      .run(
+        "system-analysis",
+        "理清主线",
+        "方向",
+        "旧系统技能。",
+        "判断作品真正要表达什么。",
+        "editor",
+        "2026-05-01T00:00:00.000Z",
+        "2026-05-01T00:00:00.000Z"
+      );
+    sqlite
+      .prepare("INSERT INTO session_enabled_skills (session_id, skill_id, created_at) VALUES (?, ?, ?)")
+      .run(state.session.id, "system-analysis", "2026-05-01T00:00:00.000Z");
+    sqlite.close();
+
+    const reopened = createTreeableRepository(dbPath, { systemSkillConfigPath: configPath });
+    const reopenedState = reopened.getSessionState(user.id, state.session.id);
+
+    expect(reopenedState?.enabledSkillIds).toEqual(["system-reviewer"]);
+
+    const check = new DatabaseSync(dbPath);
+    const rows = check
+      .prepare("SELECT skill_id FROM session_enabled_skills WHERE session_id = ? ORDER BY skill_id")
+      .all(state.session.id) as Array<{ skill_id: string }>;
+    check.close();
+
+    expect(rows.map((row) => row.skill_id)).toEqual(["system-analysis", "system-reviewer"]);
   });
 
   it("persists skill applicability for system and user skills", async () => {

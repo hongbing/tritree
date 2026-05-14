@@ -21,6 +21,7 @@ vi.mock("@/components/tree/TreeCanvas", () => ({
     changedDraftNodeIds,
     comparisonNodeIds,
     currentNode,
+    display = "full",
     generationStage,
     isBusy,
     isComparisonMode,
@@ -35,6 +36,7 @@ vi.mock("@/components/tree/TreeCanvas", () => ({
     changedDraftNodeIds?: string[];
     comparisonNodeIds?: { fromNodeId: string | null; toNodeId: string | null } | null;
     currentNode: { id: string; options: Array<{ id: "a"; label: string } | { id: string; label: string }>; roundIntent?: string } | null;
+    display?: "full" | "options" | "tree";
     generationStage?: { nodeId: string; stage: "draft" | "options" } | null;
     isBusy: boolean;
     isComparisonMode?: boolean;
@@ -50,6 +52,7 @@ vi.mock("@/components/tree/TreeCanvas", () => ({
       changedDraftNodeIds,
       comparisonNodeIds,
       currentNode,
+      display,
       generationStage,
       isBusy,
       isComparisonMode,
@@ -64,6 +67,7 @@ vi.mock("@/components/tree/TreeCanvas", () => ({
       <div data-testid="tree-canvas">
         {isBusy ? "choices disabled" : "choices enabled"}
         {isComparisonMode ? " comparison mode" : ""}
+        <div data-testid="canvas-display">{display}</div>
         <div data-testid="canvas-current-node">{currentNode?.id ?? "none"}</div>
         <div data-testid="canvas-round-intent">{currentNode?.roundIntent ?? ""}</div>
         <div data-testid="canvas-generation-stage">
@@ -71,38 +75,46 @@ vi.mock("@/components/tree/TreeCanvas", () => ({
         </div>
         <div data-testid="canvas-options">{currentNode?.options.map((option) => option.label).join("|") ?? ""}</div>
         <div data-testid="canvas-skills">{skills?.map((skill) => skill.title).join("|")}</div>
-        <button onClick={() => onActivateBranch?.("node-1", "a")} type="button">
-          activate historical branch
-        </button>
-        <button onClick={() => onViewNode?.("node-2")} type="button">
-          view historical node
-        </button>
-        <button onClick={() => onChoose?.("a")} type="button">
-          choose displayed option
-        </button>
-        <button onClick={() => onRegenerateOptions?.("focused")} type="button">
-          regenerate focused options
-        </button>
-        <button
-          onClick={() =>
-          onAddCustomOption?.({
-              id: "custom-skill",
-              label: "润色",
-              description: "使用技能「润色」继续。",
-              impact: "按当前作品启用技能继续生成。",
-              kind: "reframe"
-            })
-          }
-          type="button"
-        >
-          use custom skill option
-        </button>
-        <button onClick={() => onSelectComparisonNode?.("node-3")} type="button">
-          select comparison node 3
-        </button>
-        <button onClick={() => onSelectComparisonNode?.("node-1")} type="button">
-          select comparison node 1
-        </button>
+        {display !== "options" ? (
+          <>
+            <button onClick={() => onActivateBranch?.("node-1", "a")} type="button">
+              activate historical branch
+            </button>
+            <button onClick={() => onViewNode?.("node-2")} type="button">
+              view historical node
+            </button>
+            <button onClick={() => onSelectComparisonNode?.("node-3")} type="button">
+              select comparison node 3
+            </button>
+            <button onClick={() => onSelectComparisonNode?.("node-1")} type="button">
+              select comparison node 1
+            </button>
+          </>
+        ) : null}
+        {display !== "tree" ? (
+          <>
+            <button onClick={() => onChoose?.("a")} type="button">
+              choose displayed option
+            </button>
+            <button onClick={() => onRegenerateOptions?.("focused")} type="button">
+              regenerate focused options
+            </button>
+            <button
+              onClick={() =>
+                onAddCustomOption?.({
+                  id: "custom-skill",
+                  label: "润色",
+                  description: "使用技能「润色」继续。",
+                  impact: "按当前作品启用技能继续生成。",
+                  kind: "reframe"
+                })
+              }
+              type="button"
+            >
+              use custom skill option
+            </button>
+          </>
+        ) : null}
       </div>
     )
 }));
@@ -398,10 +410,6 @@ function installMobileViewport() {
 
 function installDesktopViewport() {
   installViewport(1280);
-}
-
-function mobileTabBadge(tabName: "树图" | "草稿") {
-  return screen.getByRole("button", { name: tabName }).querySelector(".mobile-panel-tab__badge");
 }
 
 describe("TreeableApp", () => {
@@ -711,7 +719,7 @@ describe("TreeableApp", () => {
     expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 
-  it("renders mobile panel controls with tree active by default", async () => {
+  it("renders mobile draft and options together with the tree collapsed by default", async () => {
     installMobileViewport();
     const fetchMock = vi
       .fn()
@@ -722,12 +730,38 @@ describe("TreeableApp", () => {
 
     render(<TreeableApp />);
 
-    expect(await screen.findByTestId("tree-canvas")).toBeInTheDocument();
-    const switcher = screen.getByRole("group", { name: "移动端主面板" });
-    expect(within(switcher).getByRole("button", { name: "树图" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(switcher).getByRole("button", { name: "草稿" })).toHaveAttribute("aria-pressed", "false");
-    expect(document.querySelector(".mobile-panel--tree")).toHaveClass("mobile-panel--active");
-    expect(document.querySelector(".mobile-panel--draft")).not.toHaveClass("mobile-panel--active");
+    expect(await screen.findByTestId("live-draft")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "移动端主面板" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开树图" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByTestId("tree-canvas")).toBeInTheDocument();
+    expect(screen.getByTestId("canvas-display")).toHaveTextContent("options");
+    expect(screen.queryByRole("region", { name: "移动端树图" })).not.toBeInTheDocument();
+    expect(document.querySelector(".mobile-panel--draft")).toHaveClass("mobile-panel--unified");
+  });
+
+  it("expands the mobile tree from the unified draft screen", async () => {
+    installMobileViewport();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: finishedState }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    await screen.findByTestId("live-draft");
+    await userEvent.click(screen.getByRole("button", { name: "展开树图" }));
+
+    expect(screen.getByRole("button", { name: "收起树图" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("region", { name: "移动端树图" })).toBeInTheDocument();
+    expect(screen.getAllByTestId("canvas-display").map((item) => item.textContent)).toEqual(["tree", "options"]);
+
+    await userEvent.click(screen.getByRole("button", { name: "收起树图" }));
+
+    expect(screen.getByRole("button", { name: "展开树图" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "移动端树图" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("canvas-display")).toHaveTextContent("options");
   });
 
   it("does not render mobile panel controls on desktop", async () => {
@@ -743,21 +777,57 @@ describe("TreeableApp", () => {
 
     expect(await screen.findByTestId("tree-canvas")).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "移动端主面板" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "展开树图" })).not.toBeInTheDocument();
     expect(screen.getByTestId("live-draft")).toBeInTheDocument();
   });
 
-  it("defines mobile-only panel visibility rules", () => {
+  it("defines mobile-only unified workspace visibility rules", () => {
     const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
     const defaultPanelRule = css.match(/\.mobile-panel\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
     const mediaRule = css.match(/@media \(max-width: 980px\)\s*\{(?<body>[\s\S]+?)@media \(max-width: 640px\)/)
       ?.groups?.body ?? "";
 
     expect(defaultPanelRule).toContain("display: contents");
-    expect(mediaRule).toContain(".mobile-panel-switcher");
-    expect(mediaRule).toContain("display: none");
-    expect(mediaRule).toContain(".mobile-panel--active");
+    expect(mediaRule).toContain(".mobile-tree-toggle");
+    expect(mediaRule).toContain(".mobile-panel--draft");
+    expect(mediaRule).toContain(".mobile-panel--tree");
+    expect(mediaRule).toContain(".mobile-draft-region");
+    expect(mediaRule).toContain(".mobile-options-region");
+    expect(mediaRule).toContain(".draft-panel__scroll");
+    expect(mediaRule).toContain(".mobile-module--generating");
+    expect(mediaRule).toContain("@keyframes mobile-module-glow");
+    expect(mediaRule).toContain("overflow-y: visible");
+    expect(mediaRule).toContain("overscroll-behavior: auto");
+    expect(mediaRule).not.toContain("conic-gradient");
+    expect(mediaRule).not.toContain("mask-composite");
+    expect(mediaRule).not.toContain("transform: rotate");
     expect(mediaRule).toContain("display: grid");
-    expect(mediaRule).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
+    expect(mediaRule).toContain("grid-auto-rows: auto");
+    expect(mediaRule).toContain("align-content: start");
+    expect(mediaRule).not.toContain("grid-template-rows: auto auto minmax(0, 1fr)");
+  });
+
+  it("keeps the narrow mobile topbar compact instead of stacking boxed rows", () => {
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    const narrowMobileRule = css.match(/@media \(max-width: 640px\)\s*\{(?<body>[\s\S]+)\}\s*$/)?.groups?.body ?? "";
+    const topbarRule = narrowMobileRule.match(/\.topbar\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const topbarActionsRule = narrowMobileRule.match(/\.topbar-actions\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const accountControlsRule = narrowMobileRule.match(/\.account-controls\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const workspaceActionsRule = narrowMobileRule.match(/\.workspace-actions\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const workspaceButtonsRule =
+      narrowMobileRule.match(/\.workspace-actions \.start-button,\s*\.workspace-actions \.secondary-button\s*\{(?<body>[^}]+)\}/)
+        ?.groups?.body ?? "";
+
+    expect(topbarRule).toContain("grid-template-columns: 36px minmax(0, 1fr) auto");
+    expect(topbarActionsRule).toContain("display: contents");
+    expect(accountControlsRule).toContain("grid-column: 3");
+    expect(accountControlsRule).toContain("grid-row: 1");
+    expect(workspaceActionsRule).toContain("display: grid");
+    expect(workspaceActionsRule).toContain("grid-column: 1 / -1");
+    expect(workspaceActionsRule).toContain("grid-row: 2");
+    expect(workspaceActionsRule).toContain("grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr) minmax(0, 1fr)");
+    expect(workspaceButtonsRule).toContain("min-width: 0");
+    expect(workspaceButtonsRule).toContain("min-height: 40px");
   });
 
   it("trims persisted root summary before flattening it in the topbar", async () => {
@@ -815,6 +885,41 @@ describe("TreeableApp", () => {
       expect(within(workspaceActions).getByRole("button", { name: "新念头" })).toBeInTheDocument();
       expect(within(workspaceActions).getByRole("button", { name: "重新开始" })).toBeInTheDocument();
       expect(await screen.findByTestId("tree-canvas")).toHaveTextContent("choices enabled");
+    });
+
+    it("collapses mobile account actions into a small top-right menu", async () => {
+      installMobileViewport();
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ state: finishedState }) });
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(
+        <TreeableApp
+          currentUser={{
+            id: "user-1",
+            username: "awei",
+            displayName: "Awei",
+            role: "admin",
+            isAdmin: true
+          }}
+        />
+      );
+
+      const accountActions = await screen.findByRole("group", { name: "账号操作" });
+      const accountToggle = await within(accountActions).findByRole("button", { name: "账号：Awei" });
+
+      expect(accountToggle).toHaveClass("account-controls__menu-button");
+      expect(within(accountActions).queryByRole("link", { name: "用户管理" })).not.toBeInTheDocument();
+      expect(within(accountActions).queryByRole("button", { name: "退出登录" })).not.toBeInTheDocument();
+
+      await userEvent.click(accountToggle);
+
+      expect(within(accountActions).getByRole("link", { name: "用户管理" })).toHaveAttribute("href", "/admin/users");
+      expect(within(accountActions).getByRole("button", { name: "退出登录" })).toBeInTheDocument();
+      expect(screen.getByRole("group", { name: "作品操作" })).toBeInTheDocument();
     });
 
     it("shows a draft library link for logged-in users", async () => {
@@ -1263,7 +1368,7 @@ describe("TreeableApp", () => {
     );
   });
 
-  it("switches to the draft panel when a mobile direction choice starts draft generation", async () => {
+  it("keeps a mobile direction choice in the unified draft and options workspace", async () => {
     installMobileViewport();
     const childNode = {
       ...activeState.currentNode,
@@ -1302,17 +1407,23 @@ describe("TreeableApp", () => {
 
     render(<TreeableApp />);
 
-    expect(await screen.findByRole("group", { name: "移动端主面板" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "展开树图" })).toHaveAttribute("aria-expanded", "false");
     await userEvent.click(screen.getByRole("button", { name: "choose displayed option" }));
 
     await vi.waitFor(() => {
-      expect(screen.getByRole("button", { name: "草稿" })).toHaveAttribute("aria-pressed", "true");
+      expect(liveDraftMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ draft: generatedState.currentDraft })
+      );
     });
-    expect(document.querySelector(".mobile-panel--draft")).toHaveClass("mobile-panel--active");
+    expect(screen.queryByRole("group", { name: "移动端主面板" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开树图" })).toHaveAttribute("aria-expanded", "false");
+    expect(document.querySelector(".mobile-panel--draft")).toHaveClass("mobile-panel--unified");
   });
 
-  it("marks the tree tab when next options are generating behind the mobile draft tab", async () => {
+  it("keeps next options generation in the mobile unified workspace without tab badges", async () => {
     installMobileViewport();
+    const scrollIntoView = vi.fn();
+    const scrollIntoViewDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView");
     const draftStream = controlledNdjsonResponse();
     const optionsStream = controlledNdjsonResponse();
     const childNode = {
@@ -1350,38 +1461,58 @@ describe("TreeableApp", () => {
       .mockResolvedValueOnce(draftStream.response)
       .mockResolvedValueOnce(optionsStream.response);
     vi.stubGlobal("fetch", fetchMock);
-
-    render(<TreeableApp />);
-
-    expect(await screen.findByRole("group", { name: "移动端主面板" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "choose displayed option" }));
-    await vi.waitFor(() => {
-      expect(screen.getByRole("button", { name: "草稿" })).toHaveAttribute("aria-pressed", "true");
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView
     });
 
-    act(() => {
-      draftStream.push({ type: "draft", draft: generatedDraft, streamingField: "body" });
-      draftStream.push({ type: "done", state: generatedState });
-      draftStream.close();
-    });
+    try {
+      render(<TreeableApp />);
 
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenNthCalledWith(
-        6,
-        "/api/sessions/session-1/options",
-        expect.objectContaining({ method: "POST" })
-      );
-      expect(mobileTabBadge("树图")).toHaveTextContent("新");
-    });
+      expect(await screen.findByRole("button", { name: "展开树图" })).toBeInTheDocument();
+      expect(document.querySelector(".mobile-draft-region")).not.toHaveClass("mobile-draft-region--generating");
+      expect(document.querySelector(".mobile-options-region")).not.toHaveClass("mobile-options-region--generating");
+      await userEvent.click(screen.getByRole("button", { name: "choose displayed option" }));
+      await vi.waitFor(() => {
+        expect(liveDraftMock).toHaveBeenLastCalledWith(expect.objectContaining({ generationStage: "draft" }));
+      });
+      expect(document.querySelector(".mobile-draft-region")).toHaveClass("mobile-draft-region--generating");
+      expect(document.querySelector(".mobile-options-region")).not.toHaveClass("mobile-options-region--generating");
+      await vi.waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      });
+      expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: "smooth", block: "start" });
 
-    expect(mobileTabBadge("草稿")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "树图" }));
+      act(() => {
+        draftStream.push({ type: "draft", draft: generatedDraft, streamingField: "body" });
+        draftStream.push({ type: "done", state: generatedState });
+        draftStream.close();
+      });
 
-    expect(screen.getByRole("button", { name: "树图" })).toHaveAttribute("aria-pressed", "true");
-    expect(mobileTabBadge("树图")).not.toBeInTheDocument();
+      await vi.waitFor(() => {
+        expect(fetchMock).toHaveBeenNthCalledWith(
+          6,
+          "/api/sessions/session-1/options",
+          expect.objectContaining({ method: "POST" })
+        );
+      });
+      expect(document.querySelector(".mobile-draft-region")).not.toHaveClass("mobile-draft-region--generating");
+      expect(document.querySelector(".mobile-options-region")).toHaveClass("mobile-options-region--generating");
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+      expect(screen.queryByRole("group", { name: "移动端主面板" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "展开树图" })).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByRole("region", { name: "移动端树图" })).not.toBeInTheDocument();
+    } finally {
+      if (scrollIntoViewDescriptor) {
+        Object.defineProperty(Element.prototype, "scrollIntoView", scrollIntoViewDescriptor);
+      } else {
+        delete (Element.prototype as unknown as { scrollIntoView?: () => void }).scrollIntoView;
+      }
+    }
   });
 
-  it("switches to the draft panel when a mobile historical branch starts generation", async () => {
+  it("keeps the unified workspace visible when a mobile historical branch starts generation", async () => {
     installMobileViewport();
     const fetchMock = vi
       .fn()
@@ -1393,7 +1524,8 @@ describe("TreeableApp", () => {
 
     render(<TreeableApp />);
 
-    expect(await screen.findByRole("group", { name: "移动端主面板" })).toBeInTheDocument();
+    await screen.findByRole("button", { name: "展开树图" });
+    await userEvent.click(screen.getByRole("button", { name: "展开树图" }));
     await userEvent.click(screen.getByRole("button", { name: "activate historical branch" }));
 
     await vi.waitFor(() => {
@@ -1403,10 +1535,11 @@ describe("TreeableApp", () => {
         expect.objectContaining({ method: "POST" })
       );
     });
-    expect(screen.getByRole("button", { name: "草稿" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("live-draft")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "收起树图" })).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("keeps the tree panel active when mobile options are regenerated", async () => {
+  it("regenerates mobile options from the unified workspace without opening the tree", async () => {
     installMobileViewport();
     const fetchMock = vi
       .fn()
@@ -1418,7 +1551,7 @@ describe("TreeableApp", () => {
 
     render(<TreeableApp />);
 
-    expect(await screen.findByRole("group", { name: "移动端主面板" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "展开树图" })).toHaveAttribute("aria-expanded", "false");
     await userEvent.click(screen.getByRole("button", { name: "regenerate focused options" }));
 
     await vi.waitFor(() => {
@@ -1428,11 +1561,59 @@ describe("TreeableApp", () => {
         expect.objectContaining({ method: "POST" })
       );
     });
-    expect(screen.getByRole("button", { name: "树图" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "草稿" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "展开树图" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "移动端树图" })).not.toBeInTheDocument();
   });
 
-  it("keeps the tree panel active when viewing a historical node without generation", async () => {
+  it("lets the user retry when the current draft is missing next options", async () => {
+    const missingOptionsState = {
+      ...activeState,
+      currentNode: {
+        ...activeState.currentNode,
+        options: []
+      }
+    };
+    const recoveredOptionsState = {
+      ...activeState,
+      currentNode: {
+        ...activeState.currentNode,
+        options: [
+          { id: "a", label: "Recovered A", description: "A", impact: "A", kind: "explore" },
+          { id: "b", label: "Recovered B", description: "B", impact: "B", kind: "deepen" },
+          { id: "c", label: "Recovered C", description: "C", impact: "C", kind: "finish" }
+        ]
+      }
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: missingOptionsState }) })
+      .mockResolvedValueOnce(optionsNdjsonResponse(recoveredOptionsState));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    await screen.findByTestId("tree-canvas");
+    expect(treeCanvasMock).toHaveBeenLastCalledWith(expect.objectContaining({ onRegenerateOptions: expect.any(Function) }));
+    expect(screen.getByTestId("canvas-options")).toBeEmptyDOMElement();
+
+    await userEvent.click(screen.getByRole("button", { name: "regenerate focused options" }));
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        4,
+        "/api/sessions/session-1/options",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ nodeId: "node-1", optionMode: "focused", force: true })
+        })
+      );
+      expect(screen.getByTestId("canvas-options")).toHaveTextContent("Recovered A|Recovered B|Recovered C");
+    });
+  });
+
+  it("keeps the expandable tree open when viewing a historical node without generation", async () => {
     installMobileViewport();
     const historicalNode = {
       ...activeState.currentNode,
@@ -1457,14 +1638,15 @@ describe("TreeableApp", () => {
 
     render(<TreeableApp />);
 
-    expect(await screen.findByRole("group", { name: "移动端主面板" })).toBeInTheDocument();
+    await screen.findByRole("button", { name: "展开树图" });
+    await userEvent.click(screen.getByRole("button", { name: "展开树图" }));
     await userEvent.click(screen.getByRole("button", { name: "view historical node" }));
 
-    expect(screen.getByRole("button", { name: "树图" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "收起树图" })).toHaveAttribute("aria-expanded", "true");
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("respects a manual mobile tree switch during active generation and resets it for the next generation", async () => {
+  it("keeps a manually expanded mobile tree open while draft updates arrive in the unified workspace", async () => {
     installMobileViewport();
     const draftStream = controlledNdjsonResponse();
     const childNode = {
@@ -1544,21 +1726,21 @@ describe("TreeableApp", () => {
 
     render(<TreeableApp />);
 
-    expect(await screen.findByRole("group", { name: "移动端主面板" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "展开树图" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "choose displayed option" }));
     await vi.waitFor(() => {
-      expect(screen.getByRole("button", { name: "草稿" })).toHaveAttribute("aria-pressed", "true");
+      expect(liveDraftMock).toHaveBeenLastCalledWith(expect.objectContaining({ generationStage: "draft" }));
     });
 
-    await userEvent.click(screen.getByRole("button", { name: "树图" }));
-    expect(screen.getByRole("button", { name: "树图" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: "展开树图" }));
+    expect(screen.getByRole("button", { name: "收起树图" })).toHaveAttribute("aria-expanded", "true");
 
     act(() => {
       draftStream.push({ type: "draft", draft: generatedDraft, streamingField: "body" });
     });
 
     await vi.waitFor(() => {
-      expect(mobileTabBadge("草稿")).toHaveTextContent("新");
+      expect(liveDraftMock).toHaveBeenLastCalledWith(expect.objectContaining({ draft: generatedDraft }));
     });
 
     act(() => {
@@ -1573,9 +1755,9 @@ describe("TreeableApp", () => {
         "/api/sessions/session-1/options",
         expect.objectContaining({ method: "POST" })
       );
-      expect(screen.getByTestId("canvas-options")).toHaveTextContent("A|B|C");
+      expect(screen.getAllByTestId("canvas-options").at(-1)).toHaveTextContent("A|B|C");
     });
-    expect(screen.getByRole("button", { name: "树图" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "收起树图" })).toHaveAttribute("aria-expanded", "true");
 
     await userEvent.click(screen.getByRole("button", { name: "choose displayed option" }));
 
@@ -1585,7 +1767,7 @@ describe("TreeableApp", () => {
         "/api/sessions/session-1/choose",
         expect.objectContaining({ method: "POST" })
       );
-      expect(screen.getByRole("button", { name: "草稿" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("live-draft")).toBeInTheDocument();
     });
   });
 
@@ -2646,10 +2828,9 @@ describe("TreeableApp", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("流式生成失败");
     expect(within(screen.getByTestId("mock-draft-actions")).queryByRole("button", { name: "重试生成" })).not.toBeInTheDocument();
     const retryActionArea = screen.getByTestId("mock-draft-empty-actions");
-    await userEvent.click(screen.getByRole("button", { name: "树图" }));
-    expect(screen.getByRole("button", { name: "树图" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "展开树图" })).toHaveAttribute("aria-expanded", "false");
     await userEvent.click(within(retryActionArea).getByRole("button", { hidden: true, name: "重试生成" }));
-    expect(screen.getByRole("button", { name: "草稿" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "展开树图" })).toHaveAttribute("aria-expanded", "false");
 
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenNthCalledWith(

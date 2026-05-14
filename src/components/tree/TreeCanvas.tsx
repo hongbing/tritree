@@ -28,6 +28,7 @@ type TreeCanvasProps = {
   changedDraftNodeIds?: string[];
   comparisonNodeIds?: ComparisonNodeIds | null;
   currentNode: TreeNode | null;
+  display?: "full" | "options" | "tree";
   focusedNodeId?: string | null;
   generationStage?: NodeGenerationStage | null;
   isComparisonMode?: boolean;
@@ -632,6 +633,7 @@ export function TreeCanvas({
   changedDraftNodeIds = [],
   comparisonNodeIds = null,
   currentNode,
+  display = "full",
   focusedNodeId,
   generationStage = null,
   isComparisonMode = false,
@@ -675,6 +677,8 @@ export function TreeCanvas({
     [canvasWidth, inactiveRouteDepth, renderedHistoryCount]
   );
   const isTreeScrollable = branchLayout.width > canvasWidth + 1;
+  const shouldShowTree = display !== "options";
+  const shouldShowBranchControls = display !== "tree";
   const nodeId = currentNode?.id ?? null;
   const isBranchGenerating = Boolean(pendingBranch);
   const graphCurrentNode = isBranchGenerating ? null : currentNode;
@@ -1113,37 +1117,39 @@ export function TreeCanvas({
   ]);
 
   return (
-    <div className={clsx("tree-canvas", isComparisonMode && "tree-canvas--comparison")} ref={containerRef}>
-      <div
-        aria-label="长任务树图浏览区"
-        className={clsx(
-          "tree-viewport",
-          isTreeScrollable && "tree-viewport--scrollable",
-          isDraggingTree && "tree-viewport--dragging"
-        )}
-        data-pan-axis="x"
-        onClickCapture={handleTreeViewportClick}
-        onKeyDown={handleTreeViewportKeyDown}
-        onPointerCancel={finishTreeViewportDrag}
-        onPointerDown={handleTreeViewportPointerDown}
-        onPointerMove={handleTreeViewportPointerMove}
-        onPointerUp={finishTreeViewportDrag}
-        ref={treeViewportRef}
-        role="region"
-        tabIndex={0}
-      >
-        <svg
-          aria-label="AI 内容方向示意图"
-          className="mind-map-svg"
-          height={branchLayout.height}
-          ref={svgRef}
-          role="img"
-          style={{ height: branchLayout.height, minHeight: 300, width: branchLayout.width }}
-          viewBox={`0 0 ${branchLayout.width} ${branchLayout.height}`}
-          width={branchLayout.width}
-        />
-      </div>
-      {isTreeScrollable ? (
+    <div className={clsx("tree-canvas", `tree-canvas--${display}`, isComparisonMode && "tree-canvas--comparison")} ref={containerRef}>
+      {shouldShowTree ? (
+        <div
+          aria-label="长任务树图浏览区"
+          className={clsx(
+            "tree-viewport",
+            isTreeScrollable && "tree-viewport--scrollable",
+            isDraggingTree && "tree-viewport--dragging"
+          )}
+          data-pan-axis="x"
+          onClickCapture={handleTreeViewportClick}
+          onKeyDown={handleTreeViewportKeyDown}
+          onPointerCancel={finishTreeViewportDrag}
+          onPointerDown={handleTreeViewportPointerDown}
+          onPointerMove={handleTreeViewportPointerMove}
+          onPointerUp={finishTreeViewportDrag}
+          ref={treeViewportRef}
+          role="region"
+          tabIndex={0}
+        >
+          <svg
+            aria-label="AI 内容方向示意图"
+            className="mind-map-svg"
+            height={branchLayout.height}
+            ref={svgRef}
+            role="img"
+            style={{ height: branchLayout.height, minHeight: 300, width: branchLayout.width }}
+            viewBox={`0 0 ${branchLayout.width} ${branchLayout.height}`}
+            width={branchLayout.width}
+          />
+        </div>
+      ) : null}
+      {shouldShowTree && isTreeScrollable ? (
         <div aria-label="树图浏览控制" className="tree-scroll-controls" role="group">
           <button
             aria-label="查看较早节点"
@@ -1165,7 +1171,7 @@ export function TreeCanvas({
           </button>
         </div>
       ) : null}
-      {isComparisonMode ? (
+      {shouldShowTree && isComparisonMode ? (
         <div className="tree-comparison-hint" role="status">
           对比模式 · 选择起点
         </div>
@@ -1173,9 +1179,9 @@ export function TreeCanvas({
       {!currentNode && !pendingBranch ? (
         <div className="tree-empty">输入 seed 后开始创作，第一个问题和三个答案会出现在这里。</div>
       ) : null}
-      {isTerminalNode && currentNode && !pendingBranch ? (
+      {shouldShowBranchControls && isTerminalNode && currentNode && !pendingBranch ? (
         <BranchCompletePanel message={currentNode.roundIntent} />
-      ) : currentNode && !pendingBranch ? (
+      ) : shouldShowBranchControls && currentNode && !pendingBranch ? (
         <BranchOptionTray
           isBusy={isBusy}
           onAddCustomOption={onAddCustomOption}
@@ -1235,9 +1241,11 @@ export function BranchOptionTray({
   const primaryOptions = orderedOptions.filter((option) => isPrimaryBranchOptionId(option.id));
   const visiblePrimaryOptionIds = new Set(primaryOptions.slice(0, Math.max(0, visibleCount)).map((option) => option.id));
   const primaryOptionById = new Map(primaryOptions.map((option) => [option.id, option]));
+  const hasAllPrimaryOptions = PRIMARY_BRANCH_OPTION_IDS.every((optionId) => primaryOptionById.has(optionId));
   const primaryAllVisible = PRIMARY_BRANCH_OPTION_IDS.every(
     (optionId) => primaryOptionById.has(optionId) && visiblePrimaryOptionIds.has(optionId)
   );
+  const canRetryMissingOptions = Boolean(onRegenerateOptions && !isBusy && !hasAllPrimaryOptions);
   const trimmedQuestion = question?.trim();
 
   return (
@@ -1278,6 +1286,15 @@ export function BranchOptionTray({
           );
         })}
       </div>
+      {canRetryMissingOptions ? (
+        <div className="branch-option-retry" role="status">
+          <span>选项还没生成出来</span>
+          <button className="option-mode-refresh" onClick={() => onRegenerateOptions?.(optionMode)} type="button">
+            <RefreshCw aria-hidden="true" size={13} strokeWidth={2.4} />
+            <span>重试生成选项</span>
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

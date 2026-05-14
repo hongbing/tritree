@@ -148,17 +148,53 @@ describe("StyleProfileSetup", () => {
     expect(screen.queryByRole("button", { name: "一键生成我的风格" })).not.toBeInTheDocument();
   });
 
+  it("places the skip setup action after the setup method choices", () => {
+    renderSetup();
+
+    const skipButton = screen.getByRole("button", { name: "暂不设置" });
+    const pasteButton = screen.getByRole("button", { name: "粘贴代表作生成" });
+    const manualButton = screen.getByRole("button", { name: "手动填写" });
+
+    expect(pasteButton.compareDocumentPosition(skipButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(manualButton.compareDocumentPosition(skipButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("renders collapsed when a selected personal style exists and can expand", async () => {
     renderSetup({ selectedSkillIds: ["style-1"], skills: [baseSkill] });
 
     expect(screen.getByText("正在使用：我的风格：克制产品随笔")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "代表作 1" })).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "更新" }));
 
     expect(screen.getByText("选择一种方式更新或创建个人风格。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "代表作 1" })).not.toBeInTheDocument();
+  });
+
+  it("uses a subtle update action after a personal style has been configured", () => {
+    renderSetup({ selectedSkillIds: ["style-1"], skills: [baseSkill] });
+
+    const updateButton = screen.getByRole("button", { name: "更新" });
+
+    expect(updateButton).toHaveClass("style-profile-setup__update-button");
+    expect(updateButton).not.toHaveClass("secondary-button");
+  });
+
+  it("collapses an inline configured style to a compact summary without a visible update action", async () => {
+    renderSetup({ isInline: true, selectedSkillIds: ["style-1"], skills: [baseSkill] });
+
+    const compactButton = screen.getByRole("button", { name: "展开我的风格设置：克制产品随笔" });
+
+    expect(compactButton).toHaveClass("style-profile-setup__compact-button");
+    expect(screen.getByText("克制产品随笔")).toBeInTheDocument();
+    expect(screen.queryByText("正在使用：我的风格：克制产品随笔")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "更新" })).not.toBeInTheDocument();
+
+    await userEvent.click(compactButton);
+
+    expect(screen.getByText("选择一种方式更新或创建个人风格。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
   });
 
   it("renders collapsed when a personal style exists but is not selected", async () => {
@@ -167,7 +203,7 @@ describe("StyleProfileSetup", () => {
     expect(screen.getByText("已有个人风格：我的风格：克制产品随笔")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "粘贴代表作生成" })).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "更新" }));
 
     expect(screen.getByText("选择一种方式更新或创建个人风格。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
@@ -204,7 +240,7 @@ describe("StyleProfileSetup", () => {
   it("keeps a manually expanded sample editor open across parent skills refreshes", async () => {
     const { rerender } = renderSetup({ selectedSkillIds: ["style-1"], skills: [baseSkill] });
 
-    await userEvent.click(screen.getByRole("button", { name: "设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "更新" }));
     await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
     await userEvent.type(screen.getByRole("textbox", { name: "代表作 1" }), "这一段代表我的表达习惯。");
 
@@ -432,7 +468,7 @@ describe("StyleProfileSetup", () => {
       skills: [baseSkill]
     });
 
-    await userEvent.click(screen.getByRole("button", { name: "设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "更新" }));
     await userEvent.click(screen.getByRole("button", { name: "一键生成我的风格" }));
     await screen.findByRole("textbox", { name: "风格名称" });
 
@@ -475,7 +511,7 @@ describe("StyleProfileSetup", () => {
       skills: [baseSkill, alternateSkill]
     });
 
-    await userEvent.click(screen.getByRole("button", { name: "设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "更新" }));
     await userEvent.click(screen.getByRole("button", { name: "一键生成我的风格" }));
     await screen.findByRole("textbox", { name: "风格名称" });
 
@@ -665,7 +701,7 @@ describe("StyleProfileSetup", () => {
 
     renderSetup({ onCreateSkill, onUpdateSkill, selectedSkillIds: [], skills: [baseSkill] });
 
-    await userEvent.click(screen.getByRole("button", { name: "设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "更新" }));
     await userEvent.click(screen.getByRole("button", { name: "手动填写" }));
 
     expect(screen.getByText("我的风格：")).toBeInTheDocument();

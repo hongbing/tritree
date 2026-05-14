@@ -34,6 +34,7 @@ const MAX_REPRESENTATIVE_SAMPLE_COUNT = 5;
 export function StyleProfileSetup({
   disabled,
   externalStyleGenerationAvailable,
+  isInline = false,
   onCreateSkill,
   onSavedSkill,
   onUpdateSkill,
@@ -42,6 +43,7 @@ export function StyleProfileSetup({
 }: {
   disabled: boolean;
   externalStyleGenerationAvailable: boolean;
+  isInline?: boolean;
   onCreateSkill: (input: SkillUpsert) => Promise<Skill | null>;
   onSavedSkill: (skill: Skill) => void;
   onUpdateSkill: (skillId: string, input: SkillUpsert) => Promise<Skill | null>;
@@ -67,6 +69,8 @@ export function StyleProfileSetup({
   const [updateSkillId, setUpdateSkillId] = useState(selectedPersonalStyle?.id ?? personalStyleSkills[0]?.id ?? "");
   const [hasUserExpanded, setHasUserExpanded] = useState(false);
   const isBusy = disabled || isGenerating || isSaving;
+  const shouldShowInlineCompactStyle = Boolean(isInline && hasPersonalStyles && !isExpanded && collapsedPersonalStyle);
+  const inlineCompactStyleTitle = collapsedPersonalStyle ? compactPersonalStyleTitle(collapsedPersonalStyle.title) : "";
   const hasActiveWork =
     Boolean(draft) ||
     sampleTexts.some((sample) => sample.trim().length > 0) ||
@@ -287,33 +291,56 @@ export function StyleProfileSetup({
   return (
     <section
       aria-label="我的风格"
-      className={`style-profile-setup${isExpanded ? " style-profile-setup--expanded" : ""}`}
+      className={[
+        "style-profile-setup",
+        isExpanded ? "style-profile-setup--expanded" : "",
+        isInline ? "style-profile-setup--inline" : "",
+        hasPersonalStyles ? "style-profile-setup--set" : "style-profile-setup--unset"
+      ]
+        .filter(Boolean)
+        .join(" ")}
     >
-      <header className="style-profile-setup__header">
-        <div>
-          <p className="eyebrow">我的风格</p>
-          {selectedPersonalStyle && !isExpanded ? (
-            <p className="style-profile-setup__summary">正在使用：{selectedPersonalStyle.title}</p>
-          ) : collapsedPersonalStyle && !isExpanded ? (
-            <p className="style-profile-setup__summary">已有个人风格：{collapsedPersonalStyle.title}</p>
-          ) : hasPersonalStyles ? (
-            <p className="style-profile-setup__summary">选择一种方式更新或创建个人风格。</p>
-          ) : (
-            <p className="style-profile-setup__summary">
-              你还没有配置个人风格。建议先设置，让 Tritree 优先按你的表达习惯生成内容。
-            </p>
-          )}
-        </div>
+      {shouldShowInlineCompactStyle ? (
         <button
           aria-expanded={isExpanded}
-          className="secondary-button"
+          aria-label={`展开我的风格设置：${inlineCompactStyleTitle}`}
+          className="style-profile-setup__compact-button"
           disabled={isBusy}
           onClick={toggleExpanded}
           type="button"
         >
-          {isExpanded ? "暂不设置" : "设置"}
+          <span className="style-profile-setup__compact-label">我的风格</span>
+          <span className="style-profile-setup__compact-value">{inlineCompactStyleTitle}</span>
         </button>
-      </header>
+      ) : (
+        <header className="style-profile-setup__header">
+          <div>
+            <p className="eyebrow">我的风格</p>
+            {selectedPersonalStyle && !isExpanded ? (
+              <p className="style-profile-setup__summary">正在使用：{selectedPersonalStyle.title}</p>
+            ) : collapsedPersonalStyle && !isExpanded ? (
+              <p className="style-profile-setup__summary">已有个人风格：{collapsedPersonalStyle.title}</p>
+            ) : hasPersonalStyles ? (
+              <p className="style-profile-setup__summary">选择一种方式更新或创建个人风格。</p>
+            ) : (
+              <p className="style-profile-setup__summary">
+                你还没有配置个人风格。建议先设置，让 Tritree 优先按你的表达习惯生成内容。
+              </p>
+            )}
+          </div>
+          {!isExpanded ? (
+            <button
+              aria-expanded={isExpanded}
+              className={hasPersonalStyles ? "style-profile-setup__update-button" : "secondary-button"}
+              disabled={isBusy}
+              onClick={toggleExpanded}
+              type="button"
+            >
+              {hasPersonalStyles ? "更新" : "设置"}
+            </button>
+          ) : null}
+        </header>
+      )}
 
       {isExpanded ? (
         <div className="style-profile-setup__body">
@@ -575,6 +602,18 @@ export function StyleProfileSetup({
               </button>
             </section>
           ) : null}
+
+          <div className="style-profile-setup__skip">
+            <button
+              aria-expanded={isExpanded}
+              className="secondary-button"
+              disabled={isBusy}
+              onClick={toggleExpanded}
+              type="button"
+            >
+              暂不设置
+            </button>
+          </div>
         </div>
       ) : null}
     </section>
@@ -589,6 +628,10 @@ function editablePersonalStyleTitle(title: string) {
 function personalStyleTitleFromEditableValue(value: string) {
   const trimmed = value.replace(new RegExp(`^${escapeRegExp(MY_STYLE_TITLE_PREFIX)}\\s*`), "");
   return `${MY_STYLE_TITLE_PREFIX}${trimmed}`;
+}
+
+function compactPersonalStyleTitle(title: string) {
+  return editablePersonalStyleTitle(title).trim() || title.trim();
 }
 
 function normalizedSampleTexts(sampleTexts: string[]) {

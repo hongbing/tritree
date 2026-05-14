@@ -221,6 +221,26 @@ describe("TreeCanvas", () => {
     expect(screen.queryByRole("group", { name: "方向控制" })).not.toBeInTheDocument();
   });
 
+  it("offers a retry action when option generation is idle but still missing choices", () => {
+    const onRegenerateOptions = vi.fn();
+    render(
+      <BranchOptionTray
+        isBusy={false}
+        onChoose={vi.fn()}
+        onRegenerateOptions={onRegenerateOptions}
+        options={[]}
+        pendingChoice={null}
+        visibleCount={0}
+      />
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("选项还没生成出来");
+
+    fireEvent.click(screen.getByRole("button", { name: "重试生成选项" }));
+
+    expect(onRegenerateOptions).toHaveBeenCalledWith("balanced");
+  });
+
   it("keeps full option titles in the three-choice cards", () => {
     render(
       <BranchOptionTray
@@ -1082,6 +1102,63 @@ describe("TreeCanvas", () => {
     expect(mobileRule).toContain("grid-template-columns: 1fr");
     expect(mobileRule).toContain(".branch-option-tray__controls > .branch-side-action");
     expect(mobileRule).toContain("margin-left: 0");
+  });
+
+  it("lets the full mobile options question expand the page height", () => {
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    const mobileWorkspaceRule = css.match(/@media \(max-width: 980px\)\s*\{(?<body>[\s\S]+?)@media \(max-width: 640px\)/)
+      ?.groups?.body ?? "";
+    const trayRule =
+      mobileWorkspaceRule.match(/\.tree-canvas--options \.branch-option-tray\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const questionRule =
+      mobileWorkspaceRule.match(/\.tree-canvas--options \.branch-option-question\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const questionTextRule =
+      mobileWorkspaceRule.match(/\.tree-canvas--options \.branch-option-question__text\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const mainRule =
+      mobileWorkspaceRule.match(/\.tree-canvas--options \.branch-option-main\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const sideFormRule =
+      mobileWorkspaceRule.match(/\.tree-canvas--options \.branch-side-form\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+    expect(trayRule).toContain("overflow: visible");
+    expect(questionRule).toContain("height: auto");
+    expect(questionRule).toContain("max-height: none");
+    expect(questionRule).toContain("overflow: visible");
+    expect(questionRule).not.toContain("overflow: auto");
+    expect(questionTextRule).not.toContain("-webkit-line-clamp");
+    expect(mainRule).toContain("overflow: visible");
+    expect(mainRule).toContain("overscroll-behavior: auto");
+    expect(sideFormRule).toContain("position: static");
+    expect(sideFormRule).toContain("overflow: visible");
+    expect(mobileWorkspaceRule).not.toContain("-webkit-box-orient");
+  });
+
+  it("lets vertical swipes inside the expanded mobile tree continue scrolling the page", () => {
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    const mobileWorkspaceRule = css.match(/@media \(max-width: 980px\)\s*\{(?<body>[\s\S]+?)@media \(max-width: 640px\)/)
+      ?.groups?.body ?? "";
+    const mobileTreeViewportRule =
+      mobileWorkspaceRule.match(/\.tree-canvas--tree \.tree-viewport\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+    expect(mobileTreeViewportRule).toContain("overflow-y: hidden");
+    expect(mobileTreeViewportRule).toContain("overscroll-behavior-x: contain");
+    expect(mobileTreeViewportRule).toContain("overscroll-behavior-y: auto");
+    expect(mobileTreeViewportRule).toContain("touch-action: pan-y");
+  });
+
+  it("keeps the expanded mobile tree canvas compact on narrow screens", () => {
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    const narrowMobileRule = css.match(/@media \(max-width: 640px\)\s*\{(?<body>[\s\S]+)\}\s*$/)?.groups?.body ?? "";
+    const treeCanvasRule = narrowMobileRule.match(/\.tree-canvas\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const expandedTreeRegionRule =
+      narrowMobileRule.match(/\.mobile-panel--tree > \.canvas-region\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const treeModeRule = narrowMobileRule.match(/\.tree-canvas--tree\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const optionsModeRule = narrowMobileRule.match(/\.tree-canvas--options\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+    expect(treeCanvasRule).toContain("min-height: 580px");
+    expect(expandedTreeRegionRule).toContain("grid-template-rows: auto");
+    expect(treeModeRule).toContain("min-height: 320px");
+    expect(treeModeRule).toContain("grid-template-rows: minmax(300px, auto)");
+    expect(optionsModeRule).toContain("min-height: 0");
   });
 
   it("keeps the More Directions editor inside the bottom tray bounds", () => {

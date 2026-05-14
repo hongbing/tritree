@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { signOut } from "next-auth/react";
-import { FileText, LogOut, Plus, RotateCcw, UsersRound } from "lucide-react";
+import { ChevronDown, ChevronUp, FileText, GitBranch, LogOut, Plus, RotateCcw, UsersRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   SessionStateSchema,
@@ -38,7 +38,6 @@ import { apiPath, appPath } from "@/lib/web-base-path";
 
 type LoadState = "loading" | "root" | "ready" | "error";
 type MobilePanel = "tree" | "draft";
-type MobilePanelUnreadState = Record<MobilePanel, boolean>;
 type DraftComparisonSelection = { fromNodeId: string | null; toNodeId: string | null };
 type DraftComparisonEntry = { nodeId: string; label: string; draft: Draft };
 type NodeGenerationStage = { nodeId: string; stage: "draft" | "options" };
@@ -99,7 +98,6 @@ type OptionsStreamEvent =
   | { type: "error"; error: string };
 
 const MOBILE_LAYOUT_QUERY = "(max-width: 980px)";
-const EMPTY_MOBILE_UNREAD: MobilePanelUnreadState = { tree: false, draft: false };
 
 const preferenceText: Record<string, string> = {
   Product: "产品",
@@ -508,14 +506,16 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   const [streamingOptions, setStreamingOptions] = useState<StreamingOptionsEntry | null>(null);
   const [streamingThinking, setStreamingThinking] = useState<StreamingThinkingEntry | null>(null);
   const [generatedDiffNodeId, setGeneratedDiffNodeId] = useState<string | null>(null);
-  const [activeMobilePanel, setActiveMobilePanel] = useState<MobilePanel>("tree");
-  const [mobileUnreadPanels, setMobileUnreadPanels] = useState<MobilePanelUnreadState>(EMPTY_MOBILE_UNREAD);
+  const [isMobileTreeExpanded, setIsMobileTreeExpanded] = useState(false);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
-  const activeMobilePanelRef = useRef<MobilePanel>("tree");
-  const isMobileLayoutRef = useRef(false);
-  const mobileGenerationPanelOverrideRef = useRef(false);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const loadRequestIdRef = useRef(0);
+  const mobileDraftRegionRef = useRef<HTMLDivElement>(null);
+  const wasMobileDraftGenerationActiveRef = useRef(false);
   const canImportSkills = currentUser?.isAdmin === true;
+  const isMobileDraftGenerationActive = Boolean(
+    isMobileLayout && generationStage?.nodeId && generationStage.stage === "draft"
+  );
 
   useEffect(() => {
     const requestId = loadRequestIdRef.current + 1;
@@ -548,24 +548,15 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   }, []);
 
   useEffect(() => {
-    isMobileLayoutRef.current = isMobileLayout;
     if (!isMobileLayout) {
-      setMobileUnreadPanels((panels) => (panels.tree || panels.draft ? EMPTY_MOBILE_UNREAD : panels));
+      setIsMobileTreeExpanded(false);
+      setIsAccountMenuOpen(false);
     }
   }, [isMobileLayout]);
 
   useEffect(() => {
-    activeMobilePanelRef.current = activeMobilePanel;
-    setMobileUnreadPanels((panels) =>
-      panels[activeMobilePanel] ? { ...panels, [activeMobilePanel]: false } : panels
-    );
-  }, [activeMobilePanel]);
-
-  useEffect(() => {
-    if (!isBusy && !generationStage) {
-      mobileGenerationPanelOverrideRef.current = false;
-    }
-  }, [generationStage, isBusy]);
+    setIsAccountMenuOpen(false);
+  }, [currentUser?.id]);
 
   useEffect(() => {
     if (sessionState?.currentNode?.id) {
@@ -575,48 +566,23 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     }
   }, [sessionState?.currentNode?.id]);
 
-  function mobilePanelClassName(panel: MobilePanel) {
-    return `mobile-panel mobile-panel--${panel}${activeMobilePanel === panel ? " mobile-panel--active" : ""}`;
-  }
-
-  function markMobilePanelUnread(panel: MobilePanel) {
-    if (!isMobileLayoutRef.current || activeMobilePanelRef.current === panel) return;
-    setMobileUnreadPanels((panels) => (panels[panel] ? panels : { ...panels, [panel]: true }));
-  }
-
-  function clearMobilePanelUnread(panel: MobilePanel) {
-    setMobileUnreadPanels((panels) => (panels[panel] ? { ...panels, [panel]: false } : panels));
-  }
-
-  function showMobilePanel(panel: MobilePanel) {
-    if (isBusy || generationStage) {
-      mobileGenerationPanelOverrideRef.current = true;
-    }
-    activeMobilePanelRef.current = panel;
-    setActiveMobilePanel(panel);
-    clearMobilePanelUnread(panel);
-  }
-
-  function showMobileDraftForGeneration() {
-    if (!isMobileLayout) return;
-    if (mobileGenerationPanelOverrideRef.current) {
-      markMobilePanelUnread("draft");
+  useEffect(() => {
+    if (!isMobileDraftGenerationActive) {
+      wasMobileDraftGenerationActiveRef.current = false;
       return;
     }
-    activeMobilePanelRef.current = "draft";
-    setActiveMobilePanel("draft");
-    clearMobilePanelUnread("draft");
-  }
 
-  function showMobileTreeForOptionsGeneration() {
-    if (!isMobileLayoutRef.current) return;
-    if (mobileGenerationPanelOverrideRef.current) {
-      markMobilePanelUnread("tree");
-      return;
+    if (wasMobileDraftGenerationActiveRef.current) return;
+
+    wasMobileDraftGenerationActiveRef.current = true;
+    const draftRegion = mobileDraftRegionRef.current;
+    if (typeof draftRegion?.scrollIntoView === "function") {
+      draftRegion.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-    activeMobilePanelRef.current = "tree";
-    setActiveMobilePanel("tree");
-    clearMobilePanelUnread("tree");
+  }, [isMobileDraftGenerationActive]);
+
+  function mobilePanelClassName(panel: MobilePanel, extraClassName?: string) {
+    return `mobile-panel mobile-panel--${panel}${extraClassName ? ` ${extraClassName}` : ""}`;
   }
 
   function isCurrentLoadRequest(requestId: number) {
@@ -932,7 +898,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     if (!sessionState?.currentNode) return;
     const trimmedNote = note?.trim();
     const customOptionForChoice = isCustomBranchOptionId(optionId) ? customOptionOverride ?? customOption : null;
-    showMobileDraftForGeneration();
     setPendingChoice(optionId);
     setGeneratedDiffNodeId(null);
     setIsBusy(true);
@@ -982,7 +947,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     if (!sessionState) return;
     const trimmedNote = note?.trim();
     const customOptionForBranch = isCustomBranchOptionId(optionId) ? customOptionOverride ?? customOption : null;
-    showMobileDraftForGeneration();
     setPendingBranch({ nodeId, optionId });
     setGeneratedDiffNodeId(null);
     setViewNodeId(nodeId);
@@ -1032,7 +996,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
 
     setGenerationStage({ nodeId, stage: "draft" });
     setStreamingThinking(null);
-    markMobilePanelUnread("draft");
     const requestOptions = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1072,7 +1035,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
 
     setGenerationStage({ nodeId: value.nodeId, stage: "options" });
     setStreamingOptions({ nodeId: value.nodeId, roundIntent: value.roundIntent ?? null, options: value.options });
-    markMobilePanelUnread("tree");
     return true;
   }
 
@@ -1091,7 +1053,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       stage: "options",
       text: value.text
     });
-    markMobilePanelUnread("tree");
     return true;
   }
 
@@ -1103,7 +1064,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     let receivedOptions = false;
     let receivedThinking = false;
     let receivedDone = false;
-    let streamRoutedToOptions = false;
     let streamError: string | null = null;
     const completeOptionPreviewNodeIds = new Set<string>();
     const decoder = new TextDecoder();
@@ -1119,7 +1079,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
 
       if (value.type === "draft") {
         setStreamingDraft({ nodeId, draft: value.draft, streamingField: value.streamingField ?? null });
-        markMobilePanelUnread("draft");
         receivedDraft = true;
         return;
       }
@@ -1127,22 +1086,18 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       if (value.type === "options") {
         const didApplyOptions = applyStreamingOptionsPreview(value, completeOptionPreviewNodeIds);
         setStreamingThinking(null);
-        showMobileTreeForOptionsGeneration();
         receivedOptions = didApplyOptions;
-        streamRoutedToOptions = true;
         return;
       }
 
       if (value.type === "thinking") {
         setStreamingThinking({ nodeId: value.nodeId ?? nodeId, stage: "draft", text: value.text });
-        markMobilePanelUnread("draft");
         receivedThinking = true;
         return;
       }
 
       if (value.type === "done") {
         doneState = value.state;
-        markMobilePanelUnread(streamRoutedToOptions ? "tree" : "draft");
         receivedDone = true;
         setStreamingThinking(null);
         return;
@@ -1189,7 +1144,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setGenerationStage({ nodeId, stage: "options" });
     setStreamingOptions({ nodeId, options: [] });
     setStreamingThinking(null);
-    markMobilePanelUnread("tree");
     const response = await fetch(apiPath(`/api/sessions/${state.session.id}/options`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1243,7 +1197,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       if (value.type === "done") {
         doneState = value.state;
         receivedDone = true;
-        markMobilePanelUnread("tree");
         setGenerationStage(null);
         setStreamingOptions(null);
         setStreamingThinking(null);
@@ -1291,7 +1244,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       setSessionState(nextState);
       setViewNodeId(generatedNodeId ?? null);
       setGeneratedDiffNodeId(hasGeneratedDraft ? generatedNodeId ?? null : null);
-      markMobilePanelUnread(hasGeneratedDraft ? "draft" : "tree");
       await allowDraftRender();
     }
 
@@ -1568,6 +1520,16 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       directDraftForView &&
       activeViewNode?.options.length === 3
   );
+  const canRetryMissingOptions = Boolean(
+    sessionState &&
+      activeViewNodeId &&
+      isViewingCurrentNode &&
+      directDraftForView &&
+      !activeViewNode?.isTerminal &&
+      needsNodeOptions(sessionState, activeViewNodeId) &&
+      !isBusy
+  );
+  const canRefreshOptions = canRegenerateOptions || canRetryMissingOptions;
   const streamedActiveViewNode = activeViewNode ? withStreamingOptions(activeViewNode, streamingOptions) : null;
   const currentNodeForCanvas = streamedActiveViewNode ? withCustomOption(streamedActiveViewNode, customOption) : null;
   const activeThinking =
@@ -1587,6 +1549,14 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
         ? "thinking"
         : "preparing"
     : undefined;
+  const isMobileDraftModuleGenerating = isMobileLayout && liveDraftGenerationStage === "draft";
+  const isMobileOptionsModuleGenerating = isMobileLayout && liveDraftGenerationStage === "options";
+  const mobileDraftRegionClassName = `mobile-draft-region${
+    isMobileDraftModuleGenerating ? " mobile-module--generating mobile-draft-region--generating" : ""
+  }`;
+  const mobileOptionsRegionClassName = `mobile-options-region${
+    isMobileOptionsModuleGenerating ? " mobile-module--generating mobile-options-region--generating" : ""
+  }`;
   const enabledSkillIds = sessionState?.enabledSkillIds ?? [];
   const enabledSkills: Skill[] = (sessionState?.enabledSkills ?? []).map((skill) => ({
     ...skill,
@@ -1650,7 +1620,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   async function retryDraftGeneration() {
     if (!sessionState || !activeViewNodeId || isBusy) return;
 
-    showMobileDraftForGeneration();
     setGeneratedDiffNodeId(null);
     setStreamingDraft(null);
     setStreamingOptions(null);
@@ -1673,6 +1642,33 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     }
   }
 
+  function renderTreeCanvas(display: "full" | "options" | "tree") {
+    return (
+      <TreeCanvas
+        changedDraftNodeIds={changedDraftNodeIds}
+        comparisonNodeIds={draftComparison}
+        currentNode={currentNodeForCanvas}
+        display={display}
+        focusedNodeId={activeViewNodeId}
+        generationStage={generationStage}
+        isComparisonMode={Boolean(draftComparison)}
+        isBusy={treeChoicesDisabled}
+        isMobileLayout={isMobileLayout}
+        onActivateBranch={activateHistoricalBranch}
+        onAddCustomOption={activeViewNodeId ? addAndChooseCustomOption : undefined}
+        onChoose={chooseFromViewedNode}
+        onRegenerateOptions={canRefreshOptions ? regenerateOptionsForCurrentNode : undefined}
+        onSelectComparisonNode={selectDraftComparisonNode}
+        onViewNode={(nodeId) => void viewNode(nodeId)}
+        pendingBranch={pendingBranch}
+        pendingChoice={pendingChoice}
+        selectedPath={sessionState?.selectedPath ?? []}
+        skills={enabledSkills}
+        treeNodes={sessionState?.treeNodes}
+      />
+    );
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -1684,17 +1680,48 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
         <div className="topbar-actions">
           {currentUser ? (
             <div className="account-controls" role="group" aria-label="账号操作" title={currentUser.username}>
-              <span className="account-controls__name">{currentUser.displayName}</span>
-              {currentUser.isAdmin ? (
-                <Link className="account-controls__admin-link" href="/admin/users">
-                  <UsersRound aria-hidden="true" size={16} strokeWidth={2.25} />
-                  <span>用户管理</span>
-                </Link>
-              ) : null}
-              <button onClick={() => signOut({ callbackUrl: appPath("/login") })} type="button">
-                <LogOut aria-hidden="true" size={15} strokeWidth={2.25} />
-                <span>退出登录</span>
-              </button>
+              {isMobileLayout ? (
+                <>
+                  <button
+                    aria-expanded={isAccountMenuOpen}
+                    aria-label={`账号：${currentUser.displayName}`}
+                    className="account-controls__menu-button"
+                    onClick={() => setIsAccountMenuOpen((isOpen) => !isOpen)}
+                    type="button"
+                  >
+                    <span>{currentUser.displayName}</span>
+                    <ChevronDown aria-hidden="true" size={14} strokeWidth={2.4} />
+                  </button>
+                  {isAccountMenuOpen ? (
+                    <div aria-label="账号菜单" className="account-controls__menu" role="group">
+                      {currentUser.isAdmin ? (
+                        <Link className="account-controls__admin-link" href="/admin/users">
+                          <UsersRound aria-hidden="true" size={16} strokeWidth={2.25} />
+                          <span>用户管理</span>
+                        </Link>
+                      ) : null}
+                      <button onClick={() => signOut({ callbackUrl: appPath("/login") })} type="button">
+                        <LogOut aria-hidden="true" size={15} strokeWidth={2.25} />
+                        <span>退出登录</span>
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <span className="account-controls__name">{currentUser.displayName}</span>
+                  {currentUser.isAdmin ? (
+                    <Link className="account-controls__admin-link" href="/admin/users">
+                      <UsersRound aria-hidden="true" size={16} strokeWidth={2.25} />
+                      <span>用户管理</span>
+                    </Link>
+                  ) : null}
+                  <button onClick={() => signOut({ callbackUrl: appPath("/login") })} type="button">
+                    <LogOut aria-hidden="true" size={15} strokeWidth={2.25} />
+                    <span>退出登录</span>
+                  </button>
+                </>
+              )}
             </div>
           ) : null}
           <div className="workspace-actions" role="group" aria-label="作品操作">
@@ -1721,32 +1748,20 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
         </div>
       </header>
       {isMobileLayout ? (
-        <div aria-label="移动端主面板" className="mobile-panel-switcher" role="group">
+        <div aria-label="移动端树图控制" className="mobile-tree-toggle" role="group">
           <button
-            aria-pressed={activeMobilePanel === "tree"}
-            className="mobile-panel-tab"
-            onClick={() => showMobilePanel("tree")}
+            aria-expanded={isMobileTreeExpanded}
+            className="mobile-tree-toggle__button"
+            onClick={() => setIsMobileTreeExpanded((expanded) => !expanded)}
             type="button"
           >
-            <span>树图</span>
-            {mobileUnreadPanels.tree ? (
-              <span aria-hidden="true" className="mobile-panel-tab__badge">
-                新
-              </span>
-            ) : null}
-          </button>
-          <button
-            aria-pressed={activeMobilePanel === "draft"}
-            className="mobile-panel-tab"
-            onClick={() => showMobilePanel("draft")}
-            type="button"
-          >
-            <span>草稿</span>
-            {mobileUnreadPanels.draft ? (
-              <span aria-hidden="true" className="mobile-panel-tab__badge">
-                新
-              </span>
-            ) : null}
+            <GitBranch aria-hidden="true" size={16} strokeWidth={2.4} />
+            <span>{isMobileTreeExpanded ? "收起树图" : "展开树图"}</span>
+            {isMobileTreeExpanded ? (
+              <ChevronUp aria-hidden="true" size={15} strokeWidth={2.5} />
+            ) : (
+              <ChevronDown aria-hidden="true" size={15} strokeWidth={2.5} />
+            )}
           </button>
         </div>
       ) : null}
@@ -1762,115 +1777,108 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           skills={skills}
         />
       ) : null}
-      <div
-        aria-hidden={isMobileLayout && activeMobilePanel !== "tree" ? "true" : undefined}
-        className={mobilePanelClassName("tree")}
-      >
-        <section className="canvas-region">
-          <TreeCanvas
-            changedDraftNodeIds={changedDraftNodeIds}
-            comparisonNodeIds={draftComparison}
-            currentNode={currentNodeForCanvas}
-            focusedNodeId={activeViewNodeId}
-            generationStage={generationStage}
-            isComparisonMode={Boolean(draftComparison)}
-            isBusy={treeChoicesDisabled}
-            isMobileLayout={isMobileLayout}
-            onActivateBranch={activateHistoricalBranch}
-            onAddCustomOption={activeViewNodeId ? addAndChooseCustomOption : undefined}
-            onChoose={chooseFromViewedNode}
-            onRegenerateOptions={canRegenerateOptions ? regenerateOptionsForCurrentNode : undefined}
-            onSelectComparisonNode={selectDraftComparisonNode}
-            onViewNode={(nodeId) => void viewNode(nodeId)}
-            pendingBranch={pendingBranch}
-            pendingChoice={pendingChoice}
-            selectedPath={sessionState?.selectedPath ?? []}
-            skills={enabledSkills}
-            treeNodes={sessionState?.treeNodes}
-          />
-        </section>
-      </div>
-      <div
-        aria-hidden={isMobileLayout && activeMobilePanel !== "draft" ? "true" : undefined}
-        className={mobilePanelClassName("draft")}
-      >
-        <LiveDraft
-          artifactTypeId={sessionState?.session.artifactTypeId ?? DEFAULT_ARTIFACT_TYPE_ID}
-          canCompareDrafts={comparisonEntries.length >= 2}
-          comparisonDrafts={comparisonDrafts}
-          comparisonLabels={comparisonLabels}
-          comparisonSelectionCount={comparisonSelectionCount}
-          draft={viewedDraft}
-          emptyStateActions={
-            canRetryDraftGeneration ? (
-              <button className="secondary-button" onClick={() => void retryDraftGeneration()} type="button">
-                重试生成
-              </button>
-            ) : null
-          }
-          headerActions={
-            <>
-              <button
-                aria-expanded={isSkillPanelOpen}
-                className="draft-skill-button"
-                disabled={isBusy || !sessionState}
-                onClick={() => {
-                  setIsSkillLibraryOpen(false);
-                  setIsSkillPanelOpen((open) => !open);
-                }}
-                type="button"
-              >
-                {enabledSkillIds.length} 个技能
-              </button>
-            </>
-          }
-          headerPanel={
-            isSkillPanelOpen && sessionState ? (
-              <aside aria-label="本作品技能" className="draft-skill-panel">
-                <header className="draft-skill-panel__header">
-                  <div>
-                    <p className="eyebrow">本作品技能</p>
-                    <p className="draft-skill-panel__summary">已启用 {enabledSkillIds.length} 个</p>
-                  </div>
-                  <button
-                    className="secondary-button"
+      {!isMobileLayout || isMobileTreeExpanded ? (
+        <div
+          aria-label={isMobileLayout ? "移动端树图" : undefined}
+          className={mobilePanelClassName("tree", isMobileLayout ? "mobile-panel--expanded" : undefined)}
+          role={isMobileLayout ? "region" : undefined}
+        >
+          <section className="canvas-region">{renderTreeCanvas(isMobileLayout ? "tree" : "full")}</section>
+        </div>
+      ) : null}
+      <div className={mobilePanelClassName("draft", isMobileLayout ? "mobile-panel--unified" : undefined)}>
+        <div
+          aria-busy={isMobileDraftModuleGenerating}
+          className={mobileDraftRegionClassName}
+          ref={mobileDraftRegionRef}
+        >
+          <LiveDraft
+            artifactTypeId={sessionState?.session.artifactTypeId ?? DEFAULT_ARTIFACT_TYPE_ID}
+            canCompareDrafts={comparisonEntries.length >= 2}
+            comparisonDrafts={comparisonDrafts}
+            comparisonLabels={comparisonLabels}
+            comparisonSelectionCount={comparisonSelectionCount}
+            draft={viewedDraft}
+            emptyStateActions={
+              canRetryDraftGeneration ? (
+                <button className="secondary-button" onClick={() => void retryDraftGeneration()} type="button">
+                  重试生成
+                </button>
+              ) : null
+            }
+            headerActions={
+              <>
+                <button
+                  aria-expanded={isSkillPanelOpen}
+                  className="draft-skill-button"
+                  disabled={isBusy || !sessionState}
+                  onClick={() => {
+                    setIsSkillLibraryOpen(false);
+                    setIsSkillPanelOpen((open) => !open);
+                  }}
+                  type="button"
+                >
+                  {enabledSkillIds.length} 个技能
+                </button>
+              </>
+            }
+            headerPanel={
+              isSkillPanelOpen && sessionState ? (
+                <aside aria-label="本作品技能" className="draft-skill-panel">
+                  <header className="draft-skill-panel__header">
+                    <div>
+                      <p className="eyebrow">本作品技能</p>
+                      <p className="draft-skill-panel__summary">已启用 {enabledSkillIds.length} 个</p>
+                    </div>
+                    <button
+                      className="secondary-button"
+                      disabled={isBusy}
+                      onClick={() => {
+                        setIsSkillPanelOpen(false);
+                        setIsSkillLibraryOpen(true);
+                      }}
+                      type="button"
+                    >
+                      管理技能库
+                    </button>
+                  </header>
+                  <SkillPicker
                     disabled={isBusy}
-                    onClick={() => {
-                      setIsSkillPanelOpen(false);
-                      setIsSkillLibraryOpen(true);
-                    }}
-                    type="button"
-                  >
-                    管理技能库
-                  </button>
-                </header>
-                <SkillPicker
-                  disabled={isBusy}
-                  onChange={(ids) => void saveSessionSkills(ids)}
-                  selectedSkillIds={enabledSkillIds}
-                  skills={skills}
-                />
-              </aside>
-            ) : null
-          }
-          generationPhase={liveDraftGenerationPhase}
-          generationStage={liveDraftGenerationStage}
-          isBusy={isBusy}
-          isComparisonMode={Boolean(draftComparison)}
-          isEditable={Boolean(activeViewNodeId)}
-          isLiveDiff={shouldShowGeneratedDiff}
-          isLiveDiffStreaming={isLiveDraftStreaming}
-          liveDiffStreamingField={liveDiffStreamingField}
-          mode={isViewingCurrentNode ? "current" : "history"}
-          onCancelComparison={cancelDraftComparison}
-          onDismissLiveDiff={() => setGeneratedDiffNodeId(null)}
-          onRewriteSelection={rewriteDraftSelection}
-          onSave={saveDraft}
-          onStartComparison={startDraftComparison}
-          previousDraft={previousDraft}
-          publishPackage={null}
-          thinkingText={activeThinking?.text}
-        />
+                    onChange={(ids) => void saveSessionSkills(ids)}
+                    selectedSkillIds={enabledSkillIds}
+                    skills={skills}
+                  />
+                </aside>
+              ) : null
+            }
+            generationPhase={liveDraftGenerationPhase}
+            generationStage={liveDraftGenerationStage}
+            isBusy={isBusy}
+            isComparisonMode={Boolean(draftComparison)}
+            isEditable={Boolean(activeViewNodeId)}
+            isLiveDiff={shouldShowGeneratedDiff}
+            isLiveDiffStreaming={isLiveDraftStreaming}
+            liveDiffStreamingField={liveDiffStreamingField}
+            mode={isViewingCurrentNode ? "current" : "history"}
+            onCancelComparison={cancelDraftComparison}
+            onDismissLiveDiff={() => setGeneratedDiffNodeId(null)}
+            onRewriteSelection={rewriteDraftSelection}
+            onSave={saveDraft}
+            onStartComparison={startDraftComparison}
+            previousDraft={previousDraft}
+            publishPackage={null}
+            thinkingText={activeThinking?.text}
+          />
+        </div>
+        {isMobileLayout ? (
+          <section
+            aria-busy={isMobileOptionsModuleGenerating}
+            aria-label="当前问题和选项"
+            className={mobileOptionsRegionClassName}
+          >
+            {renderTreeCanvas("options")}
+          </section>
+        ) : null}
       </div>
       {message ? (
         <div className="toast" role="status">

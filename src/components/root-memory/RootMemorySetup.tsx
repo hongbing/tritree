@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useId, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, FileText, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { StyleProfileSetup } from "@/components/root-memory/StyleProfileSetup";
 import { SkillPicker } from "@/components/skills/SkillPicker";
@@ -110,6 +110,7 @@ export function RootMemorySetup({
     initialSkillIds ?? skills.filter((skill) => skill.defaultEnabled && !skill.isArchived).map((skill) => skill.id)
   );
   const [isSkillPickerOpen, setIsSkillPickerOpen] = useState(false);
+  const seedFieldId = useId();
   const trimmedSeed = seed.trim();
   const trimmedCreationRequest = creationRequest.trim();
   const canSubmit = trimmedSeed.length > 0;
@@ -321,6 +322,31 @@ export function RootMemorySetup({
             </div>
           </section>
         ) : null}
+        <div className="seed-field">
+          <div className="seed-field__header">
+            <label htmlFor={seedFieldId}>创作 seed</label>
+            {onCreateSkill && onUpdateSkill ? (
+              <StyleProfileSetup
+                disabled={isSaving}
+                externalStyleGenerationAvailable={Boolean(styleProfileExternalAvailable)}
+                isInline
+                onCreateSkill={onCreateSkill}
+                onSavedSkill={handleSavedStyleSkill}
+                onUpdateSkill={onUpdateSkill}
+                selectedSkillIds={selectedSkillIds}
+                skills={skills}
+              />
+            ) : null}
+          </div>
+          <textarea
+            aria-label="创作 seed"
+            id={seedFieldId}
+            onChange={(event) => setSeed(event.target.value)}
+            placeholder="例如：我想写 AI 产品经理在真实项目里的困境"
+            rows={5}
+            value={seed}
+          />
+        </div>
         {hasInspirations ? (
           <section aria-label="灵感列表" className="root-setup__inspirations" role="group">
             <p className="eyebrow">灵感</p>
@@ -345,27 +371,6 @@ export function RootMemorySetup({
               })}
             </div>
           </section>
-        ) : null}
-        <label className="seed-field">
-          <span>创作 seed</span>
-          <textarea
-            aria-label="创作 seed"
-            onChange={(event) => setSeed(event.target.value)}
-            placeholder="例如：我想写 AI 产品经理在真实项目里的困境"
-            rows={5}
-            value={seed}
-          />
-        </label>
-        {onCreateSkill && onUpdateSkill ? (
-          <StyleProfileSetup
-            disabled={isSaving}
-            externalStyleGenerationAvailable={Boolean(styleProfileExternalAvailable)}
-            onCreateSkill={onCreateSkill}
-            onSavedSkill={handleSavedStyleSkill}
-            onUpdateSkill={onUpdateSkill}
-            selectedSkillIds={selectedSkillIds}
-            skills={skills}
-          />
         ) : null}
         <section aria-label="本次创作要求" className="root-setup__request" role="group">
           <div className="root-setup__request-header">
@@ -559,7 +564,7 @@ export function RootMemorySetup({
               <button
                 aria-label={isSkillPickerOpen ? "收起技能列表" : "展开技能列表"}
                 aria-expanded={isSkillPickerOpen}
-                className="icon-button"
+                className="root-setup__skills-toggle"
                 disabled={isSaving}
                 onClick={() => setIsSkillPickerOpen((open) => !open)}
                 type="button"

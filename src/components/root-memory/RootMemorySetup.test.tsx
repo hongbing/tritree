@@ -114,6 +114,81 @@ describe("RootMemorySetup", () => {
     expect(screen.getByRole("button", { name: "用这个念头开始" })).toBeDisabled();
   });
 
+  it("places artifact type selection before the creation seed", () => {
+    renderRootMemorySetup();
+
+    const artifactTypeGroup = screen.getByRole("group", { name: "作品类型" });
+    const seedField = screen.getByRole("textbox", { name: "创作 seed" });
+
+    expect(artifactTypeGroup.compareDocumentPosition(seedField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("places an unset expanded style setup in the seed field header", () => {
+    const { container } = renderRootMemorySetup({
+      onCreateSkill: vi.fn(),
+      onUpdateSkill: vi.fn(),
+      styleProfileExternalAvailable: false
+    });
+
+    const seedField = container.querySelector(".seed-field") as HTMLElement;
+    const styleProfile = within(seedField).getByRole("region", { name: "我的风格" });
+
+    expect(seedField).toContainElement(screen.getByRole("textbox", { name: "创作 seed" }));
+    expect(styleProfile).toHaveClass("style-profile-setup--inline");
+    expect(styleProfile).toHaveClass("style-profile-setup--unset");
+    expect(styleProfile).toHaveClass("style-profile-setup--expanded");
+    expect(within(styleProfile).getByText(/建议先设置/)).toBeInTheDocument();
+    expect(within(styleProfile).getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
+    expect(within(styleProfile).getByRole("button", { name: "手动填写" })).toBeInTheDocument();
+  });
+
+  it("collapses a configured style into a compact seed header block", () => {
+    const { container } = renderRootMemorySetup({
+      onCreateSkill: vi.fn(),
+      onUpdateSkill: vi.fn(),
+      skills: [...skills, personalStyleSkill]
+    });
+
+    const seedField = container.querySelector(".seed-field") as HTMLElement;
+    const styleProfile = within(seedField).getByRole("region", { name: "我的风格" });
+
+    expect(styleProfile).toHaveClass("style-profile-setup--inline");
+    expect(styleProfile).toHaveClass("style-profile-setup--set");
+    expect(styleProfile).not.toHaveClass("style-profile-setup--expanded");
+    expect(within(styleProfile).getByRole("button", { name: "展开我的风格设置：克制产品随笔" })).toHaveClass(
+      "style-profile-setup__compact-button"
+    );
+    expect(within(styleProfile).getByText("克制产品随笔")).toBeInTheDocument();
+    expect(within(styleProfile).queryByText("正在使用：我的风格：克制产品随笔")).not.toBeInTheDocument();
+    expect(within(styleProfile).queryByRole("button", { name: "更新" })).not.toBeInTheDocument();
+    expect(within(styleProfile).queryByRole("button", { name: "粘贴代表作生成" })).not.toBeInTheDocument();
+  });
+
+  it("defines a light inline style setup for the seed header", () => {
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    const inlineRule = css.match(/\.style-profile-setup--inline\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const inlineUnsetRule =
+      css.match(/\.style-profile-setup--inline\.style-profile-setup--unset\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const compactButtonRule =
+      css.match(/\.style-profile-setup__compact-button\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const seedHeaderRule = css.match(/\.seed-field__header\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const inlineMethodsRule =
+      css.match(/\.style-profile-setup--inline \.style-profile-methods\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+    expect(seedHeaderRule).toContain("grid-template-columns: minmax(0, 1fr) auto");
+    expect(css).toContain(
+      ".seed-field__header > .style-profile-setup--inline.style-profile-setup--unset"
+    );
+    expect(css).toContain("grid-column: 1 / -1");
+    expect(inlineRule).toContain("padding: 8px 10px");
+    expect(inlineRule).toContain("box-shadow: none");
+    expect(inlineUnsetRule).toContain("background: rgba(240, 253, 250, 0.58)");
+    expect(inlineUnsetRule).toContain("border-color: rgba(20, 184, 166, 0.2)");
+    expect(inlineMethodsRule).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
+    expect(compactButtonRule).toContain("min-height: 28px");
+    expect(compactButtonRule).toContain("border-radius: 999px");
+  });
+
   it("links to draft management from the seed screen", () => {
     renderRootMemorySetup();
 
@@ -535,7 +610,7 @@ describe("RootMemorySetup", () => {
       skills: [...skills, personalStyleSkill]
     });
 
-    expect(screen.getByText("正在使用：我的风格：克制产品随笔")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开我的风格设置：克制产品随笔" })).toBeInTheDocument();
     expect(screen.getByText("已启用 2 个技能")).toBeInTheDocument();
     expect(screen.getByText("我的风格：克制产品随笔")).toBeInTheDocument();
 
@@ -650,6 +725,15 @@ describe("RootMemorySetup", () => {
     expect(screen.getByRole("group", { name: "审稿重点" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "技能库" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "收起技能列表" })).toBeInTheDocument();
+  });
+
+  it("uses a subtle skill list disclosure control", () => {
+    renderRootMemorySetup();
+
+    const toggleButton = screen.getByRole("button", { name: "展开技能列表" });
+
+    expect(toggleButton).toHaveClass("root-setup__skills-toggle");
+    expect(toggleButton).not.toHaveClass("icon-button");
   });
 
   it("expands the skill list from the remaining skill count", async () => {

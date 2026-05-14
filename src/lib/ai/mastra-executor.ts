@@ -292,6 +292,7 @@ export async function streamTreeNextStep({
       return output;
     }
 
+    let bestPartial: unknown = null;
     const output = await withStructuredOutputRetries(messages, "next-step", async (attemptMessages) => {
       const stream = agent.stream
         ? await agent.stream(attemptMessages, {
@@ -331,7 +332,8 @@ export async function streamTreeNextStep({
         }
       }
 
-      const output = await resolveStructuredStreamOutput(stream, latestPartial);
+      if (latestPartial !== null) bestPartial = latestPartial;
+      const output = await resolveStructuredStreamOutput(stream, latestPartial ?? bestPartial);
       try {
         return DirectorNextStepOutputSchema.parse(output);
       } catch (parseError) {
@@ -387,6 +389,7 @@ export async function streamTreeDraft({
       return output;
     }
 
+    let bestPartial: unknown = null;
     const output = await withStructuredOutputRetries(messages, "draft", async (attemptMessages) => {
       const stream = agent.stream
         ? await agent.stream(attemptMessages, {
@@ -426,7 +429,8 @@ export async function streamTreeDraft({
         }
       }
 
-      const output = await resolveStructuredStreamOutput(stream, latestPartial);
+      if (latestPartial !== null) bestPartial = latestPartial;
+      const output = await resolveStructuredStreamOutput(stream, latestPartial ?? bestPartial);
       try {
         return DirectorDraftOutputSchema.parse(output);
       } catch (parseError) {
@@ -482,6 +486,7 @@ export async function streamTreeOptions({
       return output;
     }
 
+    let bestPartial: unknown = null;
     const output = await withStructuredOutputRetries(messages, "options", async (attemptMessages) => {
       const stream = agent.stream
         ? await agent.stream(attemptMessages, {
@@ -509,7 +514,8 @@ export async function streamTreeOptions({
         }
       }
 
-      const output = await resolveStructuredStreamOutput(stream, latestPartial);
+      if (latestPartial !== null) bestPartial = latestPartial;
+      const output = await resolveStructuredStreamOutput(stream, latestPartial ?? bestPartial);
       try {
         return DirectorOptionsOutputSchema.parse(output);
       } catch (parseError) {
@@ -890,11 +896,36 @@ async function parseRuntimeReActStreamOutput<TOutput>(
     });
   }
 
-  if (summary.rawText.trim()) {
-    logTritreeAiDebug("react-stream", "parse-raw-text-skipped", {
-      target,
-      reason: `Runtime final output must be submitted with ${finalSubmitToolName(target)}.`
-    });
+  if (summary.rawText.trim() && (target === "draft" || target === "options")) {
+    try {
+      const rawParsed = parseRuntimeMarkdownOutput(summary.rawText, target);
+      const parsed = schema.parse(rawParsed);
+      logTritreeAiDebug("react-stream", "parse-raw-text-success", {
+        target,
+        output: summarizePartialObjectForLog(parsed)
+      });
+      return parsed;
+    } catch (rawError) {
+      logTritreeAiDebug("react-stream", "parse-raw-text-failed", {
+        target,
+        error: summarizeErrorForLog(rawError)
+      });
+    }
+
+    try {
+      const jsonParsed = parseRuntimeRawTextJson(summary.rawText);
+      const parsed = schema.parse(jsonParsed);
+      logTritreeAiDebug("react-stream", "parse-raw-json-success", {
+        target,
+        output: summarizePartialObjectForLog(parsed)
+      });
+      return parsed;
+    } catch (jsonError) {
+      logTritreeAiDebug("react-stream", "parse-raw-json-failed", {
+        target,
+        error: summarizeErrorForLog(jsonError)
+      });
+    }
   }
 
   logTritreeAiDebug("react-stream", "parse-failed", {
@@ -1220,7 +1251,7 @@ async function disconnectRuntimeTools(runtime: Pick<McpRuntimeTools, "disconnect
 function executionOptionsForTools(tools: ToolsInput | undefined) {
   if (!tools || Object.keys(tools).length === 0) return {};
   return {
-    maxSteps: 6,
+    maxSteps: 20,
     toolCallConcurrency: 1,
     toolChoice: "auto" as const
   };

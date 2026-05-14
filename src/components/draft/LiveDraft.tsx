@@ -15,7 +15,7 @@ import { unifiedMergeView } from "@codemirror/merge";
 import { EditorState } from "@codemirror/state";
 import { Decoration, EditorView, keymap } from "@codemirror/view";
 import { createPortal } from "react-dom";
-import { Copy, ImagePlus, Send, Sparkles, X } from "lucide-react";
+import { Copy, Send, Sparkles, X } from "lucide-react";
 import { DEFAULT_ARTIFACT_TYPE_ID, type ArtifactTypeId, type Draft, type PublishPackage } from "@/lib/domain";
 import { buildArtifactDelivery, getArtifactType, type PublishPlatform } from "@/lib/artifacts";
 import { resolveDraftTitle } from "@/lib/seed-draft";
@@ -933,10 +933,6 @@ export function LiveDraft({
                   <section className="image-prompt">
                     <div className="image-prompt__heading">
                       <h3>配图提示</h3>
-                      <button className="image-prompt__generate-button" disabled={isBusy} onClick={generateImage} type="button">
-                        <ImagePlus aria-hidden="true" size={14} />
-                        <span>生成图片</span>
-                      </button>
                     </div>
                     <DraftDiffMergeField
                       disabled={isBusy || isReadOnlyMergeDiff}
@@ -1027,10 +1023,6 @@ export function LiveDraft({
                   <section className="image-prompt">
                     <div className="image-prompt__heading">
                       <h3>配图提示</h3>
-                      <button className="image-prompt__generate-button" disabled={isBusy} onClick={generateImage} type="button">
-                        <ImagePlus aria-hidden="true" size={14} />
-                        <span>生成图片</span>
-                      </button>
                     </div>
                     <p className={shouldShowInlineDiff ? "draft-inline-diff" : undefined}>
                       {shouldShowInlineDiff && draftDiff ? (

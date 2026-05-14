@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { badRequestResponse, isBadRequestError } from "@/lib/api/errors";
 import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
+import { listConfiguredArtifactTypes } from "@/lib/artifacts";
 import { getRepository } from "@/lib/db/repository";
 import { SkillUpsertSchema } from "@/lib/domain";
 import { externalStyleProviderAvailable } from "@/lib/skills/style-profile";
@@ -12,6 +13,7 @@ export async function GET() {
     const user = await requireCurrentUser();
     const repository = getRepository();
     return NextResponse.json({
+      artifactTypes: listConfiguredArtifactTypes(),
       skills: repository.listSkills(user.id),
       creationRequestOptions: repository.listCreationRequestOptions(user.id),
       styleProfile: {

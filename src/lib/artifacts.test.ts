@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARTIFACT_TYPES_ENV,
   DEFAULT_ARTIFACT_TYPE_ID,
   buildArtifactDelivery,
   formatArtifactInstructionsForDirector,
   getArtifactType,
+  listConfiguredArtifactTypes,
   listArtifactTypes
 } from "./artifacts";
 
@@ -13,6 +15,22 @@ describe("artifact type registry", () => {
     expect(listArtifactTypes().map((artifactType) => artifactType.id)).toEqual(["social-post", "prd"]);
     expect(getArtifactType("social-post").label).toBe("社媒内容");
     expect(getArtifactType("prd").label).toBe("PRD 文档");
+  });
+
+  it("filters enabled artifact types from environment configuration", () => {
+    expect(listConfiguredArtifactTypes({}).map((artifactType) => artifactType.id)).toEqual(["social-post", "prd"]);
+    expect(listConfiguredArtifactTypes({ [ARTIFACT_TYPES_ENV]: "all" }).map((artifactType) => artifactType.id)).toEqual([
+      "social-post",
+      "prd"
+    ]);
+    expect(listConfiguredArtifactTypes({ [ARTIFACT_TYPES_ENV]: "prd" }).map((artifactType) => artifactType.id)).toEqual(["prd"]);
+    expect(
+      listConfiguredArtifactTypes({ [ARTIFACT_TYPES_ENV]: "prd, social-post, unknown" }).map((artifactType) => artifactType.id)
+    ).toEqual(["prd", "social-post"]);
+    expect(listConfiguredArtifactTypes({ [ARTIFACT_TYPES_ENV]: "unknown" }).map((artifactType) => artifactType.id)).toEqual([
+      "social-post",
+      "prd"
+    ]);
   });
 
   it("formats PRD-specific director instructions", () => {

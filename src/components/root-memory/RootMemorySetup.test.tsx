@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RootMemorySetup } from "./RootMemorySetup";
+import { listArtifactTypes } from "@/lib/artifacts";
 import { DEFAULT_CREATION_REQUEST_OPTIONS, type CreationRequestOption, type Skill, type SkillUpsert } from "@/lib/domain";
 
 const skills: Skill[] = [
@@ -117,6 +120,55 @@ describe("RootMemorySetup", () => {
     expect(screen.getByRole("link", { name: "我的草稿" })).toHaveAttribute("href", "/drafts");
   });
 
+  it("keeps the inspiration list hidden when no inspirations are configured", () => {
+    renderRootMemorySetup();
+
+    expect(screen.queryByRole("group", { name: "灵感列表" })).not.toBeInTheDocument();
+  });
+
+  it("fills the seed from a selected inspiration", async () => {
+    renderRootMemorySetup({
+      inspirations: [
+        {
+          id: "idea-1",
+          title: "AI 产品真实困境",
+          detail: "我想写 AI 产品经理在真实项目里的困境。"
+        },
+        {
+          id: "idea-2",
+          title: "团队写作规范",
+          detail: "我想写一份团队内容写作规范。"
+        }
+      ]
+    });
+
+    const inspirationList = screen.getByRole("group", { name: "灵感列表" });
+    expect(within(inspirationList).getByRole("button", { name: "AI 产品真实困境" })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    );
+
+    await userEvent.click(within(inspirationList).getByRole("button", { name: "AI 产品真实困境" }));
+
+    expect(screen.getByRole("textbox", { name: "创作 seed" })).toHaveValue("我想写 AI 产品经理在真实项目里的困境。");
+    expect(within(inspirationList).getByRole("button", { name: "AI 产品真实困境" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+  });
+
+  it("keeps inspiration cards in a horizontally scrollable row sized for three visible items", () => {
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    const optionsRule = css.match(/\.inspiration-options\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const optionRule = css.match(/\.inspiration-option\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+    expect(optionsRule).toContain("display: flex");
+    expect(optionsRule).toContain("overflow-x: auto");
+    expect(optionsRule).toContain("scroll-snap-type: x proximity");
+    expect(optionRule).toContain("flex: 0 0 calc((100% - 16px) / 3)");
+    expect(optionRule).toContain("scroll-snap-align: start");
+  });
+
   it("submits the seed without requiring a first guide", async () => {
     const onSubmit = vi.fn();
     renderRootMemorySetup({ onSubmit });
@@ -148,6 +200,54 @@ describe("RootMemorySetup", () => {
       }),
       enabledSkillIds: ["system-analysis"]
     });
+  });
+
+  it("hides artifact type choices and submits the configured single artifact type", async () => {
+    const onSubmit = vi.fn();
+    renderRootMemorySetup({
+      artifactTypes: listArtifactTypes().filter((artifactType) => artifactType.id === "prd"),
+      onSubmit
+    });
+
+    expect(screen.queryByRole("group", { name: "作品类型" })).not.toBeInTheDocument();
+
+    await userEvent.type(screen.getByRole("textbox", { name: "创作 seed" }), "移动端草稿管理");
+    await userEvent.click(screen.getByRole("button", { name: "用这个念头开始" }));
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      preferences: expect.objectContaining({
+        artifactTypeId: "prd",
+        seed: "移动端草稿管理"
+      }),
+      enabledSkillIds: ["system-analysis"]
+    });
+  });
+
+  it("shows inspirations for the currently selected artifact type", async () => {
+    renderRootMemorySetup({
+      inspirations: [
+        {
+          id: "social-idea",
+          title: "社媒灵感",
+          detail: "写一条社媒内容。",
+          artifactTypeIds: ["social-post"]
+        },
+        {
+          id: "prd-idea",
+          title: "PRD 灵感",
+          detail: "写一份 PRD。",
+          artifactTypeIds: ["prd"]
+        }
+      ]
+    });
+
+    expect(screen.getByRole("button", { name: "社媒灵感" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "PRD 灵感" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "PRD 文档" }));
+
+    expect(screen.queryByRole("button", { name: "社媒灵感" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "PRD 灵感" })).toBeInTheDocument();
   });
 
   it("lets the user submit an optional creation request", async () => {

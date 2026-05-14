@@ -91,9 +91,27 @@ const ARTIFACT_TYPES = [
 ] satisfies ArtifactType[];
 
 const artifactTypeById = new Map(ARTIFACT_TYPES.map((artifactType) => [artifactType.id, artifactType]));
+export const ARTIFACT_TYPES_ENV = "TRITREE_ARTIFACT_TYPES";
 
 export function listArtifactTypes() {
   return ARTIFACT_TYPES;
+}
+
+export function listConfiguredArtifactTypes(env: Record<string, string | undefined> = process.env) {
+  const configured = env[ARTIFACT_TYPES_ENV]?.trim();
+  if (!configured || configured.toLowerCase() === "all") return ARTIFACT_TYPES;
+
+  const selectedTypes = configured
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .flatMap((part) => {
+      const parsed = ArtifactTypeIdSchema.safeParse(part);
+      const artifactType = parsed.success ? artifactTypeById.get(parsed.data) : undefined;
+      return artifactType ? [artifactType] : [];
+    });
+
+  return selectedTypes.length > 0 ? selectedTypes : ARTIFACT_TYPES;
 }
 
 export function getArtifactType(typeId: string | null | undefined): ArtifactType {

@@ -10,11 +10,12 @@ import {
   DEFAULT_ARTIFACT_TYPE_ID,
   type ArtifactTypeId,
   type CreationRequestOption,
+  type Inspiration,
   type RootPreferences,
   type Skill,
   type SkillUpsert
 } from "@/lib/domain";
-import { listArtifactTypes } from "@/lib/artifacts";
+import { type ArtifactType, listArtifactTypes } from "@/lib/artifacts";
 import { apiPath } from "@/lib/web-base-path";
 
 const defaultPreferences = {
@@ -37,6 +38,12 @@ function formatCreationRequest(parts: string[]) {
   return parts.join("，");
 }
 
+function inspirationAppliesToArtifactType(inspiration: Inspiration, artifactTypeId: ArtifactTypeId) {
+  if (inspiration.artifactTypeIds?.length) return inspiration.artifactTypeIds.includes(artifactTypeId);
+  if (inspiration.artifactTypeId) return inspiration.artifactTypeId === artifactTypeId;
+  return true;
+}
+
 function defaultCreationRequestOptions(): CreationRequestOption[] {
   const timestamp = new Date(0).toISOString();
 
@@ -50,12 +57,15 @@ function defaultCreationRequestOptions(): CreationRequestOption[] {
 }
 
 export function RootMemorySetup({
+  artifactTypes,
   initialArtifactTypeId = DEFAULT_ARTIFACT_TYPE_ID,
   initialSeed = "",
   initialCreationRequest = "",
   initialCreationRequestOptions,
   initialSkillIds,
+  inspirations = [],
   onSubmit,
+  onArtifactTypeChange,
   isSaving,
   message,
   onBack,
@@ -66,12 +76,15 @@ export function RootMemorySetup({
   styleProfileExternalAvailable,
   skills
 }: {
+  artifactTypes?: ArtifactType[];
   initialArtifactTypeId?: ArtifactTypeId;
   initialSeed?: string;
   initialCreationRequest?: string;
   initialCreationRequestOptions?: CreationRequestOption[];
   initialSkillIds?: string[];
+  inspirations?: Inspiration[];
   onSubmit: (payload: { preferences: RootPreferences; enabledSkillIds: string[] }) => void;
+  onArtifactTypeChange?: (artifactTypeId: ArtifactTypeId) => void;
   isSaving: boolean;
   message?: string;
   onBack?: () => void;
@@ -111,7 +124,12 @@ export function RootMemorySetup({
     ? creationRequestOptions
     : creationRequestOptions.slice(0, visibleRequestOptionCount);
   const hiddenRequestOptionCount = Math.max(0, creationRequestOptions.length - visibleCreationRequestOptions.length);
-  const artifactTypes = listArtifactTypes();
+  const availableArtifactTypes = artifactTypes?.length ? artifactTypes : listArtifactTypes();
+  const selectedArtifactTypeId = availableArtifactTypes.some((artifactType) => artifactType.id === artifactTypeId)
+    ? artifactTypeId
+    : availableArtifactTypes[0]?.id ?? DEFAULT_ARTIFACT_TYPE_ID;
+  const visibleInspirations = inspirations.filter((inspiration) => inspirationAppliesToArtifactType(inspiration, selectedArtifactTypeId));
+  const hasInspirations = visibleInspirations.length > 0;
 
   useEffect(() => {
     setCreationRequestOptions(initialCreationRequestOptions ?? defaultCreationRequestOptions());
@@ -120,6 +138,18 @@ export function RootMemorySetup({
   useEffect(() => {
     setArtifactTypeId(initialArtifactTypeId);
   }, [initialArtifactTypeId]);
+
+  useEffect(() => {
+    if (selectedArtifactTypeId !== artifactTypeId) {
+      setArtifactTypeId(selectedArtifactTypeId);
+      onArtifactTypeChange?.(selectedArtifactTypeId);
+    }
+  }, [artifactTypeId, onArtifactTypeChange, selectedArtifactTypeId]);
+
+  function selectArtifactType(nextArtifactTypeId: ArtifactTypeId) {
+    setArtifactTypeId(nextArtifactTypeId);
+    onArtifactTypeChange?.(nextArtifactTypeId);
+  }
 
   function toggleCreationRequestOption(option: string) {
     setCreationRequest((current) => {
@@ -267,28 +297,55 @@ export function RootMemorySetup({
             {message}
           </p>
         ) : null}
-        <section aria-label="作品类型" className="root-setup__artifact-type" role="group">
-          <div>
-            <p className="eyebrow">作品类型</p>
-            <p className="root-setup__request-copy">选择这棵树要生成的产物。</p>
-          </div>
-          <div className="artifact-type-options">
-            {artifactTypes.map((artifactType) => (
-              <button
-                aria-label={artifactType.label}
-                aria-pressed={artifactTypeId === artifactType.id}
-                className={`artifact-type-option${artifactTypeId === artifactType.id ? " artifact-type-option--active" : ""}`}
-                disabled={isSaving}
-                key={artifactType.id}
-                onClick={() => setArtifactTypeId(artifactType.id)}
-                type="button"
-              >
-                <span>{artifactType.label}</span>
-                <small>{artifactType.description}</small>
-              </button>
-            ))}
-          </div>
-        </section>
+        {availableArtifactTypes.length > 1 ? (
+          <section aria-label="作品类型" className="root-setup__artifact-type" role="group">
+            <div>
+              <p className="eyebrow">作品类型</p>
+              <p className="root-setup__request-copy">选择这棵树要生成的产物。</p>
+            </div>
+            <div className="artifact-type-options">
+              {availableArtifactTypes.map((artifactType) => (
+                <button
+                  aria-label={artifactType.label}
+                  aria-pressed={selectedArtifactTypeId === artifactType.id}
+                  className={`artifact-type-option${selectedArtifactTypeId === artifactType.id ? " artifact-type-option--active" : ""}`}
+                  disabled={isSaving}
+                  key={artifactType.id}
+                  onClick={() => selectArtifactType(artifactType.id)}
+                  type="button"
+                >
+                  <span>{artifactType.label}</span>
+                  <small>{artifactType.description}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
+        {hasInspirations ? (
+          <section aria-label="灵感列表" className="root-setup__inspirations" role="group">
+            <p className="eyebrow">灵感</p>
+            <div className="inspiration-options">
+              {visibleInspirations.map((inspiration) => {
+                const isActive = trimmedSeed === inspiration.detail.trim();
+
+                return (
+                  <button
+                    aria-label={inspiration.title}
+                    aria-pressed={isActive}
+                    className={`inspiration-option${isActive ? " inspiration-option--active" : ""}`}
+                    disabled={isSaving}
+                    key={inspiration.id}
+                    onClick={() => setSeed(inspiration.detail)}
+                    type="button"
+                  >
+                    <span>{inspiration.title}</span>
+                    <small>{inspiration.detail}</small>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
         <label className="seed-field">
           <span>创作 seed</span>
           <textarea
@@ -548,7 +605,7 @@ export function RootMemorySetup({
             onSubmit({
               preferences: {
                 ...defaultPreferences,
-                artifactTypeId,
+                artifactTypeId: selectedArtifactTypeId,
                 seed: trimmedSeed,
                 creationRequest: trimmedCreationRequest
               },

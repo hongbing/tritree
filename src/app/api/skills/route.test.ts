@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthApiError } from "@/lib/auth/current-user";
+import { ARTIFACT_TYPES_ENV } from "@/lib/artifacts";
 import { STYLE_PROFILE_URL_ENV } from "@/lib/skills/style-profile";
 import { GET, POST } from "./route";
 import { PATCH } from "./[skillId]/route";
@@ -23,6 +24,7 @@ const currentUser = {
 };
 
 const originalStyleProfileUrl = process.env[STYLE_PROFILE_URL_ENV];
+const originalArtifactTypes = process.env[ARTIFACT_TYPES_ENV];
 
 vi.mock("server-only", () => ({}));
 
@@ -46,6 +48,7 @@ vi.mock("@/lib/skills/skill-installer", () => ({
 
 beforeEach(() => {
   delete process.env[STYLE_PROFILE_URL_ENV];
+  delete process.env[ARTIFACT_TYPES_ENV];
   mocks.getRepository.mockReset();
   mocks.installSkillFromGitHub.mockReset();
   mocks.requireAdminUser.mockReset();
@@ -59,6 +62,12 @@ afterEach(() => {
     delete process.env[STYLE_PROFILE_URL_ENV];
   } else {
     process.env[STYLE_PROFILE_URL_ENV] = originalStyleProfileUrl;
+  }
+
+  if (originalArtifactTypes === undefined) {
+    delete process.env[ARTIFACT_TYPES_ENV];
+  } else {
+    process.env[ARTIFACT_TYPES_ENV] = originalArtifactTypes;
   }
 });
 
@@ -85,6 +94,21 @@ describe("/api/skills", () => {
     expect(data.skills).toEqual([{ id: "system-analysis", title: "分析" }]);
     expect(data.creationRequestOptions).toEqual([{ id: "request-preserve", label: "保留我的原意" }]);
     expect(data.styleProfile).toEqual({ externalStyleGenerationAvailable: false });
+    expect(data.artifactTypes.map((artifactType: { id: string }) => artifactType.id)).toEqual(["social-post", "prd"]);
+  });
+
+  it("lists only configured artifact types", async () => {
+    process.env[ARTIFACT_TYPES_ENV] = "prd";
+    mocks.getRepository.mockReturnValue({
+      listCreationRequestOptions: vi.fn().mockReturnValue([]),
+      listSkills: vi.fn().mockReturnValue([])
+    });
+
+    const response = await GET();
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.artifactTypes.map((artifactType: { id: string }) => artifactType.id)).toEqual(["prd"]);
   });
 
   it("reports when external style generation is available", async () => {

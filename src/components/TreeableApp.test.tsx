@@ -5,6 +5,7 @@ import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TreeableApp } from "./TreeableApp";
+import { listArtifactTypes } from "@/lib/artifacts";
 import type { Skill } from "@/lib/domain";
 
 const liveDraftMock = vi.hoisted(() => vi.fn());
@@ -486,7 +487,8 @@ describe("TreeableApp", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory: rootMemoryWithRequest }) });
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory: rootMemoryWithRequest }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ inspirations: [] }) });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<TreeableApp startNewDraft />);
@@ -495,8 +497,126 @@ describe("TreeableApp", () => {
     expect(screen.getByText("未启用技能")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "展开自定义创作要求" }));
     expect(screen.getByRole("textbox", { name: "自定义创作要求" })).toHaveValue("");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/inspirations?artifactTypeId=social-post");
     expect(fetchMock).not.toHaveBeenCalledWith("/api/sessions");
+  });
+
+  it("loads inspirations for a blank draft setup and lets the user fill the seed", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          inspirations: [
+            {
+              id: "idea-1",
+              title: "AI 产品真实困境",
+              detail: "我想写 AI 产品经理在真实项目里的困境。"
+            }
+          ]
+        })
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp startNewDraft />);
+
+    const seed = await screen.findByRole("textbox", { name: "创作 seed" });
+    await userEvent.click(await screen.findByRole("button", { name: "AI 产品真实困境" }));
+
+    expect(seed).toHaveValue("我想写 AI 产品经理在真实项目里的困境。");
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/inspirations?artifactTypeId=social-post");
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/sessions");
+  });
+
+  it("reloads inspirations when the user switches artifact type", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills, artifactTypes: listArtifactTypes() }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          inspirations: [{ id: "social-idea", title: "社媒灵感", detail: "写一条社媒内容。", artifactTypeIds: ["social-post"] }]
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          inspirations: [{ id: "prd-idea", title: "PRD 灵感", detail: "写一份 PRD。", artifactTypeIds: ["prd"] }]
+        })
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp startNewDraft />);
+
+    expect(await screen.findByRole("button", { name: "社媒灵感" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "PRD 文档" }));
+
+    expect(await screen.findByRole("button", { name: "PRD 灵感" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "社媒灵感" })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/inspirations?artifactTypeId=social-post");
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/inspirations?artifactTypeId=prd");
+  });
+
+  it("uses the single configured artifact type without showing artifact choices", async () => {
+    const prdArtifactTypes = listArtifactTypes().filter((artifactType) => artifactType.id === "prd");
+    const onSubmitState = {
+      ...rootMemory,
+      preferences: {
+        ...rootMemory.preferences,
+        artifactTypeId: "prd",
+        seed: "移动端草稿管理"
+      }
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills, artifactTypes: prdArtifactTypes }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          inspirations: [{ id: "prd-idea", title: "PRD 灵感", detail: "写一份 PRD。", artifactTypeIds: ["prd"] }]
+        })
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory: onSubmitState }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: { ...finishedState, rootMemory: onSubmitState } }) })
+      .mockResolvedValueOnce(optionsNdjsonResponse({ ...finishedState, rootMemory: onSubmitState }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp startNewDraft />);
+
+    expect(await screen.findByRole("button", { name: "PRD 灵感" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "作品类型" })).not.toBeInTheDocument();
+
+    await userEvent.type(screen.getByRole("textbox", { name: "创作 seed" }), "移动端草稿管理");
+    await userEvent.click(screen.getByRole("button", { name: "用这个念头开始" }));
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/inspirations?artifactTypeId=prd");
+      expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/root-memory", expect.objectContaining({ method: "POST" }));
+      expect(JSON.parse(fetchMock.mock.calls[3][1].body as string)).toEqual(
+        expect.objectContaining({ artifactTypeId: "prd", seed: "移动端草稿管理" })
+      );
+    });
+  });
+
+  it("keeps the blank draft setup available when inspiration loading fails", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "灵感加载失败。" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp startNewDraft />);
+
+    expect(await screen.findByRole("textbox", { name: "创作 seed" })).toHaveValue("");
+    expect(screen.queryByRole("group", { name: "灵感列表" })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/inspirations?artifactTypeId=social-post");
   });
 
   it("passes external style generation availability to the blank seed setup", async () => {
@@ -539,8 +659,10 @@ describe("TreeableApp", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
       .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "not found" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ inspirations: [] }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) });
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ inspirations: [] }) });
     vi.stubGlobal("fetch", fetchMock);
 
     const { rerender } = render(<TreeableApp initialSessionId="missing-session" />);
@@ -550,7 +672,7 @@ describe("TreeableApp", () => {
 
     expect(await screen.findByRole("textbox", { name: "创作 seed" })).toHaveValue("");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
   });
 
   it("ignores stale latest-session loads after switching to a blank draft setup", async () => {
@@ -567,7 +689,8 @@ describe("TreeableApp", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
       .mockReturnValueOnce(delayedLatestSession)
       .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) });
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ inspirations: [] }) });
     vi.stubGlobal("fetch", fetchMock);
 
     const { rerender } = render(<TreeableApp />);
@@ -585,7 +708,7 @@ describe("TreeableApp", () => {
 
     expect(screen.getByRole("textbox", { name: "创作 seed" })).toHaveValue("");
     expect(screen.queryByTestId("tree-canvas")).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 
   it("renders mobile panel controls with tree active by default", async () => {
@@ -795,6 +918,7 @@ describe("TreeableApp", () => {
       .fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory: null }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ inspirations: [] }) })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -826,18 +950,19 @@ describe("TreeableApp", () => {
     expect(await screen.findByText(/本次创作要求：改成英文的/)).toBeInTheDocument();
     expect(await screen.findByTestId("tree-canvas")).toHaveTextContent("choices enabled");
     expect(screen.getByTestId("canvas-generation-stage")).toHaveTextContent("idle");
-    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/root-memory", expect.objectContaining({ method: "POST" }));
-    expect(JSON.parse(fetchMock.mock.calls[2][1].body as string)).toEqual(
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/inspirations?artifactTypeId=social-post");
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/root-memory", expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body as string)).toEqual(
       expect.objectContaining({
         seed: "我想写 AI 产品经理的真实困境",
         creationRequest: "改成英文的，保留口语感"
       })
     );
-    expect(JSON.parse(fetchMock.mock.calls[2][1].body as string)).not.toHaveProperty("initialOptionId");
-    expect(JSON.parse(fetchMock.mock.calls[2][1].body as string)).not.toHaveProperty("initialOptionMode");
-    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/sessions", expect.objectContaining({ method: "POST" }));
-    expect(JSON.parse(fetchMock.mock.calls[3][1].body as string).enabledSkillIds).toEqual(["system-analysis"]);
-    expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/sessions/session-1/options", expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body as string)).not.toHaveProperty("initialOptionId");
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body as string)).not.toHaveProperty("initialOptionMode");
+    expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/sessions", expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse(fetchMock.mock.calls[4][1].body as string).enabledSkillIds).toEqual(["system-analysis"]);
+    expect(fetchMock).toHaveBeenNthCalledWith(6, "/api/sessions/session-1/options", expect.objectContaining({ method: "POST" }));
   });
 
   it("lets the user start over with a new seed", async () => {
@@ -845,7 +970,8 @@ describe("TreeableApp", () => {
       .fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: finishedState }) });
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: finishedState }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ inspirations: [] }) });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<TreeableApp />);
@@ -858,7 +984,8 @@ describe("TreeableApp", () => {
 
     expect(await screen.findByTestId("tree-canvas")).toBeInTheDocument();
     expect(screen.getByText("Seed：我想写 AI 产品经理的真实困境")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/inspirations?artifactTypeId=social-post");
   });
 
   it("restarts from the seed screen with the current seed and skills preselected", async () => {
@@ -889,6 +1016,7 @@ describe("TreeableApp", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory: rootMemoryWithRequest }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ state: currentSettingsState }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ inspirations: [] }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
       .mockResolvedValueOnce(jsonResponse({ state: createdState }))
       .mockResolvedValueOnce(optionsNdjsonResponse(currentSettingsState));
@@ -906,18 +1034,19 @@ describe("TreeableApp", () => {
     expect(screen.queryByRole("button", { name: "找表达角度" })).not.toBeInTheDocument();
     expect(screen.getByText("标题不要夸张")).toBeInTheDocument();
     expect(screen.queryByText("分析")).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/inspirations?artifactTypeId=social-post");
 
     await userEvent.click(screen.getByRole("button", { name: "用这个念头开始" }));
 
     await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/root-memory", expect.objectContaining({ method: "POST" }));
-      expect(JSON.parse(fetchMock.mock.calls[3][1].body as string)).toEqual(
+      expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/root-memory", expect.objectContaining({ method: "POST" }));
+      expect(JSON.parse(fetchMock.mock.calls[4][1].body as string)).toEqual(
         expect.objectContaining({ seed: "我想写 AI 产品经理的真实困境" })
       );
-      expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/sessions", expect.objectContaining({ method: "POST" }));
-      expect(JSON.parse(fetchMock.mock.calls[4][1].body as string).enabledSkillIds).toEqual(["system-no-hype-title"]);
-      expect(fetchMock).toHaveBeenNthCalledWith(6, "/api/sessions/session-1/options", expect.objectContaining({ method: "POST" }));
+      expect(fetchMock).toHaveBeenNthCalledWith(6, "/api/sessions", expect.objectContaining({ method: "POST" }));
+      expect(JSON.parse(fetchMock.mock.calls[5][1].body as string).enabledSkillIds).toEqual(["system-no-hype-title"]);
+      expect(fetchMock).toHaveBeenNthCalledWith(7, "/api/sessions/session-1/options", expect.objectContaining({ method: "POST" }));
     });
   });
 

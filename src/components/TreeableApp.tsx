@@ -14,6 +14,8 @@ import {
   type CreationRequestOption,
   type CustomBranchOptionId,
   type Draft,
+  type Inspiration,
+  InspirationSchema,
   type OptionGenerationMode,
   type RootMemory,
   type RootPreferences,
@@ -24,7 +26,7 @@ import {
   isCustomBranchOptionId,
   isPrimaryBranchOptionId
 } from "@/lib/domain";
-import { getArtifactType } from "@/lib/artifacts";
+import { getArtifactType, listArtifactTypes, type ArtifactType } from "@/lib/artifacts";
 import type { UserRole } from "@/lib/auth/types";
 import { LiveDraft } from "@/components/draft/LiveDraft";
 import { RootMemorySetup } from "@/components/root-memory/RootMemorySetup";
@@ -41,7 +43,7 @@ type DraftComparisonSelection = { fromNodeId: string | null; toNodeId: string | 
 type DraftComparisonEntry = { nodeId: string; label: string; draft: Draft };
 type NodeGenerationStage = { nodeId: string; stage: "draft" | "options" };
 type RootSetupDefaults = {
-  artifactTypeId?: ArtifactTypeId;
+  artifactTypeId: ArtifactTypeId;
   creationRequest?: string;
   enabledSkillIds?: string[];
   seed: string;
@@ -179,6 +181,55 @@ function isBranchOption(value: unknown): value is BranchOption {
     (value.kind === "explore" || value.kind === "deepen" || value.kind === "reframe" || value.kind === "finish") &&
     (value.mode == null || value.mode === "divergent" || value.mode === "balanced" || value.mode === "focused")
   );
+}
+
+function normalizeInspirationsResponse(value: unknown): Inspiration[] {
+  if (!isRecord(value) || !Array.isArray(value.inspirations)) return [];
+
+  return value.inspirations.flatMap((item) => {
+    const parsed = InspirationSchema.safeParse(item);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
+function normalizeArtifactTypesResponse(value: unknown): ArtifactType[] {
+  const allArtifactTypes = listArtifactTypes();
+  if (!Array.isArray(value)) return allArtifactTypes;
+
+  const artifactTypeById = new Map(allArtifactTypes.map((artifactType) => [artifactType.id, artifactType]));
+  const seenArtifactTypeIds = new Set<ArtifactTypeId>();
+  const artifactTypes = value.flatMap((item) => {
+    if (!isRecord(item) || typeof item.id !== "string") return [];
+    const artifactType = artifactTypeById.get(item.id as ArtifactTypeId);
+    if (!artifactType || seenArtifactTypeIds.has(artifactType.id)) return [];
+    seenArtifactTypeIds.add(artifactType.id);
+    return [artifactType];
+  });
+
+  return artifactTypes.length > 0 ? artifactTypes : allArtifactTypes;
+}
+
+function resolveArtifactTypeId(
+  artifactTypes: ArtifactType[],
+  preferredArtifactTypeId: ArtifactTypeId | null | undefined
+): ArtifactTypeId {
+  if (preferredArtifactTypeId && artifactTypes.some((artifactType) => artifactType.id === preferredArtifactTypeId)) {
+    return preferredArtifactTypeId;
+  }
+
+  return artifactTypes[0]?.id ?? DEFAULT_ARTIFACT_TYPE_ID;
+}
+
+function resolveRootSetupDefaults(
+  defaults: RootSetupDefaults | null | undefined,
+  artifactTypes: ArtifactType[]
+): RootSetupDefaults {
+  return {
+    artifactTypeId: resolveArtifactTypeId(artifactTypes, defaults?.artifactTypeId),
+    creationRequest: defaults?.creationRequest ?? "",
+    enabledSkillIds: defaults?.enabledSkillIds,
+    seed: defaults?.seed ?? ""
+  };
 }
 
 function isDraftStreamEvent(value: unknown): value is DraftStreamEvent {
@@ -435,9 +486,11 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   const [rootMemory, setRootMemory] = useState<RootMemory | null>(null);
   const [sessionState, setSessionState] = useState<SessionState | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [artifactTypes, setArtifactTypes] = useState<ArtifactType[]>(() => listArtifactTypes());
   const [creationRequestOptions, setCreationRequestOptions] = useState<CreationRequestOption[]>(
     defaultCreationRequestOptions
   );
+  const [inspirations, setInspirations] = useState<Inspiration[]>([]);
   const [message, setMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const [pendingChoice, setPendingChoice] = useState<BranchOption["id"] | null>(null);
@@ -574,9 +627,11 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setLoadState("loading");
     setMessage("");
     setRootSetupDefaults(null);
+    setInspirations([]);
     try {
       const skillsResponse = await fetch(apiPath("/api/skills"));
       const skillsData = (await skillsResponse.json()) as {
+        artifactTypes?: unknown;
         creationRequestOptions?: CreationRequestOption[];
         error?: string;
         skills?: Skill[];
@@ -584,7 +639,9 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       };
       if (!isCurrentLoadRequest(requestId)) return;
       if (!skillsResponse.ok || !skillsData.skills) throw new Error(skillsData.error ?? "技能加载失败。");
+      const nextArtifactTypes = normalizeArtifactTypesResponse(skillsData.artifactTypes);
       setSkills(skillsData.skills);
+      setArtifactTypes(nextArtifactTypes);
       setCreationRequestOptions(skillsData.creationRequestOptions ?? defaultCreationRequestOptions());
       setIsExternalStyleGenerationAvailable(Boolean(skillsData.styleProfile?.externalStyleGenerationAvailable));
 
@@ -595,8 +652,12 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       if (!isCurrentLoadRequest(requestId)) return;
       setRootMemory(data.rootMemory);
       if (startNewDraft) {
+        const nextRootSetupDefaults = resolveRootSetupDefaults(emptyRootSetupDefaults, nextArtifactTypes);
+        const nextInspirations = await loadInspirationsForSetup(requestId, nextRootSetupDefaults.artifactTypeId);
+        if (!isCurrentLoadRequest(requestId) || !nextInspirations) return;
         setSessionState(null);
-        setRootSetupDefaults(emptyRootSetupDefaults);
+        setRootSetupDefaults(nextRootSetupDefaults);
+        setInspirations(nextInspirations);
         setLoadState("root");
         return;
       }
@@ -615,8 +676,12 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           return;
         } catch {
           if (!isCurrentLoadRequest(requestId)) return;
+          const nextRootSetupDefaults = resolveRootSetupDefaults(emptyRootSetupDefaults, nextArtifactTypes);
+          const nextInspirations = await loadInspirationsForSetup(requestId, nextRootSetupDefaults.artifactTypeId);
+          if (!isCurrentLoadRequest(requestId) || !nextInspirations) return;
           setSessionState(null);
-          setRootSetupDefaults(emptyRootSetupDefaults);
+          setRootSetupDefaults(nextRootSetupDefaults);
+          setInspirations(nextInspirations);
           setMessage("草稿不存在或已归档。");
           setLoadState("root");
           return;
@@ -624,6 +689,11 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       }
 
       if (!data.rootMemory?.preferences.seed.trim()) {
+        const nextRootSetupDefaults = resolveRootSetupDefaults(null, nextArtifactTypes);
+        const nextInspirations = await loadInspirationsForSetup(requestId, nextRootSetupDefaults.artifactTypeId);
+        if (!isCurrentLoadRequest(requestId) || !nextInspirations) return;
+        setRootSetupDefaults(nextRootSetupDefaults);
+        setInspirations(nextInspirations);
         setLoadState("root");
         return;
       }
@@ -633,6 +703,11 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       if (!isCurrentLoadRequest(requestId)) return;
       if (!sessionResponse.ok) throw new Error(sessionData.error ?? "创作树加载失败。");
       if (!sessionData.state) {
+        const nextRootSetupDefaults = resolveRootSetupDefaults(null, nextArtifactTypes);
+        const nextInspirations = await loadInspirationsForSetup(requestId, nextRootSetupDefaults.artifactTypeId);
+        if (!isCurrentLoadRequest(requestId) || !nextInspirations) return;
+        setRootSetupDefaults(nextRootSetupDefaults);
+        setInspirations(nextInspirations);
         setLoadState("root");
         return;
       }
@@ -643,6 +718,32 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       if (!isCurrentLoadRequest(requestId)) return;
       setMessage(error instanceof Error ? error.message : "无法加载 Seed。");
       setLoadState("error");
+    }
+  }
+
+  async function loadInspirationsForSetup(requestId: number, artifactTypeId: ArtifactTypeId) {
+    try {
+      const response = await fetch(apiPath(`/api/inspirations?artifactTypeId=${encodeURIComponent(artifactTypeId)}`));
+      if (!isCurrentLoadRequest(requestId)) return null;
+      if (!response.ok) return [];
+      const data = await response.json();
+      if (!isCurrentLoadRequest(requestId)) return null;
+      return normalizeInspirationsResponse(data);
+    } catch {
+      return [];
+    }
+  }
+
+  async function refreshInspirationsForSetup(artifactTypeId: ArtifactTypeId) {
+    try {
+      const response = await fetch(apiPath(`/api/inspirations?artifactTypeId=${encodeURIComponent(artifactTypeId)}`));
+      if (!response.ok) {
+        setInspirations([]);
+        return;
+      }
+      setInspirations(normalizeInspirationsResponse(await response.json()));
+    } catch {
+      setInspirations([]);
     }
   }
 
@@ -1289,7 +1390,8 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   }
 
   function openSeedSetup(defaults: RootSetupDefaults | null = null) {
-    setRootSetupDefaults(defaults);
+    const nextRootSetupDefaults = resolveRootSetupDefaults(defaults, artifactTypes);
+    setRootSetupDefaults(nextRootSetupDefaults);
     setLoadState("root");
     setCustomOption(null);
     setPendingChoice(null);
@@ -1304,6 +1406,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setIsSkillLibraryOpen(false);
     setDraftComparison(null);
     setMessage("");
+    void refreshInspirationsForSetup(nextRootSetupDefaults.artifactTypeId);
   }
 
   function startNewSeed() {
@@ -1386,13 +1489,16 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     return (
       <>
         <RootMemorySetup
+          artifactTypes={artifactTypes}
           initialCreationRequest={rootSetupDefaults?.creationRequest}
           initialCreationRequestOptions={creationRequestOptions}
           initialArtifactTypeId={rootSetupDefaults?.artifactTypeId}
           initialSeed={rootSetupDefaults?.seed}
           initialSkillIds={rootSetupDefaults?.enabledSkillIds}
+          inspirations={inspirations}
           message={message}
           onBack={sessionState ? returnToCurrentWork : undefined}
+          onArtifactTypeChange={(artifactTypeId) => void refreshInspirationsForSetup(artifactTypeId)}
           onCreationRequestOptionsChange={setCreationRequestOptions}
           onCreateSkill={createLibrarySkill}
           onManageSkills={() => setIsSkillLibraryOpen(true)}

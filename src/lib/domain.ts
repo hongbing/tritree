@@ -72,6 +72,14 @@ export const CreationRequestOptionSchema = CreationRequestOptionUpsertSchema.ext
   updatedAt: z.string()
 });
 
+export const InspirationSchema = z.object({
+  id: z.string().trim().min(1),
+  title: z.string().trim().min(1),
+  detail: z.string().trim().min(1),
+  artifactTypeId: ArtifactTypeIdSchema.optional(),
+  artifactTypeIds: z.array(ArtifactTypeIdSchema).optional()
+});
+
 export const DEFAULT_SYSTEM_SKILLS = [
   {
     id: "system-writer",
@@ -536,6 +544,7 @@ export type RootPreferences = z.input<typeof RootPreferencesSchema>;
 export type ArtifactTypeId = z.infer<typeof ArtifactTypeIdSchema>;
 export type CreationRequestOption = z.infer<typeof CreationRequestOptionSchema>;
 export type CreationRequestOptionUpsert = z.input<typeof CreationRequestOptionUpsertSchema>;
+export type Inspiration = z.infer<typeof InspirationSchema>;
 export type SkillCategory = z.infer<typeof SkillCategorySchema>;
 export type Skill = z.infer<typeof SkillSchema>;
 export type SkillUpsert = z.input<typeof SkillUpsertSchema>;

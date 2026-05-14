@@ -65,11 +65,42 @@ npm run dev
 
 ## 使用流程
 
-1. 点击「新念头」，选择作品类型，输入 seed 和创作要求。
+1. 点击「新念头」，选择作品类型，输入 seed 和创作要求。若只配置了一个作品类型，页面会直接使用该类型。
 2. 可选配置「我的风格」和本轮 Skills。
 3. 生成第一版作品后，在创作树里选择一个方向，或写下自己的方向。
 4. 审阅 diff、手动编辑，或对选中文本发起局部 AI 改写。
 5. 内容接近完成后打开发布或交付助手，复制最终版本。
+
+## 灵感接口
+
+新 seed 页面可以显示外部灵感列表。配置 `TRITREE_INSPIRATION_URL` 后，Tritree 会通过后端代理请求该接口；如需认证，可配置 `TRITREE_INSPIRATION_TOKEN`，请求会带上 `Authorization: Bearer <token>`。请求会附加当前作品类型，例如 `?artifactTypeId=social-post` 或 `?artifactTypeId=prd`。
+
+接口返回：
+
+```json
+{
+  "inspirations": [
+    {
+      "id": "idea-1",
+      "title": "AI 产品真实困境",
+      "detail": "我想写 AI 产品经理在真实项目里的困境。",
+      "artifactTypeIds": ["social-post"]
+    }
+  ]
+}
+```
+
+本地调试时可设置 `TRITREE_MOCK_INSPIRATIONS=1`，无需外部接口也会在新 seed 页面显示模拟灵感。
+
+## 作品类型配置
+
+默认展示全部作品类型。可通过 `TRITREE_ARTIFACT_TYPES` 控制新 seed 页面和生成流程可用的类型：
+
+```env
+TRITREE_ARTIFACT_TYPES=social-post,prd
+```
+
+设置为 `prd` 时只展示 PRD 内容，seed 页面不会显示作品类型选择。设置为 `all` 或留空时展示全部类型。
 
 ## 技术栈
 

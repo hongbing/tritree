@@ -168,8 +168,8 @@ describe("TreeCanvas", () => {
     expect(within(tray).getByText("这次最需要先确认什么？")).toBeInTheDocument();
     expect(main.querySelectorAll('[data-choice-button="true"]')).toHaveLength(3);
     expect(within(main).getByRole("button", { name: /具体场景/ })).toBeEnabled();
-    expect(within(controls).getByRole("button", { name: "更多方向" })).toBeEnabled();
-    expect(screen.queryByLabelText("补充要求 A")).not.toBeInTheDocument();
+    expect(within(controls).getByRole("button", { name: "自己写方向" })).toBeEnabled();
+    expect(screen.queryByLabelText("补充想法 A")).not.toBeInTheDocument();
     expect(tray.querySelector("foreignObject")).toBeNull();
   });
 
@@ -366,8 +366,9 @@ describe("TreeCanvas", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: /A 拆解核心矛盾来源/ })).toBeEnabled();
-    expect(screen.getByText("拆解核心矛盾来源")).toBeInTheDocument();
+    const optionButton = screen.getByRole("button", { name: /A 拆解核心矛盾来源/ });
+    expect(optionButton).toBeEnabled();
+    expect(within(optionButton).getByText("拆解核心矛盾来源")).toBeInTheDocument();
     expect(screen.queryByText("拆解核心矛盾")).not.toBeInTheDocument();
   });
 
@@ -385,34 +386,67 @@ describe("TreeCanvas", () => {
 
     expect(main).toHaveClass("branch-option-main--horizontal");
     expect(main).not.toHaveClass("branch-option-main--vertical");
-    expect(within(main).getAllByText(/Explore|Deepen|Finish/)).toHaveLength(3);
+    expect(main.querySelectorAll(".branch-card__choose .branch-card__description")).toHaveLength(3);
     expect(within(screen.getByRole("button", { name: /A 具体场景/ })).getByText("Explore")).toHaveClass(
       "branch-card__description"
     );
   });
 
-  it("keeps long option copy clipped inside the existing three-card layout", () => {
+  it("keeps long option copy readable through hover previews without leaving the three-card layout", () => {
     const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    const treeCanvasRule = css.match(/\.tree-canvas\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const treeShellRule = css.match(/\.tree-viewport-shell\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
     const mainRule = css.match(/\.branch-option-main\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const cardRule = css.match(/\.branch-card--option:not\(\.branch-card--side\)\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
     const descriptionRule =
       css.match(/\.branch-card--option:not\(\.branch-card--side\) \.branch-card__description\s*\{(?<body>[^}]+)\}/)
         ?.groups?.body ?? "";
-    const expandedDescriptionRule =
-      css.match(
-        /\.branch-card--option:not\(\.branch-card--side\) \.branch-card__description--expanded\s*\{(?<body>[^}]+)\}/
-      )?.groups?.body ?? "";
-    const metaRule = css.match(/\.branch-card__meta\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
-    const moreRule = css.match(/\.branch-card__more\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const previewRule = css.match(/\.branch-card__hover-preview\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const hoverPreviewRule = css.match(/\.branch-card:hover \.branch-card__hover-preview\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
 
+    expect(treeCanvasRule).toContain("min-height: 260px");
+    expect(treeCanvasRule).toContain("grid-template-rows: minmax(260px, 1fr) auto");
+    expect(treeShellRule).toContain("min-height: 260px");
     expect(mainRule).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
     expect(mainRule).toContain("align-items: start");
+    expect(mainRule).toContain("overflow: visible");
+    expect(cardRule).toContain("max-height: 176px");
     expect(descriptionRule).toContain("overflow: hidden");
-    expect(descriptionRule).toContain("-webkit-line-clamp: 3");
-    expect(expandedDescriptionRule).toContain("-webkit-line-clamp: unset");
-    expect(metaRule).toContain("justify-content: flex-start");
-    expect(metaRule).toContain("border-top: 1px solid");
-    expect(moreRule).toContain("background: transparent");
-    expect(moreRule).toContain("border: 0");
+    expect(descriptionRule).toContain("-webkit-line-clamp: 5");
+    expect(previewRule).toContain("position: absolute");
+    expect(previewRule).toContain("bottom: calc(100% + 8px)");
+    expect(hoverPreviewRule).toContain("display: block");
+  });
+
+  it("only renders hover previews for option copy that may be truncated", () => {
+    const { container, rerender } = render(
+      <BranchOptionTray
+        isBusy={false}
+        onChoose={vi.fn()}
+        options={currentNode.options}
+        pendingChoice={null}
+      />
+    );
+
+    expect(container.querySelector(".branch-card__hover-preview")).toBeNull();
+
+    rerender(
+      <BranchOptionTray
+        isBusy={false}
+        onChoose={vi.fn()}
+        options={[
+          {
+            ...currentNode.options[0],
+            description:
+              "把这一轮内容改成一个完整的长方向：先交代为什么读者会在这里卡住，再给出具体的表达切口，最后说明这个切口会如何影响下一版草稿的结构、语气、信息密度和结尾判断。"
+          },
+          ...currentNode.options.slice(1)
+        ]}
+        pendingChoice={null}
+      />
+    );
+
+    expect(container.querySelectorAll(".branch-card__hover-preview")).toHaveLength(1);
   });
 
   it("caps long current questions so the three choices remain visible", () => {
@@ -422,18 +456,18 @@ describe("TreeCanvas", () => {
     const questionTextRule = css.match(/\.branch-option-question__text\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
     const mainRule = css.match(/\.branch-option-main\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
 
-    expect(trayRule).toContain("max-height: min(320px, calc(100dvh - 220px))");
-    expect(trayRule).toContain("overflow: hidden");
+    expect(trayRule).toContain("max-height: min(420px, calc(100dvh - 180px))");
+    expect(trayRule).toContain("overflow: visible");
     expect(questionRule).toContain("max-height:");
     expect(questionRule).toContain("overflow: auto");
     expect(questionRule).toContain("overscroll-behavior: contain");
     expect(questionTextRule).toContain("overflow-wrap: anywhere");
     expect(questionTextRule).toContain("word-break: break-word");
     expect(mainRule).toContain("min-height: 0");
-    expect(mainRule).toContain("overflow: auto");
+    expect(mainRule).toContain("overflow: visible");
   });
 
-  it("expands an option card on first click before showing the confirmation controls", () => {
+  it("selects an option before showing the shared writing controls", () => {
     const onChoose = vi.fn();
     const longDescription =
       "把当前内容重构为面向计划去青岛的读者的实用攻略，保留行程骨架，但增加交通建议、预算参考、排队避坑技巧、餐厅具体位置等实用信息。";
@@ -446,21 +480,26 @@ describe("TreeCanvas", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "A 展开详情" })).toHaveTextContent("详情");
-    expect(screen.queryByLabelText("补充要求 A")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "A 确认生成" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("补充想法 A")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "A 按这个方向写" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /A 具体场景/ }));
 
     expect(onChoose).not.toHaveBeenCalled();
-    expect(screen.getByText(longDescription)).toHaveClass("branch-card__description--expanded");
-    expect(screen.getByRole("button", { name: "A 收起详情" })).toHaveTextContent("收起");
-    expect(screen.getByLabelText("补充要求 A")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "A 确认生成" })).toBeInTheDocument();
+    const focusPanel = screen.getByRole("group", { name: "已选方向" });
+    expect(focusPanel).toHaveClass("branch-option-focus");
+    expect(within(focusPanel).getByRole("button", { name: /A 具体场景/ })).toHaveClass("branch-card__choose");
+    expect(screen.getByText("已选 A")).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "A 写作操作" })).queryByText("具体场景")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "A 写作操作" })).queryByText(longDescription)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("补充想法 A")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "A 按这个方向写" })).toBeInTheDocument();
+    expect(screen.getByText("还想补一句吗？")).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "其他方向" })).getByRole("button", { name: /切换到 B/ })).toBeInTheDocument();
     expect(screen.queryByText("更多备注")).not.toBeInTheDocument();
   });
 
-  it("submits supplemental requests from inside the note panel", () => {
+  it("submits supplemental requests from the shared writing controls", () => {
     const onChoose = vi.fn();
     render(
       <BranchOptionTray
@@ -472,14 +511,34 @@ describe("TreeCanvas", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /A 具体场景/ }));
-    fireEvent.change(screen.getByLabelText("补充要求 A"), {
+    fireEvent.change(screen.getByLabelText("补充想法 A"), {
       target: { value: "请用更尖锐一点的对比。" }
     });
     expect(onChoose).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "A 确认生成" }));
+    fireEvent.click(screen.getByRole("button", { name: "A 按这个方向写" }));
 
     expect(onChoose).toHaveBeenCalledWith("a", "请用更尖锐一点的对比。", "balanced");
+  });
+
+  it("lets the user close the writing controls and return to the three choices", () => {
+    render(
+      <BranchOptionTray
+        isBusy={false}
+        onChoose={vi.fn()}
+        options={currentNode.options}
+        pendingChoice={null}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /A 具体场景/ }));
+
+    expect(screen.getByRole("group", { name: "已选方向" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "关闭写作操作" }));
+
+    expect(screen.queryByRole("group", { name: "已选方向" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "A 写作操作" })).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "三个主选项" })).toBeInTheDocument();
   });
 
   it("uses one tray-level direction range control for choosing option mode", () => {
@@ -508,7 +567,7 @@ describe("TreeCanvas", () => {
     expect(within(range).getByRole("button", { name: "发散" })).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.click(screen.getByRole("button", { name: /A 具体场景/ }));
-    fireEvent.click(screen.getByRole("button", { name: "A 确认生成" }));
+    fireEvent.click(screen.getByRole("button", { name: "A 按这个方向写" }));
 
     expect(onChoose).toHaveBeenCalledWith("a", "", "divergent");
   });
@@ -570,8 +629,8 @@ describe("TreeCanvas", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /A 具体场景/ }));
 
-    expect(screen.getByLabelText("补充要求 A")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "A 确认生成" })).toBeInTheDocument();
+    expect(screen.getByLabelText("补充想法 A")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "A 按这个方向写" })).toBeInTheDocument();
     expect(screen.getAllByRole("group", { name: "发散度" })).toHaveLength(1);
     expect(screen.queryByRole("group", { name: "A 生成倾向" })).not.toBeInTheDocument();
   });
@@ -591,8 +650,8 @@ describe("TreeCanvas", () => {
     const tray = screen.getByRole("group", { name: "回答当前问题" });
     const controls = within(tray).getByRole("group", { name: "方向控制" });
 
-    expect(within(controls).getByRole("button", { name: "更多方向" })).toBeEnabled();
-    expect(within(controls).getByText("自定义")).toBeInTheDocument();
+    expect(within(controls).getByRole("button", { name: "自己写方向" })).toBeEnabled();
+    expect(within(controls).getByText("自己写方向")).toBeInTheDocument();
     expect(within(controls).queryByRole("button", { name: /自定义视角/ })).not.toBeInTheDocument();
   });
 
@@ -608,14 +667,14 @@ describe("TreeCanvas", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "更多方向" }));
+    fireEvent.click(screen.getByRole("button", { name: "自己写方向" }));
     expect(screen.queryByLabelText("自定义方向短标题")).not.toBeInTheDocument();
     expect(screen.queryByText("确认添加自定义")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "关闭更多方向" }));
-    expect(screen.queryByRole("textbox", { name: "更多方向" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "关闭自己写方向" }));
+    expect(screen.queryByRole("textbox", { name: "自己写方向" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "更多方向" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "更多方向" }), {
+    fireEvent.click(screen.getByRole("button", { name: "自己写方向" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "自己写方向" }), {
       target: { value: "从一句办公室黑话切入。" }
     });
     fireEvent.click(screen.getByRole("button", { name: "添加" }));
@@ -656,7 +715,7 @@ describe("TreeCanvas", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "更多方向" }));
+    fireEvent.click(screen.getByRole("button", { name: "自己写方向" }));
     fireEvent.click(screen.getByRole("button", { name: "使用技能 润色" }));
 
     expect(onAddCustomOption).toHaveBeenCalledWith({
@@ -680,8 +739,8 @@ describe("TreeCanvas", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "更多方向" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "更多方向" }), {
+    fireEvent.click(screen.getByRole("button", { name: "自己写方向" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "自己写方向" }), {
       target: { value: "从一句办公室黑话切入写职场沟通的荒诞感。" }
     });
     fireEvent.click(screen.getByRole("button", { name: "添加" }));
@@ -709,7 +768,7 @@ describe("TreeCanvas", () => {
     fireEvent.click(within(range).getByRole("button", { name: "专注" }));
     fireEvent.click(screen.getByRole("button", { name: /A 具体场景/ }));
     expect(screen.queryByRole("group", { name: "A 生成倾向" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "A 确认生成" }));
+    fireEvent.click(screen.getByRole("button", { name: "A 按这个方向写" }));
 
     expect(onChoose).toHaveBeenCalledWith("a", "", "focused");
     expect(within(screen.getByRole("group", { name: "方向控制" })).queryAllByText("专注")).toHaveLength(1);
@@ -1028,7 +1087,7 @@ describe("TreeCanvas", () => {
       });
       expect(tray.querySelectorAll('[data-choice-button="true"]')).toHaveLength(3);
       expect(within(tray).getByRole("button", { name: /反驳误解/ })).toBeEnabled();
-      expect(within(tray).getByRole("button", { name: "更多方向" })).toBeEnabled();
+      expect(within(tray).getByRole("button", { name: "自己写方向" })).toBeEnabled();
     } finally {
       vi.useRealTimers();
     }
@@ -1069,7 +1128,7 @@ describe("TreeCanvas", () => {
       });
 
       expect(within(tray).getByRole("button", { name: /具体场景/ })).toBeEnabled();
-      expect(within(tray).getByRole("button", { name: "更多方向" })).toBeEnabled();
+      expect(within(tray).getByRole("button", { name: "自己写方向" })).toBeEnabled();
     } finally {
       vi.useRealTimers();
     }
@@ -1208,6 +1267,32 @@ describe("TreeCanvas", () => {
     expect(mobileRule).toContain("grid-template-columns: 1fr");
     expect(mobileRule).toContain(".branch-option-tray__controls > .branch-side-action");
     expect(mobileRule).toContain("margin-left: 0");
+  });
+
+  it("stacks the selected mobile option above the writing controls", () => {
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    const mobileWorkspaceRule = css.match(/@media \(max-width: 980px\)\s*\{(?<body>[\s\S]+?)@media \(max-width: 640px\)/)
+      ?.groups?.body ?? "";
+    const focusRule =
+      mobileWorkspaceRule.match(/\.tree-canvas--options \.branch-option-focus\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const selectedCardRule =
+      mobileWorkspaceRule.match(
+        /\.tree-canvas--options \.branch-option-focus__selected \.branch-card--option:not\(\.branch-card--side\)\s*\{(?<body>[^}]+)\}/
+      )?.groups?.body ?? "";
+    const composerRule =
+      mobileWorkspaceRule.match(/\.tree-canvas--options \.branch-option-focus__composer\s*\{(?<body>[^}]+)\}/)?.groups?.body ??
+      "";
+    const composerCardRule =
+      mobileWorkspaceRule.match(
+        /\.tree-canvas--options \.branch-option-focus__composer \.branch-option-composer\s*\{(?<body>[^}]+)\}/
+      )?.groups?.body ?? "";
+
+    expect(focusRule).toContain("grid-template-columns: 1fr");
+    expect(focusRule).toContain("grid-template-rows: auto");
+    expect(selectedCardRule).toContain("height: auto");
+    expect(composerRule).toContain("grid-column: auto");
+    expect(composerRule).toContain("grid-row: auto");
+    expect(composerCardRule).toContain("height: auto");
   });
 
   it("lets the full mobile options question expand the page height", () => {

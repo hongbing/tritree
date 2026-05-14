@@ -2858,7 +2858,7 @@ describe("TreeableApp", () => {
     });
   });
 
-  it("shows a retry action after draft generation fails for a draftless current node", async () => {
+  it("shows a toast retry action after draft generation fails for a draftless current node", async () => {
     installMobileViewport();
     const nodeOnlyState = {
       ...activeState,
@@ -2913,11 +2913,12 @@ describe("TreeableApp", () => {
     render(<TreeableApp />);
     await userEvent.click(await screen.findByRole("button", { name: "choose displayed option" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("流式生成失败");
+    const failureToast = await screen.findByRole("status");
+    expect(failureToast).toHaveTextContent("流式生成失败");
+    const retryButton = within(failureToast).getByRole("button", { name: "重试生成" });
     expect(within(screen.getByTestId("mock-draft-actions")).queryByRole("button", { name: "重试生成" })).not.toBeInTheDocument();
-    const retryActionArea = screen.getByTestId("mock-draft-empty-actions");
     expect(screen.getByRole("button", { name: "展开树图" })).toHaveAttribute("aria-expanded", "false");
-    await userEvent.click(within(retryActionArea).getByRole("button", { hidden: true, name: "重试生成" }));
+    await userEvent.click(retryButton);
     expect(screen.getByRole("button", { name: "展开树图" })).toHaveAttribute("aria-expanded", "false");
 
     await vi.waitFor(() => {

@@ -1,7 +1,9 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { Agent } from "@mastra/core/agent";
 import type { ToolsInput } from "@mastra/core/agent";
+import { TokenLimiterProcessor } from "@mastra/core/processors";
 import { getDirectorAuthToken, getDirectorBaseUrl, getDirectorModel } from "./director";
+import { DEFAULT_MAX_OUTPUT_TOKENS, resolveModelContextBudget } from "./model-context";
 import {
   buildTreeDraftInstructions,
   buildTreeNextStepInstructions,
@@ -38,6 +40,8 @@ export function createTreeDraftAgent(
     name: "Treeable Tree Draft Agent",
     instructions: buildTreeDraftInstructions(context),
     model: createTreeableAnthropicModel(env),
+    defaultOptions: { modelSettings: { maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS } },
+    inputProcessors: [new TokenLimiterProcessor({ limit: resolveModelContextBudget(env).inputBudgetTokens })],
     ...(hasTools(tools) ? { tools } : {})
   });
 }
@@ -52,6 +56,8 @@ export function createTreeOptionsAgent(
     name: "Treeable Tree Options Agent",
     instructions: buildTreeOptionsInstructions(context),
     model: createTreeableAnthropicModel(env),
+    defaultOptions: { modelSettings: { maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS } },
+    inputProcessors: [new TokenLimiterProcessor({ limit: resolveModelContextBudget(env).inputBudgetTokens })],
     ...(hasTools(tools) ? { tools } : {})
   });
 }
@@ -66,6 +72,8 @@ export function createTreeNextStepAgent(
     name: "Treeable Tree Next Step Agent",
     instructions: buildTreeNextStepInstructions(context),
     model: createTreeableAnthropicModel(env),
+    defaultOptions: { modelSettings: { maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS } },
+    inputProcessors: [new TokenLimiterProcessor({ limit: resolveModelContextBudget(env).inputBudgetTokens })],
     ...(hasTools(tools) ? { tools } : {})
   });
 }

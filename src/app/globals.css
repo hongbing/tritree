@@ -4267,12 +4267,43 @@ button:disabled {
   position: fixed;
   right: 16px;
   bottom: 16px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
   max-width: min(420px, calc(100vw - 32px));
   padding: 12px 14px;
   color: #fff7ed;
   background: #9a3412;
   border-radius: 8px;
   box-shadow: var(--shadow);
+}
+
+.toast__message {
+  min-width: 0;
+}
+
+.toast--with-action {
+  max-width: min(520px, calc(100vw - 32px));
+}
+
+.toast-action {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 9px;
+  color: #7c2d12;
+  font-size: 0.8rem;
+  font-weight: 850;
+  background: #ffedd5;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.toast-action:hover {
+  background: #fed7aa;
 }
 
 @media (max-width: 980px) {

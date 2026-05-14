@@ -159,6 +159,11 @@ describe("createTreeOptionsAgent", () => {
         instructions: expect.stringContaining("run_skill_command")
       })
     );
+    expect(mocks.agentConstructor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputProcessors: expect.arrayContaining([expect.objectContaining({ id: "token-limiter" })])
+      })
+    );
   });
 });
 
@@ -577,6 +582,59 @@ describe("tree director compatibility generators", () => {
         structuredOutput: expect.objectContaining({ schema: expect.anything() })
       })
     );
+  });
+
+  it("compacts oversized historical agent messages before passing them to the draft agent", async () => {
+    const finalObject = {
+      roundIntent: "继续完善",
+      draft: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" },
+    };
+    const fakeAgent = {
+      generate: vi.fn(async () => ({ object: finalObject }))
+    };
+    const partsWithLargeHistory: DirectorInputParts = {
+      ...directorParts,
+      messages: [
+        { role: "user", content: "初始内容：写作为什么重要" },
+        { role: "assistant", content: "旧版本：" + "旧正文".repeat(500) },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolName: "statusServer_getTimeline",
+              output: {
+                type: "json",
+                value: {
+                  statuses: ["RAW_TIMELINE_SHOULD_NOT_BE_REPLAYED".repeat(80)]
+                }
+              }
+            }
+          ]
+        },
+        { role: "user", content: "最终请求：请生成下一版草稿。" }
+      ]
+    };
+
+    await expect(
+      generateTreeDraft({
+        parts: partsWithLargeHistory,
+        env: {
+          TRITREE_CONTEXT_SAFETY_TOKENS: "128",
+          TRITREE_MAX_OUTPUT_TOKENS: "128",
+          TRITREE_MODEL_CONTEXT_TOKENS: "900"
+        },
+        treeDraftAgent: fakeAgent
+      })
+    ).resolves.toEqual(finalObject);
+
+    const generateCalls = fakeAgent.generate.mock.calls as unknown as unknown[][];
+    const sentMessages = (generateCalls[0]?.[0] ?? []) as Array<{ content: unknown; role: string }>;
+    const serialized = JSON.stringify(sentMessages);
+    expect(sentMessages[0]?.content).toContain("初始内容");
+    expect(sentMessages.at(-1)?.content).toContain("最终请求");
+    expect(serialized).toContain("已省略");
+    expect(serialized).not.toContain("RAW_TIMELINE_SHOULD_NOT_BE_REPLAYED");
   });
 
   it("logs the full generated draft response once by default", async () => {

@@ -32,16 +32,16 @@ describe("publicServerErrorMessage", () => {
     );
   });
 
-  it("surfaces structured upstream errors without knowing provider-specific codes", () => {
+  it("hides structured upstream errors behind the fallback", () => {
     expect(
       publicServerErrorMessage(
         { code: "insufficient_quota", message: "You exceeded your current quota.", status: 429 },
         "无法启动创作。"
       )
-    ).toBe("无法启动创作：上游服务返回 429：You exceeded your current quota.");
+    ).toBe("无法启动创作。");
   });
 
-  it("includes retry timing from generic upstream headers", () => {
+  it("hides retry timing and provider messages from upstream errors", () => {
     expect(
       publicServerErrorMessage(
         {
@@ -59,22 +59,22 @@ describe("publicServerErrorMessage", () => {
         },
         "无法启动创作。"
       )
-    ).toBe("无法启动创作：上游服务返回 429，可在 60 秒后重试：The engine is currently overloaded, please try again later");
+    ).toBe("无法启动创作。");
   });
 
-  it("surfaces authentication failures through the same status/message path", () => {
+  it("hides authentication failures instead of exposing raw provider text", () => {
     expect(
       publicServerErrorMessage({ code: "authentication_error", message: "invalid token", status: 401 }, "无法启动创作。")
-    ).toBe("无法启动创作：上游服务返回 401：invalid token");
+    ).toBe("无法启动创作。");
   });
 
-  it("surfaces generic script failures without a per-skill adapter", () => {
+  it("hides generic script failure output from public errors", () => {
     expect(
       publicServerErrorMessage({ exitCode: 2, stderr: "search failed because browser gateway is unavailable" }, "无法运行 Skill。")
-    ).toBe("无法运行 Skill：命令退出 2：search failed because browser gateway is unavailable");
+    ).toBe("无法运行 Skill。");
   });
 
-  it("surfaces structured agent errors without knowing their specific ids", () => {
+  it("hides structured agent errors without knowing their specific ids", () => {
     const error = Object.assign(new Error("Structured output validation failed: - root: Required"), {
       category: "SYSTEM",
       details: { value: "undefined" },
@@ -82,12 +82,10 @@ describe("publicServerErrorMessage", () => {
       id: "STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED"
     });
 
-    expect(publicServerErrorMessage(error, "无法启动创作。")).toBe(
-      "无法启动创作：AGENT/STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED：Structured output validation failed: - root: Required"
-    );
+    expect(publicServerErrorMessage(error, "无法启动创作。")).toBe("无法启动创作。");
   });
 
-  it("redacts obvious secrets from surfaced error details", () => {
+  it("hides response bodies even when they contain redacted secrets", () => {
     expect(
       publicServerErrorMessage(
         {
@@ -100,7 +98,24 @@ describe("publicServerErrorMessage", () => {
         },
         "无法启动创作。"
       )
-    ).toBe("无法启动创作：上游服务返回 400：Authorization: Bearer [redacted] and api_key=[redacted]");
+    ).toBe("无法启动创作。");
+  });
+
+  it("returns a friendly context-length hint without exposing provider details", () => {
+    expect(
+      publicServerErrorMessage(
+        {
+          statusCode: 400,
+          responseBody: JSON.stringify({
+            error: {
+              message:
+                "无法生成下一版草稿：上游服务返回 400：对话内容太长，已超出当前模型的处理能力。model_id: moonshot-kimi-k2.6"
+            }
+          })
+        },
+        "无法生成下一版草稿。"
+      )
+    ).toBe("无法生成下一版草稿：内容较长，已尝试压缩后仍超出当前模型处理范围。");
   });
 
   it("hides unrelated internal server errors behind the fallback", () => {

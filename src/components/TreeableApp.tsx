@@ -1579,6 +1579,17 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   const comparisonLabels =
     comparisonFrom && comparisonTo ? { from: comparisonFrom.label, to: comparisonTo.label } : null;
   const changedDraftNodeIds = changedDraftNodeIdsForState(sessionState);
+  const toastRetryAction = canRetryDraftGeneration
+    ? {
+        label: "重试生成",
+        onClick: retryDraftGeneration
+      }
+    : canRetryMissingOptions
+      ? {
+          label: "重试生成",
+          onClick: () => regenerateOptionsForCurrentNode("focused")
+        }
+      : null;
 
   function startDraftComparison() {
     if (comparisonEntries.length < 2) return;
@@ -1888,8 +1899,14 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
         ) : null}
       </div>
       {message ? (
-        <div className="toast" role="status">
-          {message}
+        <div className={`toast${toastRetryAction ? " toast--with-action" : ""}`} role="status">
+          <span className="toast__message">{message}</span>
+          {toastRetryAction ? (
+            <button className="toast-action" onClick={() => void toastRetryAction.onClick()} type="button">
+              <RotateCcw aria-hidden="true" size={14} strokeWidth={2.4} />
+              <span>{toastRetryAction.label}</span>
+            </button>
+          ) : null}
         </div>
       ) : null}
     </main>

@@ -17,12 +17,21 @@ export function publicServerErrorMessage(error: unknown, fallback: string) {
   const details = publicErrorDetails(error);
 
   if (!details) return fallback;
-  return `${trimSentenceEnd(fallback)}：${formatPublicErrorDetails(details)}`;
+  if (details.kind === "configuration" && details.message) {
+    return `${trimSentenceEnd(fallback)}：${details.message}`;
+  }
+
+  if (details.kind === "context-length") {
+    return `${trimSentenceEnd(fallback)}：内容较长，已尝试压缩后仍超出当前模型处理范围。`;
+  }
+
+  return fallback;
 }
 
 type PublicErrorDetails = {
   exitCode?: number;
   identifier?: string;
+  kind: "configuration" | "context-length" | "hidden";
   message?: string;
   retryAfterSeconds?: number;
   status?: number;
@@ -63,28 +72,20 @@ function publicErrorDetails(error: unknown): PublicErrorDetails | null {
   if (!hasExternalBoundaryShape && !hasStructuredBoundaryShape && !hasSafeConfigurationShape) return null;
 
   const sanitizedMessage = sanitizePublicMessage(message);
+  const kind = hasSafeConfigurationShape
+    ? "configuration"
+    : isContextLengthMessage(sanitizedMessage)
+      ? "context-length"
+      : "hidden";
 
   return {
     exitCode,
     identifier: hasStructuredBoundaryShape ? [domain, id].filter(Boolean).join("/") : undefined,
+    kind,
     message: sanitizedMessage,
     retryAfterSeconds: numberFromUnknown(headers?.["retry-after"] ?? headers?.["x-retry-after"]),
     status
   };
-}
-
-function formatPublicErrorDetails(details: PublicErrorDetails) {
-  const headline = details.status !== undefined
-    ? `上游服务返回 ${details.status}`
-    : details.exitCode !== undefined
-      ? `命令退出 ${details.exitCode}`
-      : details.identifier ?? "";
-  const retryHint = details.retryAfterSeconds !== undefined ? `可在 ${details.retryAfterSeconds} 秒后重试` : "";
-  const prefix = [headline, retryHint].filter(Boolean).join("，");
-
-  if (prefix && details.message) return `${prefix}：${details.message}`;
-  if (prefix) return `${prefix}。`;
-  return details.message ?? "发生未知错误。";
 }
 
 function trimSentenceEnd(value: string) {
@@ -130,4 +131,9 @@ function sanitizePublicMessage(value: string | undefined) {
     .replace(/\b((?:api[_-]?key|token|password|secret)\s*[:=]\s*)["']?[^"',\s}]+/gi, "$1[redacted]")
     .replace(/([?&](?:api[_-]?key|token|authorization|password|secret|access_token)=)[^&\s]+/gi, "$1[redacted]");
   return redacted.length > 800 ? `${redacted.slice(0, 797)}...` : redacted;
+}
+
+function isContextLengthMessage(value: string | undefined) {
+  if (!value) return false;
+  return /(context|token|conversation|message|prompt|对话|上下文|内容|输入).{0,30}(long|length|limit|exceed|overflow|超|长|限制|窗口|处理能力)/i.test(value);
 }

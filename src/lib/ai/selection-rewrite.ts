@@ -118,7 +118,8 @@ export function createSelectionRewriteAgent(env: Record<string, string | undefin
     id: "treeable-selection-rewrite-agent",
     name: "Treeable Selection Rewrite Agent",
     instructions: SELECTION_REWRITE_SYSTEM_PROMPT,
-    model: createTreeableAnthropicModel(env)
+    model: createTreeableAnthropicModel(env),
+    defaultOptions: { modelSettings: { maxOutputTokens: 32000 } }
   });
 }
 

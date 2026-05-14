@@ -430,4 +430,37 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
     expect(text).toContain('"type":"done"');
     expect(text).toContain('"currentDraft":{"title":"新"');
   });
+
+  it("logs upstream failures while streaming only a safe public error", async () => {
+    const upstreamError = {
+      statusCode: 400,
+      responseBody: JSON.stringify({
+        error: {
+          message: "对话内容太长，已超出当前模型的处理能力。model_id: moonshot-kimi-k2.6"
+        }
+      })
+    };
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    getRepositoryMock.mockReturnValue({
+      getSessionState: vi.fn().mockReturnValue(state)
+    });
+    streamDirectorNextStepMock.mockRejectedValue(upstreamError);
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/draft/generate/stream", {
+        method: "POST",
+        body: JSON.stringify({ nodeId: "node-2" })
+      }),
+      { params: Promise.resolve({ sessionId: "session-1" }) }
+    );
+    const text = await response.text();
+
+    expect(text).toContain("无法生成下一版草稿");
+    expect(text).toContain("内容较长，已尝试压缩后仍超出当前模型处理范围");
+    expect(text).not.toContain("model_id");
+    expect(text).not.toContain("moonshot-kimi-k2.6");
+    expect(consoleErrorSpy).toHaveBeenCalledWith("[treeable:generate-draft-stream]", upstreamError);
+
+    consoleErrorSpy.mockRestore();
+  });
 });

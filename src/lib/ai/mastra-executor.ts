@@ -16,6 +16,7 @@ import { createTool } from "@mastra/core/tools";
 import { ZodError, type ZodIssue } from "zod";
 import { createSkillRuntimeTools } from "@/lib/skills/skill-runtime";
 import { createTreeDraftAgent, createTreeNextStepAgent, createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-agents";
+import { compactDirectorMessagesForModel } from "./model-context";
 import {
   buildTreeDraftInstructions,
   buildTreeNextStepInstructions,
@@ -186,7 +187,7 @@ export async function generateTreeDraft({
   const executionContext = await executionContextForDirectorParts(parts, "writer", context, Boolean(treeDraftAgent));
   const { agentContext, tools } = executionContext;
   try {
-    const messages = directorMessagesForParts(parts);
+    const messages = directorMessagesForParts(parts, env);
     logMastraPrompt("draft", agentContext, messages);
     const agent = treeDraftAgent ?? (createTreeDraftAgent(agentContext, env, tools) as unknown as TreeDraftAgentLike);
     const output = await withStructuredOutputRetries(messages, "draft", async (attemptMessages) => {
@@ -226,7 +227,7 @@ export async function generateTreeNextStep({
   const executionContext = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeNextStepAgent));
   const { agentContext, tools } = executionContext;
   try {
-    const messages = directorMessagesForParts(parts);
+    const messages = directorMessagesForParts(parts, env);
     logMastraPrompt("next-step", agentContext, messages);
     const agent = treeNextStepAgent ?? (createTreeNextStepAgent(agentContext, env, tools) as unknown as TreeNextStepAgentLike);
     const output = await withStructuredOutputRetries(messages, "next-step", async (attemptMessages) => {
@@ -271,7 +272,7 @@ export async function streamTreeNextStep({
     const runtimeHasTools = hasRuntimeTools(tools);
     const agentContextWithSubmit = runtimeHasTools ? withFinalSubmitToolSummary(agentContext, "next-step") : agentContext;
     const agentTools = runtimeHasTools ? withFinalSubmitTool(tools, "next-step") : tools;
-    const messages = directorMessagesForParts(parts);
+    const messages = directorMessagesForParts(parts, env);
     logMastraPrompt("next-step", agentContextWithSubmit, messages);
     const agent = treeNextStepAgent ?? (createTreeNextStepAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeNextStepAgentLike);
     if (runtimeHasTools) {
@@ -368,7 +369,7 @@ export async function streamTreeDraft({
     const runtimeHasTools = hasRuntimeTools(tools);
     const agentContextWithSubmit = runtimeHasTools ? withFinalSubmitToolSummary(agentContext, "draft") : agentContext;
     const agentTools = runtimeHasTools ? withFinalSubmitTool(tools, "draft") : tools;
-    const messages = directorMessagesForParts(parts);
+    const messages = directorMessagesForParts(parts, env);
     logMastraPrompt("draft", agentContextWithSubmit, messages);
     const agent = treeDraftAgent ?? (createTreeDraftAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeDraftAgentLike);
     if (runtimeHasTools) {
@@ -465,7 +466,7 @@ export async function streamTreeOptions({
     const runtimeHasTools = hasRuntimeTools(tools);
     const agentContextWithSubmit = runtimeHasTools ? withFinalSubmitToolSummary(agentContext, "options") : agentContext;
     const agentTools = runtimeHasTools ? withFinalSubmitTool(tools, "options") : tools;
-    const messages = directorMessagesForParts(parts);
+    const messages = directorMessagesForParts(parts, env);
     logMastraPrompt("options", agentContextWithSubmit, messages);
     const agent = treeOptionsAgent ?? (createTreeOptionsAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeOptionsAgentLike);
     if (runtimeHasTools) {
@@ -1311,8 +1312,11 @@ function memoryScopeForDirectorParts(parts: DirectorInputParts): MemoryScope {
   };
 }
 
-function directorMessagesForParts(parts: DirectorInputParts): MastraConversationMessage[] {
-  return parts.messages ?? [{ role: "user", content: buildDirectorInput(parts) }];
+function directorMessagesForParts(
+  parts: DirectorInputParts,
+  env: Record<string, string | undefined> | undefined
+): MastraConversationMessage[] {
+  return compactDirectorMessagesForModel(parts.messages ?? [{ role: "user", content: buildDirectorInput(parts) }], env);
 }
 
 function streamingStructuredOutput<TSchema>(schema: TSchema) {

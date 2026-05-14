@@ -134,10 +134,35 @@ type ParseableOutputSchema<TOutput> = {
 };
 
 type RuntimeToolStreamSummary = {
+  abortSignalAborted: boolean;
+  abortSignalReason: string;
   agentMessages: AgentMessage[];
   latestPartial: unknown;
   rawText: string;
+  streamChunkCount: number;
+  streamChunks: RuntimeStreamChunkSummary[];
+  streamDurationMs: number;
+  streamShape: RuntimeStreamShape;
   submittedOutput: unknown;
+};
+
+type RuntimeStreamShape = {
+  hasFullStream: boolean;
+  hasObject: boolean;
+  hasObjectStream: boolean;
+  hasOutput: boolean;
+};
+
+type RuntimeStreamChunkSummary = {
+  index: number;
+  keys: string[];
+  payloadKeys?: string[];
+  reasoningChars: number;
+  source: "fullStream" | "objectStream";
+  submittedOutput: boolean;
+  textChars: number;
+  toolName?: string;
+  type: string;
 };
 
 export type DirectorAgentTrace = {
@@ -707,6 +732,7 @@ async function streamRuntimeToolsOnce<TPartial, TOutput>({
   const summary = await consumeRuntimeReActStream<TPartial>(stream, {
     onPartialObject,
     onReasoningText,
+    signal,
     target
   });
   return {
@@ -720,9 +746,13 @@ async function consumeRuntimeReActStream<TPartial>(
   options: {
     onPartialObject?: (partial: TPartial) => void;
     onReasoningText?: (event: ReasoningTextEvent) => void;
+    signal?: AbortSignal;
     target: RuntimeSubmitTarget;
   }
 ): Promise<RuntimeToolStreamSummary> {
+  const streamStartedAt = Date.now();
+  const streamShape = runtimeStreamShape(stream);
+  const streamChunks: RuntimeStreamChunkSummary[] = [];
   let accumulatedProgressText = "";
   let hasSeenToolActivity = false;
   let hasSeenFinalSubmitOutput = false;
@@ -744,6 +774,7 @@ async function consumeRuntimeReActStream<TPartial>(
 
   if (stream.fullStream) {
     for await (const chunk of toAsyncIterable(stream.fullStream)) {
+      streamChunks.push(summarizeRuntimeStreamChunk(chunk, streamChunks.length, "fullStream"));
       logAiStream(options.target, "chunk", chunk);
       const textDelta = textDeltaFromStreamChunk(chunk);
       const submittedDeltaOutput = submittedOutputDeltaFromStreamChunk(chunk, toolCallDeltaState);
@@ -835,11 +866,23 @@ async function consumeRuntimeReActStream<TPartial>(
         break;
       }
     }
-    return { agentMessages: agentMessageHistoryState.messages, latestPartial, rawText, submittedOutput };
+    return {
+      abortSignalAborted: Boolean(options.signal?.aborted),
+      abortSignalReason: summarizeJsonValue(options.signal?.reason, 1000),
+      agentMessages: agentMessageHistoryState.messages,
+      latestPartial,
+      rawText,
+      streamChunkCount: streamChunks.length,
+      streamChunks,
+      streamDurationMs: Date.now() - streamStartedAt,
+      streamShape,
+      submittedOutput
+    };
   }
 
   if (stream.objectStream) {
     for await (const partial of toAsyncIterable(stream.objectStream)) {
+      streamChunks.push(summarizeRuntimeStreamChunk(partial, streamChunks.length, "objectStream"));
       logAiStream(options.target, "partial", partial);
       latestPartial = partial;
       options.onPartialObject?.(partial as TPartial);
@@ -851,7 +894,18 @@ async function consumeRuntimeReActStream<TPartial>(
     }
   }
 
-  return { agentMessages: agentMessageHistoryState.messages, latestPartial, rawText, submittedOutput };
+  return {
+    abortSignalAborted: Boolean(options.signal?.aborted),
+    abortSignalReason: summarizeJsonValue(options.signal?.reason, 1000),
+    agentMessages: agentMessageHistoryState.messages,
+    latestPartial,
+    rawText,
+    streamChunkCount: streamChunks.length,
+    streamChunks,
+    streamDurationMs: Date.now() - streamStartedAt,
+    streamShape,
+    submittedOutput
+  };
 }
 
 async function parseRuntimeReActStreamOutput<TOutput>(
@@ -955,16 +1009,51 @@ function logRuntimeStreamParseFailure(target: RuntimeSubmitTarget, summary: Runt
   console.info(
     `[tritree:ai-response:${target}:stream-parse-failed-details]`,
     stringifyDiagnosticValue({
+      abortSignalAborted: summary.abortSignalAborted,
+      abortSignalReason: summary.abortSignalReason,
       agentMessageCount: summary.agentMessages.length,
       agentMessages: summary.agentMessages,
       error: summarizeErrorForLog(error),
       latestPartial: summary.latestPartial ?? null,
       rawTextChars: summary.rawText.length,
       rawTextPreview: truncateText(summary.rawText, 12000),
+      streamChunkCount: summary.streamChunkCount,
+      streamChunks: summary.streamChunks.slice(0, 40),
+      streamDurationMs: summary.streamDurationMs,
+      streamShape: summary.streamShape,
       submittedOutput: summary.submittedOutput ?? null,
       target
     })
   );
+}
+
+function runtimeStreamShape(stream: StructuredObjectStreamResult): RuntimeStreamShape {
+  return {
+    hasFullStream: stream.fullStream !== undefined,
+    hasObject: stream.object !== undefined,
+    hasObjectStream: stream.objectStream !== undefined,
+    hasOutput: stream.output !== undefined
+  };
+}
+
+function summarizeRuntimeStreamChunk(
+  chunk: unknown,
+  index: number,
+  source: RuntimeStreamChunkSummary["source"]
+): RuntimeStreamChunkSummary {
+  const payload = isObjectRecord(chunk) && isObjectRecord(chunk.payload) ? chunk.payload : null;
+  const toolName = payload ? toolNameFromPayload(payload) : isObjectRecord(chunk) ? toolNameFromPayload(chunk) : "";
+  return {
+    index,
+    keys: streamChunkKeysForLog(chunk),
+    ...(payload ? { payloadKeys: Object.keys(payload).slice(0, 12) } : {}),
+    reasoningChars: reasoningDeltaFromStreamChunk(chunk).length,
+    source,
+    submittedOutput: submittedOutputFromStreamChunk(chunk) !== undefined,
+    textChars: textDeltaFromStreamChunk(chunk).length,
+    ...(toolName ? { toolName } : {}),
+    type: streamChunkTypeForLog(chunk)
+  };
 }
 
 function stringifyDiagnosticValue(value: unknown) {

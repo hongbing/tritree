@@ -2056,6 +2056,22 @@ describe("tree director compatibility generators", () => {
       "[tritree:ai-response:next-step:stream-parse-failed-details]",
       expect.stringContaining("agentMessages")
     );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[tritree:ai-response:next-step:stream-parse-failed-details]",
+      expect.stringContaining('"streamChunkCount": 3')
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[tritree:ai-response:next-step:stream-parse-failed-details]",
+      expect.stringContaining('"streamShape"')
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[tritree:ai-response:next-step:stream-parse-failed-details]",
+      expect.stringContaining('"abortSignalAborted": false')
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[tritree:ai-response:next-step:stream-parse-failed-details]",
+      expect.stringContaining('"type": "text-delta"')
+    );
   });
 
   it("suppresses noisy thinking text after the final submit tool has been called", async () => {

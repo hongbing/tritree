@@ -97,8 +97,8 @@ describe("system skill config loader", () => {
     ).toThrow("systemSkills must be a non-empty array");
   });
 
-  it("rejects duplicate system skill ids", () => {
-    expect(() =>
+  it("rejects duplicate system skill ids with the config path", () => {
+    const loadDuplicateConfig = () =>
       loadConfiguredSystemSkills({
         configPath: "/workspace/tritree/.tritree/system-skills.json",
         exists: () => true,
@@ -127,8 +127,10 @@ describe("system skill config loader", () => {
               }
             ]
           })
-      })
-    ).toThrow("Duplicate system skill id: system-writer");
+      });
+
+    expect(loadDuplicateConfig).toThrow("Duplicate system skill id: system-writer");
+    expect(loadDuplicateConfig).toThrow("/workspace/tritree/.tritree/system-skills.json");
   });
 
   it("parses valid skills through SkillUpsertSchema defaults and validation", () => {

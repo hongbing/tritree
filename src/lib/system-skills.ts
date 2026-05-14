@@ -73,7 +73,7 @@ export function loadConfiguredSystemSkills({
   const seen = new Set<string>();
   for (const skill of parsed.data.systemSkills) {
     if (seen.has(skill.id)) {
-      throw new Error(`Duplicate system skill id: ${skill.id}.`);
+      throw new Error(`System skills config ${resolvedPath} is invalid: Duplicate system skill id: ${skill.id}.`);
     }
     seen.add(skill.id);
   }

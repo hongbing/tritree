@@ -2337,6 +2337,94 @@ describe("TreeableApp", () => {
     });
   });
 
+  it("moves draft-stream routing thinking to the options area before option text arrives", async () => {
+    const nodeOnlyState = {
+      ...activeState,
+      session: { ...activeState.session, currentNodeId: "node-2" },
+      currentNode: {
+        ...activeState.currentNode,
+        id: "node-2",
+        parentId: "node-1",
+        parentOptionId: "a" as const,
+        roundIndex: 2,
+        roundIntent: "A",
+        options: []
+      },
+      currentDraft: null,
+      selectedPath: [
+        activeState.currentNode,
+        { ...activeState.currentNode, id: "node-2", parentId: "node-1", parentOptionId: "a" as const, options: [] }
+      ],
+      treeNodes: [
+        activeState.currentNode,
+        { ...activeState.currentNode, id: "node-2", parentId: "node-1", parentOptionId: "a" as const, options: [] }
+      ]
+    };
+    const finalOptions = [
+      { id: "a", label: "Route A", description: "A", impact: "A", kind: "explore" },
+      { id: "b", label: "Route B", description: "B", impact: "B", kind: "deepen" },
+      { id: "c", label: "Route C", description: "C", impact: "C", kind: "finish" }
+    ];
+    const optionsState = {
+      ...nodeOnlyState,
+      currentNode: {
+        ...nodeOnlyState.currentNode,
+        roundIntent: "先补三个问题",
+        options: finalOptions
+      }
+    };
+    const draftStream = controlledNdjsonResponse();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: activeState }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: nodeOnlyState }) })
+      .mockResolvedValueOnce(draftStream.response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "choose displayed option" }));
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId("canvas-generation-stage")).toHaveTextContent("node-2:draft");
+    });
+
+    act(() => {
+      draftStream.push({ type: "thinking", nodeId: "node-2", stage: "options", text: "[工具] 正在查找素材" });
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId("canvas-generation-stage")).toHaveTextContent("node-2:options");
+      expect(screen.getByTestId("canvas-options")).toBeEmptyDOMElement();
+      expect(screen.getByTestId("live-draft-generation-status")).toHaveTextContent("options:thinking:[工具] 正在查找素材");
+      expect(liveDraftMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          generationStage: "options",
+          isGenerating: false
+        })
+      );
+    });
+
+    act(() => {
+      draftStream.push({ type: "options", nodeId: "node-2", roundIntent: "先补三个问题", options: [finalOptions[0]] });
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId("canvas-options")).toHaveTextContent("Route A");
+    });
+
+    act(() => {
+      draftStream.push({ type: "done", state: optionsState });
+      draftStream.close();
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId("canvas-generation-stage")).toHaveTextContent("idle");
+    });
+  });
+
   it("streams regenerated options over an existing option set", async () => {
     const finalOptions = [
       { id: "a", label: "Focused A", description: "A", impact: "A", kind: "deepen" },

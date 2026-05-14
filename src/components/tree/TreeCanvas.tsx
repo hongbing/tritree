@@ -756,21 +756,50 @@ export function TreeCanvas({
     }
   }, [isMobileLayout]);
 
+  const wasOptionsGeneratingRef = useRef(false);
+  const isOptionsGenerating = generationStage?.stage === "options";
+
   useEffect(() => {
     const nodeId = currentNode?.id ?? null;
     if (!nodeId) {
       previousNodeIdRef.current = null;
+      wasOptionsGeneratingRef.current = false;
       setVisibleOptionCount(0);
       return;
     }
     const optionLength = currentNode?.options.filter((option) => isPrimaryBranchOptionId(option.id)).length ?? 0;
 
-    if (previousNodeIdRef.current === nodeId) {
+    // options 生成开始时（从 false 变为 true），按当前流里已经到达的选项数显示
+    if (isOptionsGenerating && !wasOptionsGeneratingRef.current) {
+      wasOptionsGeneratingRef.current = true;
+      previousNodeIdRef.current = nodeId;
+      setVisibleOptionCount(optionLength);
+      return;
+    }
+
+    // options 生成中，流式增量更新（每来一个新 option 就显示）
+    if (isOptionsGenerating) {
+      setVisibleOptionCount(optionLength);
+      return;
+    }
+
+    // 同一节点且不是刚完成 options 生成，直接更新数量（不触发动画）
+    if (previousNodeIdRef.current === nodeId && !wasOptionsGeneratingRef.current) {
       setVisibleOptionCount((count) => (optionLength > count ? optionLength : Math.min(count, optionLength)));
       return;
     }
 
+    // 新节点或刚完成 options 生成，触发逐个显示动画
+    const wasGenerating = wasOptionsGeneratingRef.current;
+    wasOptionsGeneratingRef.current = false;
     previousNodeIdRef.current = nodeId;
+
+    // 如果是刚完成 options 流式生成（options 已经逐个显示过了），不重复触发动画
+    if (wasGenerating) {
+      setVisibleOptionCount(optionLength);
+      return;
+    }
+
     setVisibleOptionCount(0);
     const timers = Array.from({ length: optionLength }, (_value, index) => 260 + index * 360).map((delay, index) =>
       window.setTimeout(() => {
@@ -781,7 +810,7 @@ export function TreeCanvas({
     return () => {
       timers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [currentNode?.id, currentPrimaryOptionCount]);
+  }, [currentNode?.id, currentPrimaryOptionCount, isOptionsGenerating]);
 
   useEffect(() => {
     if (isMobileLayout) {

@@ -306,6 +306,7 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
       agentMessages: nextStepOutput.agentMessages
     });
     expect(text).toContain('"text":"先判断。"');
+    expect(text).toContain('"stage":"options"');
     expect(text).toContain('"type":"options"');
     expect(text).toContain('"roundIntent":"先澄清样式修改范围"');
     expect(text).toContain('"label":"补系统范围"');

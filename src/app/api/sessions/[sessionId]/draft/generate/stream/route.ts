@@ -88,7 +88,7 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
           memory,
           signal: request.signal,
           onReasoningText(event) {
-            send({ type: "thinking", nodeId: targetNode.id, text: event.accumulatedText });
+            send({ type: "thinking", nodeId: targetNode.id, stage: "options", text: event.accumulatedText });
           },
           onText(event) {
             if (event.partialOptions) {
@@ -141,7 +141,7 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
           memory,
           signal: request.signal,
           onReasoningText(event) {
-            send({ type: "thinking", nodeId: targetNode.id, text: event.accumulatedText });
+            send({ type: "thinking", nodeId: targetNode.id, stage: "draft", text: event.accumulatedText });
           },
           onText(event) {
             const draft = extractPartialDirectorDraft(event.accumulatedText);

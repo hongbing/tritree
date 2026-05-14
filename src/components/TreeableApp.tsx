@@ -75,7 +75,7 @@ type DraftSelectionRewriteRequest = {
 type DraftStreamEvent =
   | { type: "draft"; draft: Draft; streamingField?: DraftStreamField | null }
   | { type: "options"; nodeId: string; options: BranchOption[]; roundIntent?: string | null }
-  | { type: "thinking"; nodeId?: string | null; text: string }
+  | { type: "thinking"; nodeId?: string | null; stage?: NodeGenerationStage["stage"]; text: string }
   | { type: "done"; state: SessionState }
   | { type: "error"; error: string }
   | { type: "text"; text: string };
@@ -236,7 +236,11 @@ function isDraftStreamEvent(value: unknown): value is DraftStreamEvent {
         (value.roundIntent == null || typeof value.roundIntent === "string")
       );
     case "thinking":
-      return typeof value.text === "string" && (value.nodeId == null || typeof value.nodeId === "string");
+      return (
+        typeof value.text === "string" &&
+        (value.nodeId == null || typeof value.nodeId === "string") &&
+        (value.stage == null || value.stage === "draft" || value.stage === "options")
+      );
     case "done":
       return SessionStateSchema.safeParse(value.state).success;
     case "error":
@@ -326,7 +330,7 @@ function withCustomOption(node: TreeNode, customOption: BranchOption | null) {
 }
 
 function withStreamingOptions(node: TreeNode, streamingOptions: StreamingOptionsEntry | null) {
-  if (!streamingOptions || streamingOptions.nodeId !== node.id) return node;
+  if (!streamingOptions) return node;
 
   return {
     ...node,
@@ -1068,6 +1072,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       if (!isDraftStreamEvent(value)) return;
 
       if (value.type === "draft") {
+        setGenerationStage({ nodeId, stage: "draft" });
         setStreamingDraft({ nodeId, draft: value.draft, streamingField: value.streamingField ?? null });
         receivedDraft = true;
         return;
@@ -1081,7 +1086,10 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       }
 
       if (value.type === "thinking") {
-        setStreamingThinking({ nodeId: value.nodeId ?? nodeId, stage: "draft", text: value.text });
+        const thinkingNodeId = value.nodeId ?? nodeId;
+        const thinkingStage = value.stage ?? "draft";
+        setGenerationStage({ nodeId: thinkingNodeId, stage: thinkingStage });
+        setStreamingThinking({ nodeId: thinkingNodeId, stage: thinkingStage, text: value.text });
         receivedThinking = true;
         return;
       }
@@ -1478,6 +1486,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   const activeStreamingDraft = streamingDraft?.nodeId === activeViewNodeId ? streamingDraft : null;
   const previousDraft = activeStreamingDraft?.previousDraft ?? treePreviousDraft;
   const directDraftForView = sessionState ? directDraftForNode(sessionState, activeViewNodeId) : null;
+  const ancestorDraftForView = !directDraftForView && sessionState ? draftForNode(sessionState, activeViewNodeId) : null;
   const persistedDraftForView = sessionState ? draftForNode(sessionState, activeViewNodeId) : null;
   const isDraftGenerationForView = Boolean(
     activeViewNodeId && generationStage?.nodeId === activeViewNodeId && generationStage.stage === "draft"
@@ -1487,7 +1496,11 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   const liveDiffStreamingField = isStreamingDraftForView
     ? liveDraftStreamingFieldFor(activeStreamingDraft?.streamingField)
     : undefined;
-  const viewedDraft = streamedDraftForView ?? (isDraftGenerationForView ? previousDraft : persistedDraftForView);
+  const isDraftStageGeneratingForView = Boolean(
+    activeViewNodeId && generationStage?.nodeId === activeViewNodeId && generationStage.stage === "draft"
+  );
+  const isShowingAncestorDraft = Boolean(!directDraftForView && !isDraftGenerationForView && !isDraftStageGeneratingForView && ancestorDraftForView);
+  const viewedDraft = streamedDraftForView ?? (isDraftGenerationForView || isDraftStageGeneratingForView ? previousDraft : (persistedDraftForView ?? ancestorDraftForView));
   const isGeneratedDiffReview = Boolean(
     generatedDiffNodeId === activeViewNodeId && previousDraft && directDraftForView && !isDraftGenerationForView
   );
@@ -1530,7 +1543,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     liveDraftGenerationStage === "draft"
       ? Boolean(activeStreamingDraft)
       : liveDraftGenerationStage === "options"
-        ? Boolean(streamingOptions?.nodeId === activeViewNodeId && streamingOptions.options.length > 0)
+        ? Boolean(streamingOptions && streamingOptions.options.length > 0)
         : false;
   const liveDraftGenerationPhase = liveDraftGenerationStage
     ? hasLiveGenerationOutput
@@ -1539,8 +1552,10 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
         ? "thinking"
         : "preparing"
     : undefined;
-  const isMobileDraftModuleGenerating = isMobileLayout && liveDraftGenerationStage === "draft";
-  const isMobileOptionsModuleGenerating = isMobileLayout && liveDraftGenerationStage === "options";
+  const isDraftModuleGenerating = Boolean(liveDraftGenerationStage === "draft");
+  const isOptionsModuleGenerating = Boolean(liveDraftGenerationStage === "options");
+  const isMobileDraftModuleGenerating = isMobileLayout && isDraftModuleGenerating;
+  const isMobileOptionsModuleGenerating = isMobileLayout && isOptionsModuleGenerating;
   const mobileDraftRegionClassName = `mobile-draft-region${
     isMobileDraftModuleGenerating ? " mobile-module--generating mobile-draft-region--generating" : ""
   }`;
@@ -1773,7 +1788,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           className={mobilePanelClassName("tree", isMobileLayout ? "mobile-panel--expanded" : undefined)}
           role={isMobileLayout ? "region" : undefined}
         >
-          <section className="canvas-region">{renderTreeCanvas(isMobileLayout ? "tree" : "full")}</section>
+          <section className={`canvas-region${!isMobileLayout && isOptionsModuleGenerating ? " module--generating" : ""}`}>{renderTreeCanvas(isMobileLayout ? "tree" : "full")}</section>
         </div>
       ) : null}
       <div className={mobilePanelClassName("draft", isMobileLayout ? "mobile-panel--unified" : undefined)}>
@@ -1845,6 +1860,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
             generationPhase={liveDraftGenerationPhase}
             generationStage={liveDraftGenerationStage}
             isBusy={isBusy}
+            isGenerating={!isMobileLayout && isDraftModuleGenerating}
             isComparisonMode={Boolean(draftComparison)}
             isEditable={Boolean(activeViewNodeId)}
             isLiveDiff={shouldShowGeneratedDiff}
@@ -1856,7 +1872,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
             onRewriteSelection={rewriteDraftSelection}
             onSave={saveDraft}
             onStartComparison={startDraftComparison}
-            previousDraft={previousDraft}
+            previousDraft={isShowingAncestorDraft ? null : previousDraft}
             publishPackage={null}
             thinkingText={activeThinking?.text}
           />

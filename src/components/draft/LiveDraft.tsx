@@ -39,6 +39,7 @@ export function LiveDraft({
   isEditable = false,
   isBusy,
   isComparisonMode = false,
+  isGenerating = false,
   isLiveDiff = false,
   isLiveDiffStreaming = false,
   liveDiffStreamingField,
@@ -66,6 +67,7 @@ export function LiveDraft({
   isEditable?: boolean;
   isBusy: boolean;
   isComparisonMode?: boolean;
+  isGenerating?: boolean;
   isLiveDiff?: boolean;
   isLiveDiffStreaming?: boolean;
   liveDiffStreamingField?: LiveDiffStreamingField | null;
@@ -558,7 +560,7 @@ export function LiveDraft({
   }
 
   return (
-    <aside className="draft-panel">
+    <aside aria-busy={isGenerating} className={`draft-panel${isGenerating ? " module--generating" : ""}`}>
       <div className="panel-heading">
         <Sparkles size={16} />
         <span>{mode === "history" ? artifactType.historyPanelTitle : artifactType.currentPanelTitle}</span>

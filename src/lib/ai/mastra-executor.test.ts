@@ -1774,7 +1774,8 @@ describe("tree director compatibility generators", () => {
           payload: {
             toolCallId: "submit-delta-1",
             toolName: "submit_tree_next_step",
-            argsTextDelta: '{"'
+            argsTextDelta:
+              '{"action":"options","roundIntent":"你想从哪个角度评价这几条微博？","options":[{"label":"平台视角"'
           }
         };
         yield {
@@ -1833,6 +1834,11 @@ describe("tree director compatibility generators", () => {
         structuredOutput: expect.anything()
       })
     );
+    expect(partials[0]).toMatchObject({
+      action: "options",
+      roundIntent: "你想从哪个角度评价这几条微博？",
+      options: [{ id: "a", label: "平台视角" }]
+    });
     expect(partials).toContainEqual(finalObject);
     expect(generate).not.toHaveBeenCalled();
   });

@@ -1696,8 +1696,10 @@ function partialOptionsSubmitOutputFromArgsText(argsText: string) {
   const optionsMatch = /"options"\s*:\s*\[/.exec(argsText);
   if (optionsMatch) {
     const optionsText = argsText.slice(optionsMatch.index + optionsMatch[0].length);
+    const fallbackIds = ["a", "b", "c"] as const;
     const options = extractVisibleJsonObjectBlocks(optionsText).flatMap((block, index) => {
-      const id = extractVisibleJsonStringField(block, "id");
+      const explicitId = extractVisibleJsonStringField(block, "id");
+      const id = explicitId || fallbackIds[index];
       const label = extractVisibleJsonStringField(block, "label");
       if (!id || !label) return [];
 

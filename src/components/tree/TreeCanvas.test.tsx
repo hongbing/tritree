@@ -1722,6 +1722,36 @@ describe("TreeCanvas", () => {
     expect(container.querySelector(".tree-node__spinner")).toBe(spinner);
   });
 
+  it("shows the first streamed option when generation switches from draft to options", async () => {
+    const draftlessNode = { ...currentNode, options: [] };
+    const firstStreamedOptionNode = { ...currentNode, options: [currentNode.options[0]] };
+    const { rerender } = render(
+      <TreeCanvas
+        currentNode={draftlessNode}
+        generationStage={{ nodeId: currentNode.id, stage: "draft" }}
+        isBusy
+        onChoose={vi.fn()}
+        pendingChoice={null}
+        selectedPath={[draftlessNode]}
+      />
+    );
+
+    rerender(
+      <TreeCanvas
+        currentNode={firstStreamedOptionNode}
+        generationStage={{ nodeId: currentNode.id, stage: "options" }}
+        isBusy
+        onChoose={vi.fn()}
+        pendingChoice={null}
+        selectedPath={[firstStreamedOptionNode]}
+      />
+    );
+
+    const main = screen.getByRole("group", { name: "三个主选项" });
+    expect(await within(main).findByRole("button", { name: /A 具体场景/ })).toBeDisabled();
+    expect(within(main).getAllByText("等待中")).toHaveLength(2);
+  });
+
   it("updates changed tree labels without remounting the generation spinner", () => {
     vi.useFakeTimers();
     try {

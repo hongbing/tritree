@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { ToolsInput } from "@mastra/core/agent";
@@ -562,7 +562,9 @@ function createDefaultMcpClient(options: {
   id: string;
   servers: Record<string, MastraMCPServerDefinition>;
 }): McpClientLike {
-  return new MCPClient(options);
+  // 每次请求使用唯一 id，避免并发请求共享同一个 MCPClient 单例实例，
+  // 防止一个请求的 disconnect() 中断另一个并发请求正在使用的连接。
+  return new MCPClient({ ...options, id: `${options.id}-${randomUUID()}` });
 }
 
 function emptyMcpRuntimeTools(diagnostics: string[] = []): McpRuntimeTools {

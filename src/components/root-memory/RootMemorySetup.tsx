@@ -139,6 +139,16 @@ export function RootMemorySetup({
     onArtifactTypeChange?.(nextArtifactTypeId);
   }
 
+  function selectInspiration(inspiration: Inspiration) {
+    const nextSeed = inspiration.detail;
+    const trimmedNextSeed = nextSeed.trim();
+    const shouldConfirm = Boolean(trimmedSeed) && trimmedSeed !== trimmedNextSeed;
+
+    if (shouldConfirm && !window.confirm("当前文本框里已有内容，切换灵感会覆盖它。确定要切换吗？")) return;
+
+    setSeed(nextSeed);
+  }
+
   function toggleCreationRequestOption(option: string) {
     setCreationRequest((current) => {
       const parts = splitCreationRequest(current);
@@ -348,7 +358,7 @@ export function RootMemorySetup({
                     className={`inspiration-option${isActive ? " inspiration-option--active" : ""}`}
                     disabled={isSaving}
                     key={inspiration.id}
-                    onClick={() => setSeed(inspiration.detail)}
+                    onClick={() => selectInspiration(inspiration)}
                     type="button"
                   >
                     <span>{inspiration.title}</span>

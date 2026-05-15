@@ -111,6 +111,7 @@ function renderRootMemorySetup(props: Partial<ComponentProps<typeof RootMemorySe
 
 describe("RootMemorySetup", () => {
   beforeEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -242,6 +243,34 @@ describe("RootMemorySetup", () => {
       "aria-pressed",
       "true"
     );
+  });
+
+  it("confirms before replacing an existing seed with a different inspiration", async () => {
+    const confirmMock = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    vi.stubGlobal("confirm", confirmMock);
+
+    renderRootMemorySetup({
+      inspirations: [
+        {
+          id: "idea-1",
+          title: "AI 产品真实困境",
+          detail: "我想写 AI 产品经理在真实项目里的困境。"
+        }
+      ]
+    });
+
+    const seedField = screen.getByRole("textbox", { name: "创作 seed" });
+    await userEvent.type(seedField, "我自己的开头");
+
+    await userEvent.click(screen.getByRole("button", { name: "AI 产品真实困境" }));
+
+    expect(confirmMock).toHaveBeenCalledWith("当前文本框里已有内容，切换灵感会覆盖它。确定要切换吗？");
+    expect(seedField).toHaveValue("我自己的开头");
+
+    await userEvent.click(screen.getByRole("button", { name: "AI 产品真实困境" }));
+
+    expect(seedField).toHaveValue("我想写 AI 产品经理在真实项目里的困境。");
+    expect(confirmMock).toHaveBeenCalledTimes(2);
   });
 
   it("keeps inspiration cards in a horizontally scrollable row sized for three visible items", () => {

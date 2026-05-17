@@ -51,7 +51,9 @@ describe("artifact type registry", () => {
     expect(instructions).toContain("目标");
     expect(instructions).toContain("非目标");
     expect(instructions).toContain("需求");
-    expect(instructions).toContain("hashtags 必须返回空数组");
+    expect(instructions).toContain("artifact.type=\"prd\"");
+    expect(instructions).toContain("artifact.payload.markdown");
+    expect(instructions).not.toContain("draft.");
   });
 
   it("builds PRD delivery markdown and section checks", () => {

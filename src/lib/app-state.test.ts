@@ -113,7 +113,8 @@ describe("summarizeSessionForDirector", () => {
     const optionMessages = (optionSummary as any).messages as Array<{ role: string; content: string }>;
 
     expect(draftSummary.artifactContext).toContain("作品类型：PRD 文档");
-    expect(draftSummary.artifactContext).toContain("hashtags 必须返回空数组");
+    expect(draftSummary.artifactContext).toContain("artifact.type=\"prd\"");
+    expect(draftSummary.artifactContext).toContain("artifact.payload.markdown");
     expect(optionSummary.artifactContext).toContain("澄清问题和三个答案应该围绕 PRD 决策");
     expect(draftMessages.at(-1)?.content).toContain("作品类型：PRD 文档");
     expect(optionMessages.at(-1)?.content ?? optionMessages[0].content).toContain("作品类型：PRD 文档");

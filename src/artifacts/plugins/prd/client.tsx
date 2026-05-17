@@ -1,27 +1,5 @@
-import type { ArtifactRendererProps } from "@/artifacts/types";
 import { prdPlugin } from "./server";
-import { PrdPayloadSchema } from "./schema";
-
-function PrdRenderer({ artifact }: ArtifactRendererProps) {
-  const parsed = PrdPayloadSchema.safeParse(artifact.payload);
-  if (!parsed.success) {
-    return (
-      <article className="artifact-renderer" data-testid="prd-renderer">
-        <h3>{artifact.type}</h3>
-        <pre>{JSON.stringify(artifact.payload, null, 2)}</pre>
-      </article>
-    );
-  }
-
-  const payload = parsed.data;
-
-  return (
-    <article className="artifact-renderer artifact-renderer--prd" data-testid="prd-renderer">
-      <h3>{payload.title || prdPlugin.label}</h3>
-      <pre>{payload.markdown}</pre>
-    </article>
-  );
-}
+import { PrdRenderer } from "./PrdRenderer";
 
 export const prdClientPlugin = {
   manifest: {

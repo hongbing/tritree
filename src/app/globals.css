@@ -3757,6 +3757,136 @@ button:disabled {
   border-radius: 8px;
 }
 
+.prd-artifact {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  color: var(--ink);
+}
+
+.prd-artifact__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.prd-artifact__header h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.08rem;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.prd-artifact__header button,
+.prd-artifact__actions button {
+  min-height: 32px;
+  padding: 6px 10px;
+  color: #0f766e;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 850;
+  background: #ccfbf1;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.prd-artifact__header button:disabled,
+.prd-artifact__actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.prd-artifact__markdown {
+  display: grid;
+  gap: 8px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.prd-artifact__markdown h2,
+.prd-artifact__markdown h3,
+.prd-artifact__markdown h4,
+.prd-artifact__markdown h5,
+.prd-artifact__markdown h6 {
+  margin: 8px 0 0;
+  color: #0f172a;
+  font-size: 0.96rem;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.prd-artifact__markdown h2:first-child,
+.prd-artifact__markdown h3:first-child,
+.prd-artifact__markdown h4:first-child,
+.prd-artifact__markdown h5:first-child,
+.prd-artifact__markdown h6:first-child {
+  margin-top: 0;
+}
+
+.prd-artifact__markdown p {
+  margin: 0;
+  color: #334155;
+  font-size: 0.94rem;
+  line-height: 1.65;
+}
+
+.prd-artifact__checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.24);
+}
+
+.prd-artifact__checks p {
+  margin: 0;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 780;
+  line-height: 1.4;
+}
+
+.prd-artifact__field {
+  display: grid;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.prd-artifact__field input,
+.prd-artifact__field textarea {
+  width: 100%;
+  padding: 10px 11px;
+  color: var(--ink);
+  background: #fbfcfc;
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  border-radius: 8px;
+  line-height: 1.5;
+  outline: none;
+  user-select: text;
+}
+
+.prd-artifact__field textarea {
+  resize: vertical;
+}
+
+.prd-artifact__field input:focus,
+.prd-artifact__field textarea:focus {
+  border-color: rgba(37, 99, 235, 0.54);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.prd-artifact__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .social-post-panel__popover {
   position: absolute;
   top: 48px;

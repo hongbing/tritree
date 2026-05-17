@@ -51,13 +51,13 @@ describe("SkillPicker", () => {
     const onChange = vi.fn();
     render(<SkillPicker skills={skills} selectedSkillIds={["editor-logic"]} onChange={onChange} />);
 
-    expect(screen.getByRole("group", { name: "写作方式" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "审稿重点" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "发布约束" })).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "写作方式" })).getByText("影响：草稿")).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "审稿重点" })).getByText("影响：建议")).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "发布约束" })).getByText("影响：全程")).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "审稿重点" })).getByRole("checkbox", { name: /逻辑链审查/ })).toBeChecked();
+    expect(screen.getByRole("group", { name: "草稿工作" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "判断工作" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "内容团队" })).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "草稿工作" })).getByText("作用：内容更新")).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "判断工作" })).getByText("作用：方向与检查")).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "内容团队" })).getByText("作用：全程")).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "判断工作" })).getByRole("checkbox", { name: /逻辑链审查/ })).toBeChecked();
 
     await userEvent.click(screen.getByRole("checkbox", { name: /标题不要夸张/ }));
 

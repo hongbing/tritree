@@ -136,7 +136,7 @@ describe("RootMemorySetup", () => {
     expect(artifactTypeGroup.compareDocumentPosition(seedField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("places an unset expanded style setup in the seed field header", () => {
+  it("places an unset style setup prompt in the seed field header", async () => {
     const { container } = renderRootMemorySetup({
       onCreateSkill: vi.fn(),
       onUpdateSkill: vi.fn(),
@@ -149,8 +149,12 @@ describe("RootMemorySetup", () => {
     expect(seedField).toContainElement(screen.getByRole("textbox", { name: "创作 seed" }));
     expect(styleProfile).toHaveClass("style-profile-setup--inline");
     expect(styleProfile).toHaveClass("style-profile-setup--unset");
-    expect(styleProfile).toHaveClass("style-profile-setup--expanded");
+    expect(styleProfile).not.toHaveClass("style-profile-setup--expanded");
     expect(within(styleProfile).getByText(/建议先设置/)).toBeInTheDocument();
+    expect(within(styleProfile).getByRole("button", { name: "立即设置" })).toBeInTheDocument();
+
+    await userEvent.click(within(styleProfile).getByRole("button", { name: "立即设置" }));
+
     expect(within(styleProfile).getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
     expect(within(styleProfile).getByRole("button", { name: "手动填写" })).toBeInTheDocument();
   });
@@ -195,8 +199,10 @@ describe("RootMemorySetup", () => {
     expect(css).toContain("grid-column: 1 / -1");
     expect(inlineRule).toContain("padding: 8px 10px");
     expect(inlineRule).toContain("box-shadow: none");
-    expect(inlineUnsetRule).toContain("background: rgba(240, 253, 250, 0.58)");
-    expect(inlineUnsetRule).toContain("border-color: rgba(20, 184, 166, 0.2)");
+    expect(inlineUnsetRule).toContain(
+      "background: linear-gradient(135deg, rgba(255, 251, 235, 0.96), rgba(255, 247, 237, 0.92))"
+    );
+    expect(inlineUnsetRule).toContain("border-color: rgba(217, 119, 6, 0.5)");
     expect(inlineMethodsRule).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
     expect(compactButtonRule).toContain("min-height: 28px");
     expect(compactButtonRule).toContain("border-radius: 999px");
@@ -610,6 +616,7 @@ describe("RootMemorySetup", () => {
       styleProfileExternalAvailable: false
     });
 
+    await userEvent.click(screen.getByRole("button", { name: "立即设置" }));
     await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
     await userEvent.type(screen.getByRole("textbox", { name: "代表作 1" }), "第一段代表作。\n\n内部空行。");
     await userEvent.click(screen.getByRole("button", { name: "添加一段代表作" }));
@@ -758,12 +765,12 @@ describe("RootMemorySetup", () => {
 
     expect(screen.getByText("已启用 1 个技能")).toBeInTheDocument();
     expect(screen.getByText("分析")).toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "审稿重点" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "判断工作" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "技能库" })).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "展开技能列表" }));
 
-    expect(screen.getByRole("group", { name: "审稿重点" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "判断工作" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "技能库" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "收起技能列表" })).toBeInTheDocument();
   });
@@ -803,7 +810,7 @@ describe("RootMemorySetup", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "还有 1 个" }));
 
-    expect(screen.getByRole("group", { name: "审稿重点" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "判断工作" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "技能库" })).toBeInTheDocument();
   });
 

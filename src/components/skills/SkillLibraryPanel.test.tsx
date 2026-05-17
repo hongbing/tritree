@@ -49,8 +49,7 @@ describe("SkillLibraryPanel", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "新建技能" }));
     await userEvent.type(screen.getByRole("textbox", { name: "技能名称" }), "小红书风格");
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "分类" }), "平台");
-    await userEvent.click(screen.getByRole("checkbox", { name: "影响建议" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "影响方向判断" }));
     await userEvent.type(screen.getByRole("textbox", { name: "说明" }), "适合小红书。");
     await userEvent.type(screen.getByRole("textbox", { name: "提示词" }), "标题口语一点。");
     await userEvent.click(screen.getByRole("checkbox", { name: "默认启用" }));
@@ -58,7 +57,7 @@ describe("SkillLibraryPanel", () => {
 
     expect(onCreate).toHaveBeenCalledWith({
       title: "小红书风格",
-      category: "平台",
+      category: "约束",
       description: "适合小红书。",
       prompt: "标题口语一点。",
       appliesTo: "writer",
@@ -130,7 +129,7 @@ describe("SkillLibraryPanel", () => {
 
     const systemItem = screen.getByRole("article", { name: "分析" });
     expect(within(systemItem).queryByRole("button", { name: "编辑 分析" })).not.toBeInTheDocument();
-    expect(within(systemItem).getByText("影响：建议")).toBeInTheDocument();
+    expect(within(systemItem).getByText("作用：方向判断")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "编辑 我的约束" }));
     await userEvent.clear(screen.getByRole("textbox", { name: "技能名称" }));
@@ -164,8 +163,8 @@ describe("SkillLibraryPanel", () => {
     );
 
     await userEvent.click(screen.getByRole("button", { name: "新建技能" }));
-    expect(screen.getByRole("checkbox", { name: "影响草稿" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "影响建议" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "影响内容更新" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "影响方向判断" })).toBeChecked();
     await userEvent.type(screen.getByRole("textbox", { name: "技能名称" }), "全程约束");
     await userEvent.type(screen.getByRole("textbox", { name: "提示词" }), "标题和正文都要克制。");
     await userEvent.click(screen.getByRole("button", { name: "保存技能" }));

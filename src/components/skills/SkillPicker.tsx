@@ -3,9 +3,9 @@
 import type { Skill } from "@/lib/domain";
 
 const effectGroups = [
-  { appliesTo: "writer", title: "写作方式", effect: "影响：草稿" },
-  { appliesTo: "editor", title: "审稿重点", effect: "影响：建议" },
-  { appliesTo: "both", title: "发布约束", effect: "影响：全程" }
+  { appliesTo: "writer", title: "草稿工作", effect: "作用：内容更新" },
+  { appliesTo: "editor", title: "判断工作", effect: "作用：方向与检查" },
+  { appliesTo: "both", title: "内容团队", effect: "作用：全程" }
 ] as const;
 
 export function SkillPicker({

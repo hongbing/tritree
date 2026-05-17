@@ -44,15 +44,15 @@ Preserve valuable material and user-authored wording according to selected skill
 export type DirectorMessage = AgentMessage;
 
 export type DirectorInputParts = {
-  artifactContext?: string;
-  rootSummary: string;
-  learnedSummary: string;
-  currentDraft: string;
-  pathSummary: string;
-  foldedSummary: string;
-  selectedOptionLabel: string;
+  artifactContext: string;
+  currentArtifact: string;
   enabledSkills: Skill[];
-  messages?: DirectorMessage[];
+  foldedSummary: string;
+  learnedSummary: string;
+  messages: DirectorMessage[];
+  pathSummary: string;
+  rootSummary: string;
+  selectedOptionLabel: string;
 };
 
 const NO_SELECTED_DIRECTION_PROMPT = `
@@ -105,8 +105,8 @@ ${parts.learnedSummary || "暂无已学习偏好。"}
 用户本轮选择：
 ${parts.selectedOptionLabel || NO_SELECTED_DIRECTION_PROMPT}
 
-当前草稿：
-${parts.currentDraft || "暂无草稿。"}
+当前产物：
+${parts.currentArtifact || "暂无产物。"}
 
 # 已选技能
 ${formatEnabledSkills(parts.enabledSkills)}

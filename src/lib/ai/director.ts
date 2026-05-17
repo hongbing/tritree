@@ -1,6 +1,4 @@
 import {
-  type DirectorDraftOutput,
-  DirectorDraftOutputSchema,
   type DirectorOptionsOutput,
   DirectorOptionsOutputSchema,
   type DirectorOutput,
@@ -8,6 +6,7 @@ import {
   requireDirectorOptionIds,
   requireThreeOptions
 } from "@/lib/domain";
+import { z } from "zod";
 import {
   buildDirectorUserPrompt,
   type DirectorInputParts
@@ -16,6 +15,38 @@ import {
 export const DEFAULT_KIMI_BASE_URL = "https://api.moonshot.ai/anthropic";
 export const DEFAULT_KIMI_MODEL = "kimi-k2.5";
 
+const DirectorGeneratedArtifactOutputSchema = z.object({
+  type: z.string().min(1),
+  payload: z.unknown(),
+  sourceArtifactIds: z.array(z.string().min(1)).optional()
+});
+
+export const DirectorArtifactOutputSchema = z.object({
+  roundIntent: z.string().min(1),
+  artifact: DirectorGeneratedArtifactOutputSchema.nullable().optional()
+});
+
+export const DirectorNextStepOutputSchema = z.union([
+  z.object({
+    action: z.literal("artifact"),
+    roundIntent: z.string().min(1),
+    artifact: DirectorGeneratedArtifactOutputSchema
+  }),
+  z.object({
+    action: z.literal("complete"),
+    roundIntent: z.string().min(1),
+    artifact: z.null().optional()
+  }),
+  z.object({
+    action: z.literal("options").default("options"),
+    roundIntent: z.string().min(1),
+    artifact: z.null().optional(),
+    options: z.array(z.unknown()).length(3, "AI suggestions must include exactly three items.")
+  })
+]);
+
+export type DirectorArtifactOutput = z.infer<typeof DirectorArtifactOutputSchema>;
+
 export function parseDirectorOutput(value: unknown): DirectorOutput {
   const parsed = DirectorOutputSchema.parse(value);
   requireThreeOptions(parsed.options);
@@ -23,8 +54,8 @@ export function parseDirectorOutput(value: unknown): DirectorOutput {
   return parsed;
 }
 
-export function parseDirectorDraftOutput(value: unknown): DirectorDraftOutput {
-  return DirectorDraftOutputSchema.parse(value);
+export function parseDirectorArtifactOutput(value: unknown): DirectorArtifactOutput {
+  return DirectorArtifactOutputSchema.parse(value);
 }
 
 export function parseDirectorOptionsOutput(value: unknown): DirectorOptionsOutput {
@@ -38,8 +69,8 @@ export function buildDirectorInput(parts: DirectorInputParts) {
   return buildDirectorUserPrompt(parts);
 }
 
-export function parseDirectorDraftText(text: string): DirectorDraftOutput {
-  return parseDirectorDraftOutput(parseDirectorJsonObject(text));
+export function parseDirectorArtifactText(text: string): DirectorArtifactOutput {
+  return parseDirectorArtifactOutput(parseDirectorJsonObject(text));
 }
 
 export function parseDirectorOptionsText(text: string): DirectorOptionsOutput {

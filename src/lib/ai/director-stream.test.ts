@@ -15,10 +15,9 @@ vi.mock("./mastra-executor", () => ({
 }));
 
 import {
-  extractActiveDirectorDraftField,
+  extractPartialDirectorArtifact,
   extractPartialDirectorOptions,
-  extractPartialDirectorDraft,
-  streamDirectorDraft,
+  streamDirectorArtifact,
   streamDirectorNextStep,
   streamDirectorOptions
 } from "./director-stream";
@@ -26,11 +25,13 @@ import {
 const directorInput = {
   rootSummary: "Seed：写一个产品故事",
   learnedSummary: "",
-  currentDraft: "标题：旧\n正文：旧正文",
+  artifactContext: "",
+  currentArtifact: "标题：旧\n正文：旧正文",
   pathSummary: "",
   foldedSummary: "",
   selectedOptionLabel: "扩写",
-  enabledSkills: []
+  enabledSkills: [],
+  messages: []
 };
 
 beforeEach(() => {
@@ -40,69 +41,53 @@ beforeEach(() => {
   mastraMocks.streamTreeOptions.mockReset();
 });
 
-describe("extractPartialDirectorDraft", () => {
-  it("returns null when the draft object has no visible fields yet", () => {
-    expect(extractPartialDirectorDraft('{"roundIntent":"扩写","draft":{')).toBeNull();
+describe("extractPartialDirectorArtifact", () => {
+  it("extracts partial artifact payload fields from streaming JSON", () => {
+    const partial = extractPartialDirectorArtifact('{"roundIntent":"写微博","artifact":{"type":"social-post","payload":{"title":"新标题","body":"开头');
+
+    expect(partial?.type).toBe("social-post");
+    expect(partial?.payload).toMatchObject({ title: "新标题" });
   });
 
-  it("returns a best-effort draft from incomplete accumulated JSON", () => {
-    expect(
-      extractPartialDirectorDraft(
-        '{"roundIntent":"扩写","draft":{"title":"新标题","body":"第一段正在生成","hashtags":["#AI"],"imagePrompt":"'
-      )
-    ).toEqual({
-      title: "新标题",
-      body: "第一段正在生成",
-      hashtags: ["#AI"],
-      imagePrompt: ""
-    });
+  it("returns null when the artifact object has no visible type yet", () => {
+    expect(extractPartialDirectorArtifact('{"roundIntent":"扩写","artifact":{')).toBeNull();
   });
 
-  it("extracts visible hashtags from an incomplete hashtag array", () => {
+  it("returns a best-effort artifact from incomplete accumulated JSON", () => {
     expect(
-      extractPartialDirectorDraft(
-        '{"roundIntent":"扩写","draft":{"title":"新标题","body":"正文","hashtags":["#AI","#写作"'
+      extractPartialDirectorArtifact(
+        '{"roundIntent":"扩写","artifact":{"type":"social-post","payload":{"title":"新标题","body":"第一段正在生成","imagePrompt":"'
       )
     ).toEqual({
-      title: "新标题",
-      body: "正文",
-      hashtags: ["#AI", "#写作"],
-      imagePrompt: ""
+      type: "social-post",
+      payload: {
+        title: "新标题",
+        body: "第一段正在生成",
+        imagePrompt: ""
+      }
     });
   });
 
   it("does not expose incomplete JSON escape sequences in partial body text", () => {
     expect(
-      extractPartialDirectorDraft('{"roundIntent":"扩写","draft":{"title":"新标题","body":"第一段。\\')
+      extractPartialDirectorArtifact('{"roundIntent":"扩写","artifact":{"type":"social-post","payload":{"title":"新标题","body":"第一段。\\')
     ).toEqual({
-      title: "新标题",
-      body: "第一段。",
-      hashtags: [],
-      imagePrompt: ""
+      type: "social-post",
+      payload: {
+        title: "新标题",
+        body: "第一段。"
+      }
     });
 
     expect(
-      extractPartialDirectorDraft('{"roundIntent":"扩写","draft":{"title":"新标题","body":"第一段。\\n\\n第二段')
+      extractPartialDirectorArtifact('{"roundIntent":"扩写","artifact":{"type":"social-post","payload":{"title":"新标题","body":"第一段。\\n\\n第二段')
     ).toEqual({
-      title: "新标题",
-      body: "第一段。\n\n第二段",
-      hashtags: [],
-      imagePrompt: ""
+      type: "social-post",
+      payload: {
+        title: "新标题",
+        body: "第一段。\n\n第二段"
+      }
     });
-  });
-});
-
-describe("extractActiveDirectorDraftField", () => {
-  it("reports the body field while body text is streaming", () => {
-    expect(extractActiveDirectorDraftField('{"roundIntent":"扩写","draft":{"title":"新标题","body":"第一段')).toBe("body");
-  });
-
-  it("reports the image prompt field as soon as that key starts", () => {
-    expect(
-      extractActiveDirectorDraftField(
-        '{"roundIntent":"扩写","draft":{"title":"新标题","body":"正文","hashtags":["#AI"],"imagePrompt":"'
-      )
-    ).toBe("imagePrompt");
   });
 });
 
@@ -275,22 +260,22 @@ describe("streamDirectorNextStep", () => {
   });
 });
 
-describe("streamDirectorDraft", () => {
-  it("uses the Mastra tree draft stream", async () => {
+describe("streamDirectorArtifact", () => {
+  it("uses the Mastra tree artifact stream", async () => {
     const output = {
       roundIntent: "扩写",
-      draft: { title: "新标题", body: "新正文", hashtags: ["#AI"], imagePrompt: "新图" },
+      artifact: { type: "social-post", payload: { title: "新标题", body: "新正文", hashtags: ["#AI"], imagePrompt: "新图" } },
     };
     mastraMocks.streamTreeDraft.mockImplementation(async ({ onPartialObject }) => {
-      onPartialObject({ roundIntent: "扩写", draft: { title: "新标题" } });
-      onPartialObject({ roundIntent: "扩写", draft: { title: "新标题", body: "新正文" } });
+      onPartialObject({ roundIntent: "扩写", artifact: { type: "social-post", payload: { title: "新标题" } } });
+      onPartialObject({ roundIntent: "扩写", artifact: { type: "social-post", payload: { title: "新标题", body: "新正文" } } });
       return output;
     });
     const signal = new AbortController().signal;
     const onText = vi.fn();
 
     await expect(
-      streamDirectorDraft(directorInput, {
+      streamDirectorArtifact(directorInput, {
         signal,
         memory: { resource: "root", thread: "session-1" },
         onText
@@ -308,14 +293,14 @@ describe("streamDirectorDraft", () => {
     expect(onText).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        accumulatedText: JSON.stringify({ roundIntent: "扩写", draft: { title: "新标题" } }),
-        partialDraft: expect.objectContaining({ title: "新标题" })
+        accumulatedText: JSON.stringify({ roundIntent: "扩写", artifact: { type: "social-post", payload: { title: "新标题" } } }),
+        partialArtifact: expect.objectContaining({ type: "social-post", payload: { title: "新标题" } })
       })
     );
     expect(onText).toHaveBeenCalledWith(
       expect.objectContaining({
         accumulatedText: JSON.stringify(output),
-        partialDraft: output.draft
+        partialArtifact: output.artifact
       })
     );
   });

@@ -1,8 +1,9 @@
-import type { BranchOption, DirectorDraftOutput, DirectorNextStepOutput, DirectorOptionsOutput, Draft } from "@/lib/domain";
+import type { BranchOption, DirectorNextStepOutput, DirectorOptionsOutput } from "@/lib/domain";
+import { DirectorArtifactOutputSchema, type DirectorArtifactOutput } from "./director";
 import { logTritreeAiDebug } from "./debug-log";
 import {
   generateTreeNextStep,
-  streamTreeDraft,
+  streamTreeDraft as streamTreeArtifact,
   streamTreeNextStep,
   streamTreeOptions,
   type DirectorAgentTrace,
@@ -11,15 +12,17 @@ import {
 import type { DirectorInputParts } from "./prompts";
 
 export type DirectorNextStepStreamResult = DirectorNextStepOutput & DirectorAgentTrace;
-export type DirectorDraftStreamResult = DirectorDraftOutput & DirectorAgentTrace;
+export type DirectorArtifactStreamResult = DirectorArtifactOutput;
 export type DirectorOptionsStreamResult = DirectorOptionsOutput & DirectorAgentTrace;
 
-export type DirectorDraftField = "title" | "body" | "hashtags" | "imagePrompt";
-
-type DirectorDraftStreamOptions = {
+type DirectorArtifactStreamOptions = {
   env?: Record<string, string | undefined>;
   memory?: MemoryScope;
-  onText?: (event: { delta: string; accumulatedText: string; partialDraft: Draft | null }) => void;
+  onText?: (event: {
+    delta: string;
+    accumulatedText: string;
+    partialArtifact: { type: string; payload: Record<string, unknown> } | null;
+  }) => void;
   onReasoningText?: (event: { delta: string; accumulatedText: string }) => void;
   signal?: AbortSignal;
 };
@@ -56,8 +59,8 @@ export async function decideDirectorNextStep(
 ): Promise<DirectorNextStepOutput> {
   logTritreeAiDebug("director-stream", "next-step-start", {
     rootChars: parts.rootSummary.length,
-    currentDraftChars: parts.currentDraft.length,
-    messageCount: parts.messages?.length ?? 0
+    currentArtifactChars: parts.currentArtifact.length,
+    messageCount: parts.messages.length
   });
   const output = await generateTreeNextStep({
     parts,
@@ -102,8 +105,8 @@ export async function streamDirectorNextStep(
 
   logTritreeAiDebug("director-stream", "next-step-stream-start", {
     rootChars: parts.rootSummary.length,
-    currentDraftChars: parts.currentDraft.length,
-    messageCount: parts.messages?.length ?? 0
+    currentArtifactChars: parts.currentArtifact.length,
+    messageCount: parts.messages.length
   });
   const output = await streamTreeNextStep({
     parts,
@@ -122,45 +125,45 @@ export async function streamDirectorNextStep(
   return output;
 }
 
-export async function streamDirectorDraft(
+export async function streamDirectorArtifact(
   parts: DirectorInputParts,
-  options: DirectorDraftStreamOptions = {}
-): Promise<DirectorDraftStreamResult> {
+  options: DirectorArtifactStreamOptions = {}
+): Promise<DirectorArtifactStreamResult> {
   let accumulatedText = "";
   const emit = (value: unknown) => {
     const text = JSON.stringify(value);
     if (!text || text === accumulatedText) return;
     accumulatedText = text;
-    const partialDraft = extractPartialDirectorDraft(accumulatedText);
-    logTritreeAiDebug("director-stream", "draft-emit", {
+    const partialArtifact = extractPartialDirectorArtifact(accumulatedText);
+    logTritreeAiDebug("director-stream", "artifact-emit", {
       chars: accumulatedText.length,
-      hasPartialDraft: Boolean(partialDraft),
-      title: partialDraft?.title ?? "",
-      bodyChars: partialDraft?.body.length ?? 0
+      hasPartialArtifact: Boolean(partialArtifact),
+      artifactType: partialArtifact?.type ?? "",
+      payloadFields: partialArtifact ? Object.keys(partialArtifact.payload) : []
     });
     options.onText?.({
       delta: text,
       accumulatedText,
-      partialDraft
+      partialArtifact
     });
   };
 
-  logTritreeAiDebug("director-stream", "draft-start", {
+  logTritreeAiDebug("director-stream", "artifact-start", {
     rootChars: parts.rootSummary.length,
-    currentDraftChars: parts.currentDraft.length,
-    messageCount: parts.messages?.length ?? 0
+    currentArtifactChars: parts.currentArtifact.length,
+    messageCount: parts.messages.length
   });
-  const output = await streamTreeDraft({
+  const output = DirectorArtifactOutputSchema.parse(await streamTreeArtifact({
     parts,
     env: options.env,
     memory: options.memory,
     signal: options.signal,
     onPartialObject: emit,
     onReasoningText: options.onReasoningText
-  });
-  logTritreeAiDebug("director-stream", "draft-output", {
-    title: output.draft.title,
-    bodyChars: output.draft.body.length
+  }));
+  logTritreeAiDebug("director-stream", "artifact-output", {
+    artifactType: output.artifact?.type ?? "",
+    hasArtifact: Boolean(output.artifact)
   });
   emit(withoutAgentTrace(output));
   return output;
@@ -194,8 +197,8 @@ export async function streamDirectorOptions(
 
   logTritreeAiDebug("director-stream", "options-start", {
     rootChars: parts.rootSummary.length,
-    currentDraftChars: parts.currentDraft.length,
-    messageCount: parts.messages?.length ?? 0
+    currentArtifactChars: parts.currentArtifact.length,
+    messageCount: parts.messages.length
   });
   const output = await streamTreeOptions({
     parts,
@@ -219,25 +222,12 @@ function withoutAgentTrace<T extends object>(value: T): T {
   return rest as T;
 }
 
-export function extractPartialDirectorDraft(text: string): Draft | null {
-  const draftMatch = /"draft"\s*:/.exec(text);
-  if (!draftMatch) {
-    return null;
-  }
-
-  const draftText = text.slice(draftMatch.index);
-  const draft = {
-    title: extractStringField(draftText, "title"),
-    body: extractStringField(draftText, "body"),
-    hashtags: extractStringArrayField(draftText, "hashtags"),
-    imagePrompt: extractStringField(draftText, "imagePrompt")
-  };
-
-  if (!draft.title && !draft.body && draft.hashtags.length === 0 && !draft.imagePrompt) {
-    return null;
-  }
-
-  return draft;
+export function extractPartialDirectorArtifact(text: string) {
+  const parsed = extractPartialJsonObject(text);
+  if (!isRecord(parsed.artifact)) return null;
+  const type = typeof parsed.artifact.type === "string" ? parsed.artifact.type : "";
+  const payload = isRecord(parsed.artifact.payload) ? parsed.artifact.payload : {};
+  return type ? { type, payload } : null;
 }
 
 export function extractPartialDirectorOptions(text: string): BranchOption[] | null {
@@ -295,23 +285,38 @@ export function extractPartialDirectorOptions(text: string): BranchOption[] | nu
   });
 }
 
-export function extractActiveDirectorDraftField(text: string): DirectorDraftField | null {
-  const draftMatch = /"draft"\s*:\s*\{/.exec(text);
-  if (!draftMatch) {
-    return null;
+function extractPartialJsonObject(text: string) {
+  const artifactMatch = /"artifact"\s*:\s*\{/.exec(text);
+  if (!artifactMatch) return {};
+
+  const artifactText = text.slice(artifactMatch.index + artifactMatch[0].length - 1);
+  const payload: Record<string, unknown> = {};
+  const payloadMatch = /"payload"\s*:\s*\{/.exec(artifactText);
+  if (payloadMatch) {
+    const payloadText = artifactText.slice(payloadMatch.index + payloadMatch[0].length);
+    const fieldPattern = /"([^"]+)"\s*:\s*"/g;
+    let fieldMatch = fieldPattern.exec(payloadText);
+    while (fieldMatch) {
+      const valueStart = fieldMatch.index + fieldMatch[0].length;
+      const { rawValue } = readVisibleJsonString(payloadText, valueStart);
+      payload[fieldMatch[1]] = parseJsonString(rawValue.endsWith("\\") ? rawValue.slice(0, -1) : rawValue);
+      fieldMatch = fieldPattern.exec(payloadText);
+    }
+
+    const arrayFieldPattern = /"([^"]+)"\s*:\s*\[/g;
+    let arrayFieldMatch = arrayFieldPattern.exec(payloadText);
+    while (arrayFieldMatch) {
+      payload[arrayFieldMatch[1]] = extractStringArrayField(payloadText, arrayFieldMatch[1]);
+      arrayFieldMatch = arrayFieldPattern.exec(payloadText);
+    }
   }
 
-  const draftText = text.slice(draftMatch.index + draftMatch[0].length);
-  const fieldPattern = /"(title|body|hashtags|imagePrompt)"\s*:/g;
-  let activeField: DirectorDraftField | null = null;
-  let fieldMatch = fieldPattern.exec(draftText);
-
-  while (fieldMatch) {
-    activeField = fieldMatch[1] as DirectorDraftField;
-    fieldMatch = fieldPattern.exec(draftText);
-  }
-
-  return activeField;
+  return {
+    artifact: {
+      type: extractStringField(artifactText, "type"),
+      payload
+    }
+  };
 }
 
 function extractStringField(text: string, fieldName: string) {

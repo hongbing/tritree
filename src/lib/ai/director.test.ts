@@ -3,14 +3,32 @@ import {
   DEFAULT_KIMI_BASE_URL,
   DEFAULT_KIMI_MODEL,
   buildDirectorInput,
+  DirectorArtifactOutputSchema,
+  DirectorNextStepOutputSchema,
   getDirectorAuthToken,
   getDirectorBaseUrl,
   getDirectorModel,
-  parseDirectorDraftText,
+  parseDirectorArtifactText,
   parseDirectorOptionsOutput,
   parseDirectorOptionsText,
   parseDirectorOutput
 } from "./director";
+import type { DirectorInputParts } from "./prompts";
+
+describe("director artifact schemas", () => {
+  it("parses artifact output and no-artifact output", () => {
+    expect(DirectorArtifactOutputSchema.parse({
+      roundIntent: "形成微博",
+      artifact: { type: "social-post", payload: { title: "T", body: "B", hashtags: [], imagePrompt: "" } }
+    }).artifact?.type).toBe("social-post");
+
+    expect(DirectorNextStepOutputSchema.parse({
+      action: "complete",
+      roundIntent: "这一步只判断",
+      artifact: null
+    }).artifact).toBeNull();
+  });
+});
 
 describe("parseDirectorOutput", () => {
   it("requires exactly three options", () => {
@@ -18,7 +36,7 @@ describe("parseDirectorOutput", () => {
       parseDirectorOutput({
         roundIntent: "Start",
         options: [],
-        draft: { title: "", body: "", hashtags: [], imagePrompt: "" },
+        artifact: { type: "social-post", payload: { title: "", body: "", hashtags: [], imagePrompt: "" } },
         finishAvailable: false,
         publishPackage: null
       })
@@ -42,7 +60,7 @@ describe("parseDirectorOutput", () => {
           { ...option, label: "Deepen" },
           { ...option, label: "Reframe" }
         ],
-        draft: { title: "", body: "", hashtags: [], imagePrompt: "" },
+        artifact: { type: "social-post", payload: { title: "", body: "", hashtags: [], imagePrompt: "" } },
         finishAvailable: false,
         publishPackage: null
       })
@@ -102,10 +120,10 @@ describe("parseDirectorOptionsText", () => {
 
 describe("buildDirectorInput", () => {
   it("includes root memory, selected option, and draft without tree path context", () => {
-    const input = buildDirectorInput({
+    const input = buildTestDirectorInput({
       rootSummary: "Seed：我想写 AI 产品经理的真实困境",
       learnedSummary: "Prefers practical choices.",
-      currentDraft: "Draft body",
+      currentArtifact: "Draft body",
       pathSummary: "Round 1: selected A",
       foldedSummary: "Round 1: folded B, C",
       selectedOptionLabel: "Make it sharper",
@@ -126,10 +144,10 @@ describe("buildDirectorInput", () => {
   });
 
   it("uses no-selected-direction fallback text when context is empty", () => {
-    const input = buildDirectorInput({
+    const input = buildTestDirectorInput({
       rootSummary: "Seed：一个内容念头",
       learnedSummary: "",
-      currentDraft: "",
+      currentArtifact: "",
       pathSummary: "",
       foldedSummary: "",
       selectedOptionLabel: "",
@@ -139,16 +157,16 @@ describe("buildDirectorInput", () => {
     expect(input).toContain("暂无已学习偏好。");
     expect(input).toContain("暂无已选技能。请基于 seed、草稿和用户选择继续判断创作下一步。");
     expect(input).toContain("还没有选择答案。请先判断 seed 和当前草稿最需要创作者澄清、选择或推进什么");
-    expect(input).toContain("暂无草稿。");
+    expect(input).toContain("暂无产物。");
     expect(input).not.toContain("暂无已选路径。");
     expect(input).not.toContain("暂无未选方向。");
   });
 
   it("includes enabled skills in the director input", () => {
-    const input = buildDirectorInput({
+    const input = buildTestDirectorInput({
       rootSummary: "Seed：写作为什么重要",
       learnedSummary: "",
-      currentDraft: "",
+      currentArtifact: "",
       pathSummary: "",
       foldedSummary: "",
       selectedOptionLabel: "",
@@ -177,10 +195,10 @@ describe("buildDirectorInput", () => {
   });
 
   it("organizes selected skills as a usable protocol instead of a flat dump", () => {
-    const input = buildDirectorInput({
+    const input = buildTestDirectorInput({
       rootSummary: "Seed：写作为什么重要",
       learnedSummary: "",
-      currentDraft: "标题：写作为什么重要\n正文：写作让我想清楚事情。",
+      currentArtifact: "标题：写作为什么重要\n正文：写作让我想清楚事情。",
       pathSummary: "",
       foldedSummary: "",
       selectedOptionLabel: "继续完善",
@@ -225,10 +243,10 @@ describe("buildDirectorInput", () => {
   });
 
   it("does not force solution-level option wording when using selected skills", () => {
-    const input = buildDirectorInput({
+    const input = buildTestDirectorInput({
       rootSummary: "Seed：一个 AI 工具名字的双关念头",
       learnedSummary: "",
-      currentDraft: "标题：种子念头\n正文：这个名字有个双关。",
+      currentArtifact: "标题：种子念头\n正文：这个名字有个双关。",
       pathSummary: "",
       foldedSummary: "",
       selectedOptionLabel: "",
@@ -269,10 +287,10 @@ describe("buildDirectorInput", () => {
   });
 
   it("asks for branch-level options without repeating previous labels or over-splitting details", () => {
-    const input = buildDirectorInput({
+    const input = buildTestDirectorInput({
       rootSummary: "Seed：写值班带来的变化",
       learnedSummary: "",
-      currentDraft: "标题：值班改变了我\n正文：先写了一个值班现场。",
+      currentArtifact: "标题：值班改变了我\n正文：先写了一个值班现场。",
       pathSummary: "第 1 轮：先完成草稿；选择 b\n第 2 轮：补充值班现场；选择 a",
       foldedSummary: "补充个人经验\n回应常见质疑",
       selectedOptionLabel: "写值班现场细节: 继续补现场画面",
@@ -288,10 +306,10 @@ describe("buildDirectorInput", () => {
   });
 
   it("frames options as creator decisions rather than editing tasks", () => {
-    const input = buildDirectorInput({
+    const input = buildTestDirectorInput({
       rootSummary: "Seed：解释 Tritree 命名为什么让我想把项目做出来",
       learnedSummary: "",
-      currentDraft: "标题：Tritree 的命名\n正文：这个名字同时有三叉树和 try tree 的双关。",
+      currentArtifact: "标题：Tritree 的命名\n正文：这个名字同时有三叉树和 try tree 的双关。",
       pathSummary: "",
       foldedSummary: "",
       selectedOptionLabel: "",
@@ -317,6 +335,10 @@ describe("getDirectorModel", () => {
   });
 });
 
+function buildTestDirectorInput(parts: Omit<DirectorInputParts, "artifactContext" | "messages"> & Partial<Pick<DirectorInputParts, "artifactContext" | "messages">>) {
+  return buildDirectorInput({ artifactContext: "", messages: [], ...parts });
+}
+
 describe("getDirectorBaseUrl", () => {
   it("defaults to Moonshot's Anthropic-compatible endpoint", () => {
     expect(getDirectorBaseUrl({})).toBe(DEFAULT_KIMI_BASE_URL);
@@ -336,16 +358,16 @@ describe("getDirectorAuthToken", () => {
   });
 });
 
-describe("parseDirectorDraftText", () => {
-  it("parses a complete draft JSON string", () => {
-    const parsed = parseDirectorDraftText(
+describe("parseDirectorArtifactText", () => {
+  it("parses a complete artifact JSON string", () => {
+    const parsed = parseDirectorArtifactText(
       JSON.stringify({
         roundIntent: "扩写",
-        draft: { title: "新标题", body: "新正文", hashtags: ["#AI"], imagePrompt: "新图" },
+        artifact: { type: "social-post", payload: { title: "新标题", body: "新正文", hashtags: ["#AI"], imagePrompt: "新图" } },
       })
     );
 
-    expect(parsed.draft.body).toBe("新正文");
+    expect(parsed.artifact?.payload).toMatchObject({ body: "新正文" });
     expect(parsed).not.toHaveProperty("finishAvailable");
     expect(parsed).not.toHaveProperty("publishPackage");
   });

@@ -642,6 +642,7 @@ describe("TreeableApp", () => {
 
     render(<TreeableApp startNewDraft />);
 
+    await userEvent.click(await screen.findByRole("button", { name: "立即设置" }));
     expect(await screen.findByRole("button", { name: "一键生成我的风格" })).toBeInTheDocument();
   });
 
@@ -795,7 +796,8 @@ describe("TreeableApp", () => {
     expect(mediaRule).toContain(".mobile-options-region");
     expect(mediaRule).toContain(".draft-panel__scroll");
     expect(mediaRule).toContain(".mobile-module--generating");
-    expect(mediaRule).toContain("@keyframes mobile-module-glow");
+    expect(mediaRule).toContain("animation: module-glow");
+    expect(css).toContain("@keyframes module-glow");
     expect(mediaRule).toContain("overflow-y: visible");
     expect(mediaRule).toContain("overscroll-behavior: auto");
     expect(mediaRule).not.toContain("conic-gradient");

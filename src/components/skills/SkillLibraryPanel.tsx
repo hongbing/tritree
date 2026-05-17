@@ -12,6 +12,7 @@ const emptyForm: SkillUpsert = {
   defaultEnabled: false,
   isArchived: false
 };
+const skillCategoryOptions = ["方向", "约束", "风格", "平台", "检查"] as const satisfies readonly SkillCategory[];
 
 type EditingState =
   | { mode: "create"; skillId: null }
@@ -176,6 +177,21 @@ export function SkillLibraryPanel({
               ref={titleInputRef}
               value={form.title}
             />
+          </label>
+          <label>
+            <span>分类</span>
+            <select
+              aria-label="分类"
+              disabled={isSaving}
+              onChange={(event) => setForm((current) => ({ ...current, category: event.target.value as SkillCategory }))}
+              value={form.category}
+            >
+              {skillCategoryOptions.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
           </label>
           <fieldset aria-label="作用方式" className="skill-editor__effect">
             <legend>作用方式</legend>

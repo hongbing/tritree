@@ -49,6 +49,7 @@ describe("SkillLibraryPanel", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "新建技能" }));
     await userEvent.type(screen.getByRole("textbox", { name: "技能名称" }), "小红书风格");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "分类" }), "平台");
     await userEvent.click(screen.getByRole("checkbox", { name: "影响方向判断" }));
     await userEvent.type(screen.getByRole("textbox", { name: "说明" }), "适合小红书。");
     await userEvent.type(screen.getByRole("textbox", { name: "提示词" }), "标题口语一点。");
@@ -57,7 +58,7 @@ describe("SkillLibraryPanel", () => {
 
     expect(onCreate).toHaveBeenCalledWith({
       title: "小红书风格",
-      category: "约束",
+      category: "平台",
       description: "适合小红书。",
       prompt: "标题口语一点。",
       appliesTo: "writer",

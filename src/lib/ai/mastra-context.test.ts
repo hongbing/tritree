@@ -172,7 +172,9 @@ describe("agent instructions", () => {
     expect(optionsInstructions).toContain("最终结构化结果还必须覆盖一句本轮问题判断");
     expect(optionsInstructions).toContain("已启用 Skills 明确要求的非中文文本除外");
     expect(optionsInstructions).toContain("确认每个已启用 Skill 的要求已落实");
-    expect(optionsInstructions.indexOf("# 已启用 Skills")).toBeGreaterThan(optionsInstructions.indexOf("# 责任编辑任务"));
+    expect(optionsInstructions.indexOf("# 已启用 Skills")).toBeGreaterThan(optionsInstructions.indexOf("# 总导演任务"));
+    expect(optionsInstructions.indexOf("# 内容工作流阶段")).toBeGreaterThan(optionsInstructions.indexOf("# 已启用 Skills"));
+    expect(optionsInstructions.indexOf("# 内容工作流阶段")).toBeLessThan(optionsInstructions.indexOf("# 本任务执行规则"));
     expect(optionsInstructions.indexOf("# 已启用 Skills")).toBeLessThan(optionsInstructions.indexOf("# 本任务执行规则"));
     expect(optionsInstructions.indexOf("# 本任务执行规则")).toBeLessThan(optionsInstructions.indexOf("# 输出要求"));
     expect(optionsInstructions.indexOf("# 输出要求")).toBeLessThan(optionsInstructions.indexOf("# 输出前检查"));

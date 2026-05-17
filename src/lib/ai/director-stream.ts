@@ -153,14 +153,15 @@ export async function streamDirectorArtifact(
     currentArtifactChars: parts.currentArtifact.length,
     messageCount: parts.messages.length
   });
-  const output = DirectorArtifactOutputSchema.parse(await streamTreeArtifact({
+  const outputWithTrace = await streamTreeArtifact({
     parts,
     env: options.env,
     memory: options.memory,
     signal: options.signal,
     onPartialObject: emit,
     onReasoningText: options.onReasoningText
-  }));
+  });
+  const output = DirectorArtifactOutputSchema.parse(withoutAgentTrace(outputWithTrace));
   logTritreeAiDebug("director-stream", "artifact-output", {
     artifactType: output.artifact?.type ?? "",
     hasArtifact: Boolean(output.artifact)

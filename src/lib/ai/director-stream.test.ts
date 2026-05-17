@@ -311,6 +311,28 @@ describe("streamDirectorArtifact", () => {
       })
     );
   });
+
+  it("strips Mastra trace metadata before validating artifact output", async () => {
+    const output = {
+      roundIntent: "扩写",
+      artifact: {
+        type: "social-post",
+        payload: { title: "新标题", body: "新正文", hashtags: [], imagePrompt: "" },
+        sourceArtifactIds: []
+      },
+      agentMessages: [{ role: "assistant", content: "trace" }]
+    };
+    mastraMocks.streamTreeArtifact.mockResolvedValue(output);
+
+    await expect(streamDirectorArtifact(directorInput)).resolves.toEqual({
+      roundIntent: "扩写",
+      artifact: {
+        type: "social-post",
+        payload: { title: "新标题", body: "新正文", hashtags: [], imagePrompt: "" },
+        sourceArtifactIds: []
+      }
+    });
+  });
 });
 
 describe("streamDirectorOptions", () => {

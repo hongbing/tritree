@@ -32,6 +32,21 @@ function selectTextInside(element: HTMLElement, text: string) {
   selection?.addRange(range);
 }
 
+function selectTextRange(startElement: HTMLElement, startOffset: number, endElement: HTMLElement, endOffset: number) {
+  const startNode = startElement.firstChild;
+  const endNode = endElement.firstChild;
+  expect(startNode?.nodeType).toBe(Node.TEXT_NODE);
+  expect(endNode?.nodeType).toBe(Node.TEXT_NODE);
+
+  const range = document.createRange();
+  range.setStart(startNode!, startOffset);
+  range.setEnd(endNode!, endOffset);
+
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
 function findTextNodeContaining(node: Node, text: string): Text | null {
   if (node.nodeType === Node.TEXT_NODE && node.textContent?.includes(text)) return node as Text;
 
@@ -110,6 +125,33 @@ describe("SocialPostRenderer", () => {
       selectedText: "目标句。",
       selectionEnd: 8,
       selectionStart: 4
+    });
+  });
+
+  it("uses the source body slice when selected text spans rendered paragraphs", async () => {
+    const onAction = vi.fn().mockResolvedValue(undefined);
+    render(
+      <SocialPostRenderer
+        artifact={createArtifact({ title: "标题", body: "第一段\n\n第二段", hashtags: ["#AI"], imagePrompt: "图" })}
+        isBusy={false}
+        onAction={onAction}
+      />
+    );
+
+    const firstParagraph = screen.getByText("第一段");
+    const secondParagraph = screen.getByText("第二段");
+    selectTextRange(firstParagraph, 1, secondParagraph, 2);
+    fireEvent.mouseUp(firstParagraph.parentElement!);
+    await userEvent.click(screen.getByRole("button", { name: "引用" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "修改要求" }), "补一个细节");
+    await userEvent.click(screen.getByRole("button", { name: "发送修改" }));
+
+    expect(onAction).toHaveBeenCalledWith("rewrite-selection", {
+      field: "body",
+      instruction: "补一个细节",
+      selectedText: "一段\n\n第二",
+      selectionEnd: 7,
+      selectionStart: 1
     });
   });
 

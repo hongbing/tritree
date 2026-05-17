@@ -64,8 +64,9 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
     );
   }
 
+  const payloadBody = payload.body;
   const displayTitle = resolveSocialPostTitle(payload.title, payload.body);
-  const bodyParagraphs = splitBodyParagraphsWithOffsets(payload.body);
+  const bodyParagraphs = splitBodyParagraphsWithOffsets(payloadBody);
   const canUseSelectionRewrite = Boolean(onAction);
 
   async function saveEditedPayload() {
@@ -96,7 +97,7 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
     if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) return;
 
     const offsets = bodyOffsetsForDisplayRange(container, range);
-    const selectedText = selection.toString();
+    const selectedText = offsets ? payloadBody.slice(offsets.start, offsets.end) : "";
     if (!offsets || !selectedText.trim()) return;
 
     setSelectionEdit({

@@ -1,5 +1,9 @@
 import type { ArtifactPluginServer } from "@/artifacts/types";
-import { replaceSocialPostSelection, SocialPostRewriteSelectionInputSchema } from "./actions";
+import {
+  assertSocialPostSelectionMatches,
+  replaceSocialPostSelection,
+  SocialPostRewriteSelectionInputSchema
+} from "./actions";
 import { SocialPostPayloadSchema, type SocialPostPayload } from "./schema";
 import { rewriteSelectedSocialPostText } from "./selection-rewrite";
 
@@ -34,6 +38,7 @@ export const socialPostPlugin: ArtifactPluginServer<SocialPostPayload> = {
   async handleAction({ artifact, input, sessionState }) {
     const payload = SocialPostPayloadSchema.parse(artifact.payload);
     const rewriteInput = SocialPostRewriteSelectionInputSchema.parse(input);
+    assertSocialPostSelectionMatches(payload, rewriteInput);
     const { replacementText } = await rewriteSelectedSocialPostText({
       currentPayload: payload,
       enabledSkills: sessionState.enabledSkills ?? [],

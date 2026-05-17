@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { ArtifactActionConflictError } from "@/artifacts/types";
 import { getArtifactPlugin } from "@/artifacts/registry";
 import { badRequestResponse, isBadRequestError, publicServerErrorMessage } from "@/lib/api/errors";
 import { focusSessionStateForNode } from "@/lib/app-state";
@@ -90,6 +91,14 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
     });
     return NextResponse.json({ state: nextState });
   } catch (error) {
+    if (isBadRequestError(error)) {
+      return badRequestResponse(error);
+    }
+
+    if (error instanceof ArtifactActionConflictError) {
+      return NextResponse.json({ error: error.publicMessage }, { status: 409 });
+    }
+
     console.error("[treeable:artifact-action]", error);
     return NextResponse.json({ error: publicServerErrorMessage(error, "无法执行作品操作。") }, { status: 500 });
   }

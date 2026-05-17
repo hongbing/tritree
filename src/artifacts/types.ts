@@ -34,6 +34,16 @@ export type ArtifactActionResult<TPayload> = {
 
 export type ArtifactActionHandler<TPayload> = (input: ArtifactActionInput) => Promise<ArtifactActionResult<TPayload>>;
 
+export class ArtifactActionConflictError extends Error {
+  constructor(
+    message: string,
+    readonly publicMessage = message
+  ) {
+    super(message);
+    this.name = "ArtifactActionConflictError";
+  }
+}
+
 export type ArtifactPluginServer<TPayload, TAiOutput = TPayload> = {
   aiOutputSchema: z.ZodType<TAiOutput>;
   capabilities: ArtifactCapabilities;

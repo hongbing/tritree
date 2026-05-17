@@ -202,6 +202,67 @@ describe("POST /api/sessions/:sessionId/artifact/actions/:actionId", () => {
     expect(createArtifactChild).not.toHaveBeenCalled();
   });
 
+  it("rejects invalid plugin action input without creating a child", async () => {
+    const createArtifactChild = vi.fn();
+    getRepositoryMock.mockReturnValue({
+      getSessionState: vi.fn().mockReturnValue(state),
+      createArtifactChild
+    });
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/artifact/actions/rewrite-selection", {
+        method: "POST",
+        body: JSON.stringify({
+          nodeId: "node-1",
+          artifactId: "artifact-1",
+          input: {
+            field: "body",
+            selectedText: "Original body",
+            selectionEnd: 13,
+            selectionStart: 0
+          }
+        })
+      }),
+      { params: Promise.resolve({ sessionId: "session-1", actionId: "rewrite-selection" }) }
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "请求内容格式不正确。" });
+    expect(rewriteSelectedSocialPostTextMock).not.toHaveBeenCalled();
+    expect(createArtifactChild).not.toHaveBeenCalled();
+  });
+
+  it("rejects stale selected ranges before calling the AI helper", async () => {
+    const createArtifactChild = vi.fn();
+    getRepositoryMock.mockReturnValue({
+      getSessionState: vi.fn().mockReturnValue(state),
+      createArtifactChild
+    });
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/artifact/actions/rewrite-selection", {
+        method: "POST",
+        body: JSON.stringify({
+          nodeId: "node-1",
+          artifactId: "artifact-1",
+          input: {
+            field: "body",
+            instruction: "Rewrite this",
+            selectedText: "Stale body",
+            selectionEnd: 10,
+            selectionStart: 0
+          }
+        })
+      }),
+      { params: Promise.resolve({ sessionId: "session-1", actionId: "rewrite-selection" }) }
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "选中的原文已变化，请重新选择后再试。" });
+    expect(rewriteSelectedSocialPostTextMock).not.toHaveBeenCalled();
+    expect(createArtifactChild).not.toHaveBeenCalled();
+  });
+
   it("rejects applying an artifact action through an unrelated node", async () => {
     const createArtifactChild = vi.fn();
     getRepositoryMock.mockReturnValue({

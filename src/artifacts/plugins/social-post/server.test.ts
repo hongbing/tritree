@@ -78,4 +78,39 @@ describe("socialPostPlugin", () => {
       sourceArtifactIds: ["artifact-1"]
     });
   });
+
+  it("rejects stale selected ranges before calling the AI rewrite helper", async () => {
+    await expect(
+      socialPostPlugin.handleAction?.({
+        artifact: {
+          id: "artifact-1",
+          type: "social-post",
+          version: 1,
+          payload: {
+            title: "标题",
+            body: "第一句。第二句要改。",
+            hashtags: ["#AI"],
+            imagePrompt: "白板"
+          },
+          sourceArtifactIds: [],
+          createdByNodeId: "node-1",
+          createdAt: "2026-04-27T00:00:00.000Z",
+          updatedAt: "2026-04-27T00:00:00.000Z"
+        },
+        input: {
+          field: "body",
+          instruction: "改得更清楚",
+          selectedText: "过期选区",
+          selectionEnd: 10,
+          selectionStart: 4
+        },
+        sessionState: {
+          rootMemory: { summary: "Seed：写产品故事", learnedSummary: "喜欢具体。" },
+          enabledSkills: []
+        } as never
+      })
+    ).rejects.toThrow("Selected text no longer matches the artifact body.");
+
+    expect(rewriteSelectedSocialPostTextMock).not.toHaveBeenCalled();
+  });
 });

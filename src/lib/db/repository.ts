@@ -46,8 +46,6 @@ import {
   DraftSummarySchema,
   DraftSchema,
   DEFAULT_ARTIFACT_TYPE_ID,
-  LEGACY_SYSTEM_SKILL_IDS,
-  MERGED_SYSTEM_SKILL_IDS,
   RootPreferencesSchema,
   SessionStateSchema,
   SessionStatusSchema,
@@ -180,6 +178,14 @@ type CreationRequestOptionRow = {
 };
 
 const MAX_NODE_AGENT_MESSAGES_JSON_CHARS = 48000;
+const skillTitleCollator = new Intl.Collator("zh-Hans-CN");
+const CONTENT_TEAM_DEFAULT_SKILL_ORDER = new Map([
+  ["system-publisher", 0],
+  ["system-planner", 1],
+  ["system-researcher", 2],
+  ["system-reviewer", 3],
+  ["system-writer", 4]
+]);
 
 function now() {
   return new Date().toISOString();
@@ -403,7 +409,6 @@ export function createTreeableRepository(
   try {
     cleanupStoredSkillRuntimePrompts();
     ensureSystemSkills(configuredDefaults.systemSkills);
-    backfillMergedSystemSkillsForLegacySessions();
     ensureDefaultCreationRequestOptions(configuredDefaults.creationRequestOptions);
   } catch (error) {
     db.close();
@@ -479,52 +484,6 @@ export function createTreeableRepository(
           AND id NOT IN (${placeholders})
       `
     ).run(timestamp, ...configuredIds);
-  }
-
-  function backfillMergedSystemSkillsForLegacySessions() {
-    const mergedPlaceholders = MERGED_SYSTEM_SKILL_IDS.map(() => "?").join(", ");
-    const activeMergedRows = db
-      .prepare(
-        `
-          SELECT id
-          FROM skills
-          WHERE id IN (${mergedPlaceholders})
-            AND user_id IS NULL
-            AND is_system = 1
-            AND is_archived = 0
-        `
-      )
-      .all(...MERGED_SYSTEM_SKILL_IDS) as Array<{ id: string }>;
-    const activeMergedIdSet = new Set(activeMergedRows.map((row) => row.id));
-    const activeMergedSkillIds = MERGED_SYSTEM_SKILL_IDS.filter((skillId) => activeMergedIdSet.has(skillId));
-    if (activeMergedSkillIds.length === 0) return;
-
-    const legacyPlaceholders = LEGACY_SYSTEM_SKILL_IDS.map(() => "?").join(", ");
-    const sessionRows = db
-      .prepare(
-        `
-          SELECT DISTINCT session_id
-          FROM session_enabled_skills
-          WHERE skill_id IN (${legacyPlaceholders})
-        `
-      )
-      .all(...LEGACY_SYSTEM_SKILL_IDS) as Array<{ session_id: string }>;
-
-    if (sessionRows.length === 0) return;
-
-    const timestamp = now();
-    const insert = db.prepare(
-      `
-        INSERT OR IGNORE INTO session_enabled_skills (session_id, skill_id, created_at)
-        VALUES (?, ?, ?)
-      `
-    );
-
-    for (const row of sessionRows) {
-      for (const skillId of activeMergedSkillIds) {
-        insert.run(row.session_id, skillId, timestamp);
-      }
-    }
   }
 
   function ensureDefaultCreationRequestOptions(creationRequestOptions: ConfiguredCreationRequestOption[]) {
@@ -754,12 +713,26 @@ export function createTreeableRepository(
 
   function defaultEnabledSkillIds() {
     const rows = db
-      .prepare("SELECT * FROM skills WHERE is_system = 1 AND user_id IS NULL AND is_archived = 0 ORDER BY category, title")
+      .prepare("SELECT * FROM skills WHERE is_system = 1 AND user_id IS NULL AND is_archived = 0")
       .all() as SkillRow[];
     return rows
       .map(toSkill)
       .filter((skill) => skill.defaultEnabled)
+      .sort(compareDefaultEnabledSkills)
       .map((skill) => skill.id);
+  }
+
+  function compareDefaultEnabledSkills(left: Skill, right: Skill) {
+    const categoryComparison = left.category.localeCompare(right.category);
+    if (categoryComparison !== 0) return categoryComparison;
+
+    const leftContentTeamOrder = CONTENT_TEAM_DEFAULT_SKILL_ORDER.get(left.id);
+    const rightContentTeamOrder = CONTENT_TEAM_DEFAULT_SKILL_ORDER.get(right.id);
+    if (left.category === "content-team" && leftContentTeamOrder !== undefined && rightContentTeamOrder !== undefined) {
+      return leftContentTeamOrder - rightContentTeamOrder;
+    }
+
+    return skillTitleCollator.compare(left.title, right.title);
   }
 
   function resolveSkillsByIds(skillIds: string[], userId: string) {

@@ -14,6 +14,13 @@ function testDbPath() {
 }
 
 const exampleDefaultsConfigPath = path.resolve("config/defaults.example.json");
+const defaultSystemSkillIds = [
+  "system-publisher",
+  "system-planner",
+  "system-researcher",
+  "system-reviewer",
+  "system-writer"
+];
 
 const repositorySystemSkills: ConfiguredSystemSkill[] = [
   {
@@ -799,10 +806,9 @@ describe("Treeable repository", () => {
 
     expect(repo.listSkills(first.id).map((skill) => skill.id)).toContain(custom.id);
     expect(repo.listSkills(second.id).map((skill) => skill.id)).not.toContain(custom.id);
-    expect(repo.listSkills(second.id).filter((skill) => skill.isSystem).map((skill) => skill.id)).toEqual([
-      "system-reviewer",
-      "system-writer"
-    ]);
+    const secondSystemSkillIds = repo.listSkills(second.id).filter((skill) => skill.isSystem).map((skill) => skill.id);
+    expect(secondSystemSkillIds).toEqual(expect.arrayContaining(defaultSystemSkillIds));
+    expect(secondSystemSkillIds).toHaveLength(defaultSystemSkillIds.length);
   });
 
   it("does not resolve another user's custom skill ids", async () => {
@@ -925,11 +931,10 @@ describe("Treeable repository", () => {
     const repo = createTreeableRepository(testDbPath());
     const user = await createTestUser(repo, "writer");
 
-    expect(repo.listSkills(user.id).filter((skill) => skill.isSystem).map((skill) => skill.id)).toEqual([
-      "system-reviewer",
-      "system-writer"
-    ]);
-    expect(repo.defaultEnabledSkillIds()).toEqual(["system-reviewer", "system-writer"]);
+    const systemSkillIds = repo.listSkills(user.id).filter((skill) => skill.isSystem).map((skill) => skill.id);
+    expect(systemSkillIds).toEqual(expect.arrayContaining(defaultSystemSkillIds));
+    expect(systemSkillIds).toHaveLength(defaultSystemSkillIds.length);
+    expect(repo.defaultEnabledSkillIds()).toEqual(defaultSystemSkillIds);
   });
 
   it("updates configured system skills when the config file changes", async () => {
@@ -1021,146 +1026,12 @@ describe("Treeable repository", () => {
     expect(reopened.defaultEnabledSkillIds()).toEqual(["system-reviewer"]);
   });
 
-  it("backfills merged system skills for sessions that referenced legacy system skills", async () => {
-    const dbPath = testDbPath();
-    const configPath = writeDefaultsConfig({ systemSkills: repositorySystemSkills });
-    const repo = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      seed: "写一篇解释为什么要写作的文章",
-      domains: ["创作"],
-      tones: ["平静"],
-      styles: ["观点型"],
-      personas: ["实践者"]
-    });
-
-    const state = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      enabledSkillIds: [],
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "deepen" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "reframe" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    const sqlite = new DatabaseSync(dbPath);
-    sqlite
-      .prepare(
-        `
-          INSERT INTO skills (id, title, category, description, prompt, applies_to, is_system, default_enabled, is_archived, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0, ?, ?)
-        `
-      )
-      .run(
-        "system-analysis",
-        "理清主线",
-        "方向",
-        "旧系统技能。",
-        "判断作品真正要表达什么。",
-        "editor",
-        "2026-05-01T00:00:00.000Z",
-        "2026-05-01T00:00:00.000Z"
-      );
-    sqlite
-      .prepare("INSERT INTO session_enabled_skills (session_id, skill_id, created_at) VALUES (?, ?, ?)")
-      .run(state.session.id, "system-analysis", "2026-05-01T00:00:00.000Z");
-    sqlite.close();
-
-    const reopened = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
-    const reopenedState = reopened.getSessionState(user.id, state.session.id);
-
-    expect(reopenedState?.enabledSkillIds).toEqual(["system-writer", "system-reviewer"]);
-
-    const check = new DatabaseSync(dbPath);
-    const rows = check
-      .prepare("SELECT skill_id FROM session_enabled_skills WHERE session_id = ? ORDER BY skill_id")
-      .all(state.session.id) as Array<{ skill_id: string }>;
-    check.close();
-
-    expect(rows.map((row) => row.skill_id)).toEqual(["system-analysis", "system-reviewer", "system-writer"]);
-  });
-
-  it("backfills only active configured merged system skills for legacy sessions", async () => {
-    const dbPath = testDbPath();
-    const configPath = writeDefaultsConfig({ systemSkills: [repositorySystemSkills[1]] });
-    const repo = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      seed: "写一篇解释为什么要写作的文章",
-      domains: ["创作"],
-      tones: ["平静"],
-      styles: ["观点型"],
-      personas: ["实践者"]
-    });
-
-    const state = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      enabledSkillIds: [],
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "deepen" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "reframe" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    const sqlite = new DatabaseSync(dbPath);
-    sqlite
-      .prepare(
-        `
-          INSERT INTO skills (id, title, category, description, prompt, applies_to, is_system, default_enabled, is_archived, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0, ?, ?)
-        `
-      )
-      .run(
-        "system-analysis",
-        "理清主线",
-        "方向",
-        "旧系统技能。",
-        "判断作品真正要表达什么。",
-        "editor",
-        "2026-05-01T00:00:00.000Z",
-        "2026-05-01T00:00:00.000Z"
-      );
-    sqlite
-      .prepare("INSERT INTO session_enabled_skills (session_id, skill_id, created_at) VALUES (?, ?, ?)")
-      .run(state.session.id, "system-analysis", "2026-05-01T00:00:00.000Z");
-    sqlite.close();
-
-    const reopened = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
-    const reopenedState = reopened.getSessionState(user.id, state.session.id);
-
-    expect(reopenedState?.enabledSkillIds).toEqual(["system-reviewer"]);
-
-    const check = new DatabaseSync(dbPath);
-    const rows = check
-      .prepare("SELECT skill_id FROM session_enabled_skills WHERE session_id = ? ORDER BY skill_id")
-      .all(state.session.id) as Array<{ skill_id: string }>;
-    check.close();
-
-    expect(rows.map((row) => row.skill_id)).toEqual(["system-analysis", "system-reviewer"]);
-  });
-
   it("persists skill applicability for system and user skills", async () => {
     const repo = createTreeableRepository(testDbPath());
     const user = await createTestUser(repo, "writer");
 
     const reviewerSkill = repo.listSkills(user.id).find((skill) => skill.id === "system-reviewer");
-    expect(reviewerSkill?.appliesTo).toBe("editor");
+    expect(reviewerSkill?.appliesTo).toBe("both");
 
     const custom = repo.createSkill(user.id, {
       title: "朋友圈短句",
@@ -1572,9 +1443,9 @@ describe("Treeable repository", () => {
       }
     });
 
-    expect(state.enabledSkillIds).toEqual(["system-reviewer", "system-writer"]);
+    expect(state.enabledSkillIds).toEqual(defaultSystemSkillIds);
     expect(state.enabledSkillIds).not.toContain("system-concrete-examples");
-    expect(state.enabledSkills!.map((skill) => skill.id)).toEqual(["system-reviewer", "system-writer"]);
+    expect(state.enabledSkills!.map((skill) => skill.id)).toEqual(defaultSystemSkillIds);
   });
 
   it("ignores archived system skills when reading session skills", async () => {
@@ -1638,7 +1509,7 @@ describe("Treeable repository", () => {
     const updated = repo.replaceSessionEnabledSkills(user.id, state.session.id, ["system-reviewer", "system-writer"]);
 
     expect(updated?.enabledSkillIds).toEqual(["system-reviewer", "system-writer"]);
-    expect(updated?.enabledSkills!.map((skill) => skill.title)).toEqual(["系统审核者", "系统写作者"]);
+    expect(updated?.enabledSkills!.map((skill) => skill.title)).toEqual(["审稿", "写手"]);
   });
 
   it("rejects direct edits to system skills", async () => {

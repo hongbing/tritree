@@ -1,4 +1,5 @@
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULTS_CONFIG_PATH_ENV,
@@ -6,6 +7,17 @@ import {
   loadConfiguredDefaults,
   resolveDefaultsConfigPath
 } from "./defaults";
+
+const exampleDefaultsConfigPath = path.resolve("config/defaults.example.json");
+const defaultSystemSkillIds = [
+  "system-publisher",
+  "system-planner",
+  "system-researcher",
+  "system-reviewer",
+  "system-writer"
+];
+const roleSectionPhrases = ["角色职责", "有用输出", "适合委托", "调用前最小上下文"];
+const protocolPhrases = ["roundIntent", "options[]", "三个答案", "让用户选择"];
 
 const validConfig = JSON.stringify({
   systemSkills: [
@@ -185,5 +197,39 @@ describe("defaults config loader", () => {
         artifactTypeIds: ["social-post"]
       }
     ]);
+  });
+
+  it("keeps the example defaults as role-focused default-enabled system skills", () => {
+    const defaults = loadConfiguredDefaults({
+      configPath: exampleDefaultsConfigPath,
+      exists: () => true,
+      readFile: (filePath) => readFileSync(filePath, "utf8")
+    });
+
+    const systemSkillsById = new Map(defaults.systemSkills.map((skill) => [skill.id, skill]));
+
+    expect(defaults.systemSkills.map((skill) => skill.id).sort()).toEqual(defaultSystemSkillIds.toSorted());
+    expect(defaults.systemSkills).toHaveLength(defaultSystemSkillIds.length);
+    expect(systemSkillsById.get("system-planner")?.title).toBe("策划");
+    expect(systemSkillsById.get("system-researcher")?.title).toBe("资料员");
+    expect(systemSkillsById.get("system-writer")?.title).toBe("写手");
+    expect(systemSkillsById.get("system-reviewer")?.title).toBe("审稿");
+    expect(systemSkillsById.get("system-publisher")?.title).toBe("发布编辑");
+
+    for (const skillId of defaultSystemSkillIds) {
+      const skill = systemSkillsById.get(skillId);
+      expect(skill).toEqual(expect.objectContaining({
+        category: "content-team",
+        appliesTo: "both",
+        defaultEnabled: true,
+        isArchived: false
+      }));
+      for (const phrase of roleSectionPhrases) {
+        expect(skill?.prompt).toContain(phrase);
+      }
+      for (const phrase of protocolPhrases) {
+        expect(skill?.prompt).not.toContain(phrase);
+      }
+    }
   });
 });

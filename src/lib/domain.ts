@@ -5,30 +5,9 @@ export const ARTIFACT_TYPE_IDS = ["social-post", "prd"] as const;
 export const DEFAULT_ARTIFACT_TYPE_ID = "social-post";
 export const ArtifactTypeIdSchema = z.enum(ARTIFACT_TYPE_IDS);
 
-export const SkillCategorySchema = z.enum(["方向", "约束", "风格", "平台", "检查"]);
+export const SkillCategorySchema = z.enum(["方向", "约束", "风格", "平台", "检查", "content-team"]);
 export const SkillAppliesToSchema = z.enum(["writer", "editor", "both"]);
 export const MAX_SKILL_PROMPT_LENGTH = 100000;
-export const MERGED_SYSTEM_SKILL_IDS = ["system-writer", "system-reviewer"] as const;
-export const LEGACY_SYSTEM_SKILL_IDS = [
-  "system-content-workflow",
-  "system-analysis",
-  "system-expand",
-  "system-rewrite",
-  "system-polish",
-  "system-correct",
-  "system-style-shift",
-  "system-compress",
-  "system-restructure",
-  "system-audience",
-  "system-concrete-examples",
-  "system-no-hype-title",
-  "system-logic-review",
-  "system-reader-entry",
-  "system-claim-risk",
-  "system-title-opening-promise",
-  "system-final-pass",
-  "system-natural-short-sentences"
-] as const;
 
 export const SkillUpsertSchema = z.object({
   title: z.string().trim().min(1).max(40),

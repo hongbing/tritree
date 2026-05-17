@@ -291,6 +291,38 @@ describe("DirectorOutputSchema", () => {
     });
   });
 
+  it("rejects persisted artifact metadata in generated artifact output", () => {
+    expect(
+      DirectorArtifactOutputSchema.safeParse({
+        roundIntent: "生成一版社媒内容",
+        artifact: validArtifact()
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects persisted artifact metadata in director option output", () => {
+    const option = {
+      id: "a",
+      label: "Turn it into a sharper opinion",
+      description: "Make the draft more memorable by adding contrast.",
+      impact: "The next draft will emphasize tension.",
+      kind: "reframe"
+    };
+
+    expect(
+      DirectorOutputSchema.safeParse({
+        roundIntent: "Add tension",
+        options: [
+          option,
+          { ...option, id: "b", kind: "deepen" },
+          { ...option, id: "c", kind: "finish" }
+        ],
+        artifact: validArtifact(),
+        finishAvailable: true
+      }).success
+    ).toBe(false);
+  });
+
   it("rejects responses with one option", () => {
     const option = {
       id: "a",

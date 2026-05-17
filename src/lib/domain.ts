@@ -160,7 +160,7 @@ export const GeneratedArtifactSchema = z.object({
   type: z.string().min(1),
   payload: z.unknown(),
   sourceArtifactIds: z.array(z.string().min(1)).default([])
-});
+}).strict();
 
 export const NodeArtifactSchema = z.object({
   nodeId: z.string().min(1),

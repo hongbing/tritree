@@ -194,6 +194,8 @@ const MASTRA_STRUCTURED_OUTPUT_VALIDATION_ID = "STRUCTURED_OUTPUT_SCHEMA_VALIDAT
 const SUBMIT_TREE_DRAFT_TOOL_NAME = "submit_tree_draft";
 const SUBMIT_TREE_NEXT_STEP_TOOL_NAME = "submit_tree_next_step";
 const SUBMIT_TREE_OPTIONS_TOOL_NAME = "submit_tree_options";
+const ACTUAL_WORK_RETRY_MESSAGE =
+  "You must do actual work before ending this turn. Call a tool or subagent, submit an updated draft or publish package, mark the task complete, or ask the user through three choices with a clear blocker rationale.";
 
 type TreeNextStepAgentLike = TreeOptionsAgentLike;
 
@@ -926,6 +928,7 @@ async function parseRuntimeReActStreamOutput<TOutput>(
   if (summary.submittedOutput !== undefined) {
     try {
       const parsed = schema.parse(summary.submittedOutput);
+      assertMeaningfulRuntimeAction({ output: parsed, summary, target });
       logTritreeAiDebug("react-stream", "parse-submit-success", {
         target,
         output: summarizePartialObjectForLog(parsed)
@@ -958,6 +961,7 @@ async function parseRuntimeReActStreamOutput<TOutput>(
   try {
     const output = await resolveStructuredStreamOutput(stream, summary.latestPartial);
     const parsed = schema.parse(output);
+    assertMeaningfulRuntimeAction({ output: parsed, summary, target });
     logTritreeAiDebug("react-stream", "parse-structured-success", {
       target,
       output: summarizePartialObjectForLog(parsed)
@@ -972,7 +976,7 @@ async function parseRuntimeReActStreamOutput<TOutput>(
     logZodIssues(target, "structured", error);
   }
 
-  if (summary.rawText.trim()) {
+  if (summary.rawText.trim() && !isActualWorkRetryError(streamError)) {
     streamError = finalSubmitToolRequiredError(target);
     logTritreeAiDebug("react-stream", "parse-final-submit-missing", {
       target,
@@ -988,6 +992,45 @@ async function parseRuntimeReActStreamOutput<TOutput>(
   logRuntimeStreamParseFailure(target, summary, streamError);
   logAiResponse(target as "draft" | "next-step" | "options", "stream-parse-failed", summary.latestPartial);
   throw streamError;
+}
+
+function assertMeaningfulRuntimeAction({
+  output,
+  summary,
+  target
+}: {
+  output: unknown;
+  summary: RuntimeToolStreamSummary;
+  target: RuntimeSubmitTarget;
+}) {
+  if (target === "draft") return;
+  if (hasNonFinalToolActivity(summary)) return;
+  if (target === "next-step" && isObjectRecord(output) && (output.action === "draft" || output.action === "complete")) {
+    return;
+  }
+  if (hasDecisionRationale(output)) return;
+
+  throw new ZodError([
+    {
+      code: "custom",
+      path: ["decisionRationale"],
+      message: ACTUAL_WORK_RETRY_MESSAGE
+    }
+  ]);
+}
+
+function hasNonFinalToolActivity(summary: RuntimeToolStreamSummary) {
+  return summary.streamChunks.some((chunk) => chunk.toolName && !isFinalSubmitToolName(chunk.toolName));
+}
+
+function hasDecisionRationale(output: unknown) {
+  return isObjectRecord(output) && typeof output.decisionRationale === "string" && output.decisionRationale.trim().length > 0;
+}
+
+function isActualWorkRetryError(error: unknown) {
+  return zodIssuesFromError(error).some(
+    (issue) => issue.path.join(".") === "decisionRationale" && issue.message === ACTUAL_WORK_RETRY_MESSAGE
+  );
 }
 
 function shouldTreatRuntimeStreamAsAborted(summary: RuntimeToolStreamSummary) {

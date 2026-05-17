@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Skill } from "@/lib/domain";
+import { DirectorNextStepOutputSchema, DirectorOptionsOutputSchema, type Skill } from "@/lib/domain";
 import { createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-agents";
 import {
   generateTreeDraft,
@@ -319,6 +319,39 @@ describe("tree director compatibility generators", () => {
     );
   });
 
+  it("parses decision rationale on options and next-step option outputs", () => {
+    const optionsOutput = DirectorOptionsOutputSchema.parse({
+      decisionRationale: "当前没有足够素材，需要让用户选择一个明确方向。",
+      roundIntent: "选择下一步",
+      options: [
+        { id: "a", label: "补具体场景", description: "加入真实场景。", impact: "让文章更具体。", kind: "explore" },
+        { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
+        { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
+      ]
+    });
+    const nextStepOutput = DirectorNextStepOutputSchema.parse({
+      action: "options",
+      decisionRationale: "需要用户先确认切入角度。",
+      roundIntent: "先澄清背景",
+      options: [
+        { label: "补系统范围", description: "先确认哪些模块要改。", impact: "避免 PRD 编造范围。" },
+        { label: "补目标风格", description: "先确认要改成什么风格。", impact: "让需求更明确。" },
+        { label: "补验收标准", description: "先确认怎么算改好。", impact: "让后续草稿可执行。" }
+      ]
+    });
+
+    expect(optionsOutput.decisionRationale).toBe("当前没有足够素材，需要让用户选择一个明确方向。");
+    expect(nextStepOutput).toMatchObject({
+      action: "options",
+      decisionRationale: "需要用户先确认切入角度。",
+      options: [
+        { id: "a", label: "补系统范围", kind: "explore" },
+        { id: "b", label: "补目标风格", kind: "deepen" },
+        { id: "c", label: "补验收标准", kind: "reframe" }
+      ]
+    });
+  });
+
   it("carries subagent template summaries from context overrides", async () => {
     const fakeAgent = {
       generate: vi.fn(async () => ({
@@ -349,6 +382,7 @@ describe("tree director compatibility generators", () => {
 
   it("uses progressive skill context returned by the runtime", async () => {
     const generatedObject = {
+      decisionRationale: "已经由渐进式 Skill 上下文判断出需要给用户三个清晰方向。",
       roundIntent: "选择下一步",
       options: [
         { id: "a", label: "补因果链", description: "第二段跳得太快。", impact: "让读者更容易理解。", kind: "deepen" },
@@ -424,6 +458,7 @@ describe("tree director compatibility generators", () => {
       execute: vi.fn()
     };
     const finalObject = {
+      decisionRationale: "已合并运行时工具上下文，需要让用户选择下一步角度。",
       roundIntent: "选择下一步",
       options: [
         { id: "a", label: "补具体场景", description: "加入真实场景。", impact: "让文章更具体。", kind: "explore" },
@@ -1298,6 +1333,7 @@ describe("tree director compatibility generators", () => {
       execute: vi.fn()
     };
     const finalObject = {
+      decisionRationale: "已经通过工具结果判断下一步选择范围，需要用三选项让用户确认。",
       roundIntent: "选择下一步",
       options: [
         { id: "a", label: "补具体场景", description: "加入真实场景。", impact: "让文章更具体。", kind: "explore" },
@@ -1988,6 +2024,180 @@ describe("tree director compatibility generators", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  it("retries runtime options when no actual work or blocker rationale happened before final submit", async () => {
+    const firstObject = {
+      roundIntent: "选择差异化角度",
+      options: [
+        { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略，聚焦低幼家庭。", impact: "目标读者更明确。", kind: "explore" },
+        { id: "b", label: "做反攻略", description: "把热门打卡点改成避坑判断。", impact: "和保姆级攻略拉开距离。", kind: "reframe" },
+        { id: "c", label: "做实时决策表", description: "根据天气和拥挤度组织内容。", impact: "更像工具而不是普通长文。", kind: "deepen" }
+      ]
+    };
+    const finalObject = {
+      ...firstObject,
+      decisionRationale: "没有足够信息直接继续创作，需要用户先选择清晰阻塞方向。"
+    };
+    const stream = vi
+      .fn()
+      .mockResolvedValueOnce({
+        fullStream: async function* () {
+          yield {
+            type: "tool-call",
+            payload: {
+              toolCallId: "submit-1",
+              toolName: "submit_tree_options",
+              args: firstObject
+            }
+          };
+        },
+        object: Promise.resolve(undefined)
+      })
+      .mockResolvedValueOnce({
+        fullStream: async function* () {
+          yield {
+            type: "tool-call",
+            payload: {
+              toolCallId: "submit-2",
+              toolName: "submit_tree_options",
+              args: finalObject
+            }
+          };
+        },
+        object: Promise.resolve(undefined)
+      });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate: vi.fn()
+      };
+    });
+
+    await expect(
+      streamTreeOptions({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" }
+      })
+    ).resolves.toMatchObject(finalObject);
+
+    expect(stream).toHaveBeenCalledTimes(2);
+    const retryMessages = stream.mock.calls[1]?.[0] as Array<{ content: string; role: string }>;
+    expect(retryMessages.at(-1)?.content).toContain("You must do actual work before ending this turn");
+    expect(retryMessages.at(-1)?.content).toContain("clear blocker rationale");
+  });
+
+  it("accepts runtime options without decision rationale after non-final subagent tool activity", async () => {
+    const finalObject = {
+      roundIntent: "选择差异化角度",
+      options: [
+        { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略，聚焦低幼家庭。", impact: "目标读者更明确。", kind: "explore" },
+        { id: "b", label: "做反攻略", description: "把热门打卡点改成避坑判断。", impact: "和保姆级攻略拉开距离。", kind: "reframe" },
+        { id: "c", label: "做实时决策表", description: "根据天气和拥挤度组织内容。", impact: "更像工具而不是普通长文。", kind: "deepen" }
+      ]
+    };
+    const stream = vi.fn(async () => ({
+      fullStream: async function* () {
+        yield {
+          type: "tool-result",
+          payload: {
+            toolCallId: "tool-1",
+            toolName: "run_subagent_template",
+            result: {
+              ok: true,
+              output: "已分析可选方向。"
+            }
+          }
+        };
+        yield {
+          type: "tool-call",
+          payload: {
+            toolCallId: "submit-1",
+            toolName: "submit_tree_options",
+            args: finalObject
+          }
+        };
+      },
+      object: Promise.resolve(undefined)
+    }));
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate: vi.fn()
+      };
+    });
+
+    await expect(
+      streamTreeOptions({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" }
+      })
+    ).resolves.toMatchObject(finalObject);
+
+    expect(stream).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts runtime next-step draft and complete actions without decision rationale", async () => {
+    const draftObject = {
+      action: "draft",
+      roundIntent: "当前信息足够，继续写草稿。"
+    };
+    const completeObject = {
+      action: "complete",
+      roundIntent: "当前发布包已完成。"
+    };
+    const stream = vi
+      .fn()
+      .mockResolvedValueOnce({
+        fullStream: async function* () {
+          yield {
+            type: "tool-call",
+            payload: {
+              toolCallId: "submit-1",
+              toolName: "submit_tree_next_step",
+              args: draftObject
+            }
+          };
+        },
+        object: Promise.resolve(undefined)
+      })
+      .mockResolvedValueOnce({
+        fullStream: async function* () {
+          yield {
+            type: "tool-call",
+            payload: {
+              toolCallId: "submit-2",
+              toolName: "submit_tree_next_step",
+              args: completeObject
+            }
+          };
+        },
+        object: Promise.resolve(undefined)
+      });
+    mocks.agentConstructor.mockImplementation(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate: vi.fn()
+      };
+    });
+
+    await expect(
+      streamTreeNextStep({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" }
+      })
+    ).resolves.toMatchObject(draftObject);
+    await expect(
+      streamTreeNextStep({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" }
+      })
+    ).resolves.toMatchObject(completeObject);
+
+    expect(stream).toHaveBeenCalledTimes(2);
+  });
+
   it("accepts runtime final next-step decisions only through the submit_tree_next_step tool", async () => {
     const runSkillCommand = {
       id: "run_skill_command",
@@ -2239,6 +2449,7 @@ describe("tree director compatibility generators", () => {
       execute: vi.fn()
     };
     const finalObject = {
+      decisionRationale: "此测试关注提交后停止消费，因此用明确理由表示当前只需要用户选择。",
       roundIntent: "选择差异化角度",
       options: [
         { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略，聚焦低幼家庭。", impact: "目标读者更明确。", kind: "explore" },
@@ -2298,6 +2509,7 @@ describe("tree director compatibility generators", () => {
       execute: vi.fn()
     };
     const finalObject = {
+      decisionRationale: "此测试关注 submit 参数增量，因此用明确理由表示当前只需要用户选择。",
       roundIntent: "选择差异化角度",
       options: [
         { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略，聚焦低幼家庭。", impact: "目标读者更明确。", kind: "explore" },
@@ -2363,6 +2575,7 @@ describe("tree director compatibility generators", () => {
       execute: vi.fn()
     };
     const finalObject = {
+      decisionRationale: "此测试关注提交后停止消费，因此用明确理由表示当前只需要用户选择。",
       roundIntent: "选择差异化角度",
       options: [
         { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略，聚焦低幼家庭。", impact: "目标读者更明确。", kind: "explore" },
@@ -2421,6 +2634,7 @@ describe("tree director compatibility generators", () => {
       execute: vi.fn()
     };
     const finalObject = {
+      decisionRationale: "此测试关注 submit 参数增量，因此用明确理由表示当前只需要用户选择。",
       roundIntent: "选择差异化角度",
       options: [
         { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略，聚焦低幼家庭。", impact: "目标读者更明确。", kind: "explore" },

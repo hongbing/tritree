@@ -167,6 +167,7 @@ export const DirectorOutputSchema = z.object({
 });
 
 export const DirectorOptionsOutputSchema = z.object({
+  decisionRationale: z.string().min(1).optional(),
   roundIntent: z.string().min(1),
   options: z.array(BranchOptionSchema).length(3, "AI suggestions must include exactly three items.")
 }).superRefine((output, context) => {
@@ -191,6 +192,7 @@ const DirectorNextStepCompleteSchema = z.object({
 
 const DirectorNextStepOptionsSchema = z.object({
   action: z.literal("options").default("options"),
+  decisionRationale: z.string().min(1).optional(),
   roundIntent: z.string().min(1),
   options: z
     .array(

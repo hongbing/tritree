@@ -1,4 +1,5 @@
 import type { Skill } from "@/lib/domain";
+import { buildContentWorkflowOptionInstructions } from "./content-workflow";
 
 export type SharedAgentContextInput = {
   rootSummary: string;
@@ -62,6 +63,7 @@ export function buildTreeOptionsInstructions(input: SharedAgentContextInput) {
     "你是一位经验丰富的澄清问题设计者。",
     "你的任务不是续写正文，而是阅读初始内容、修改历程和当前内容，提出一个当前最值得让用户回答的问题，并给出三个可选择答案。",
     buildSharedAgentContext(input),
+    buildContentWorkflowOptionInstructions(),
     "# 本任务执行规则",
     "把历史当作一篇文章的编辑记录：初始内容是什么，经过了哪些修改，现在的内容走到了哪里。",
     "先诊断当前内容最需要用户决定的一个问题，再把这个问题写进 roundIntent。",

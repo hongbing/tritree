@@ -84,11 +84,25 @@ describe("agent instructions", () => {
     expect(instructions).toContain("description 写这个答案代表的取舍");
     expect(instructions).toContain("impact 写选择后会让后续生成获得什么确定性");
     expect(instructions).toContain("不要返回独立审查报告");
+    expect(instructions).toContain("# 内容工作流阶段");
+    expect(instructions).toContain("每轮先判断当前内容最适合哪个阶段");
+    expect(instructions).toContain("为该阶段生成一个 roundIntent 问题");
+    expect(instructions).toContain("澄清意图");
+    expect(instructions).toContain("选择角度");
+    expect(instructions).toContain("组织材料");
+    expect(instructions).toContain("写作或改写");
+    expect(instructions).toContain("审稿修补");
+    expect(instructions).toContain("收口发布");
+    expect(instructions).toContain("只使用现有输出字段表达判断：roundIntent、options[].label、options[].description、options[].impact");
   });
 
   it("uses separate writer and director roles without leaking the tree choice mechanic", () => {
     const draftInstructions = buildTreeDraftInstructions(input);
     const optionsInstructions = buildTreeOptionsInstructions(input);
+
+    expect(draftInstructions).not.toContain("# 内容工作流阶段");
+    expect(draftInstructions).not.toContain("澄清意图");
+    expect(draftInstructions).not.toContain("只使用现有输出字段表达判断");
 
     expect(draftInstructions.startsWith("# 作者任务")).toBe(true);
     expect(draftInstructions).toContain("作者");

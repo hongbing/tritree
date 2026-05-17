@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ArtifactSchema,
   BranchOptionSchema,
+  DirectorArtifactOutputSchema,
   DirectorOptionsOutputSchema,
   DirectorNextStepOutputSchema,
   DirectorOutputSchema,
@@ -245,7 +246,7 @@ describe("DirectorNextStepOutputSchema", () => {
 });
 
 describe("DirectorOutputSchema", () => {
-  it("accepts a structured AI director response", () => {
+  it("accepts a structured AI director response with a generated artifact", () => {
     const option = {
       id: "a",
       label: "Turn it into a sharper opinion",
@@ -261,12 +262,33 @@ describe("DirectorOutputSchema", () => {
         { ...option, id: "b", kind: "deepen" },
         { ...option, id: "c", kind: "finish" }
       ],
-      artifact: validArtifact(),
+      artifact: {
+        type: "social-post",
+        payload: { title: "A working title", body: "A short body.", hashtags: ["#AI"], imagePrompt: "" }
+      },
       finishAvailable: true
     });
 
     expect(parsed.options).toHaveLength(3);
+    expect(parsed.artifact.type).toBe("social-post");
+    expect(parsed.artifact.sourceArtifactIds).toEqual([]);
     expect(parsed).not.toHaveProperty("memoryObservation");
+  });
+
+  it("accepts generated artifact output without persistence metadata", () => {
+    const parsed = DirectorArtifactOutputSchema.parse({
+      roundIntent: "生成一版社媒内容",
+      artifact: {
+        type: "social-post",
+        payload: { title: "T", body: "B", hashtags: [], imagePrompt: "" }
+      }
+    });
+
+    expect(parsed.artifact).toEqual({
+      type: "social-post",
+      payload: { title: "T", body: "B", hashtags: [], imagePrompt: "" },
+      sourceArtifactIds: []
+    });
   });
 
   it("rejects responses with one option", () => {

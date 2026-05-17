@@ -156,6 +156,12 @@ export const ArtifactSchema = z.object({
   updatedAt: z.string()
 });
 
+export const GeneratedArtifactSchema = z.object({
+  type: z.string().min(1),
+  payload: z.unknown(),
+  sourceArtifactIds: z.array(z.string().min(1)).default([])
+});
+
 export const NodeArtifactSchema = z.object({
   nodeId: z.string().min(1),
   artifact: ArtifactSchema
@@ -178,7 +184,7 @@ export const AgentMessageSchema = z.object({
 export const DirectorOutputSchema = z.object({
   roundIntent: z.string().min(1),
   options: z.array(BranchOptionSchema).length(3, "AI suggestions must include exactly three items."),
-  artifact: ArtifactSchema,
+  artifact: GeneratedArtifactSchema,
   finishAvailable: z.boolean().optional(),
 }).superRefine((output, context) => {
   if (!includesDirectorOptionIdsOnce(output.options)) {
@@ -260,7 +266,7 @@ export const DirectorNextStepOutputSchema = z.union([
 
 export const DirectorArtifactOutputSchema = z.object({
   roundIntent: z.string().min(1),
-  artifact: ArtifactSchema
+  artifact: GeneratedArtifactSchema
 });
 
 export const SessionStatusSchema = z.enum(["active", "finished"]);
@@ -354,6 +360,7 @@ export type SkillTarget = Exclude<SkillAppliesTo, "both">;
 export type RootMemory = z.infer<typeof RootMemorySchema>;
 export type BranchOption = z.infer<typeof BranchOptionSchema>;
 export type Artifact = z.infer<typeof ArtifactSchema>;
+export type GeneratedArtifact = z.infer<typeof GeneratedArtifactSchema>;
 export type NodeArtifact = z.infer<typeof NodeArtifactSchema>;
 export type WorkflowNodeKind = z.infer<typeof WorkflowNodeKindSchema>;
 export type AgentMessage = z.infer<typeof AgentMessageSchema>;

@@ -184,9 +184,9 @@ export const AgentMessageSchema = z.object({
 export const DirectorOutputSchema = z.object({
   roundIntent: z.string().min(1),
   options: z.array(BranchOptionSchema).length(3, "AI suggestions must include exactly three items."),
-  artifact: GeneratedArtifactSchema,
+  artifact: GeneratedArtifactSchema.nullable().optional(),
   finishAvailable: z.boolean().optional(),
-}).superRefine((output, context) => {
+}).strict().superRefine((output, context) => {
   if (!includesDirectorOptionIdsOnce(output.options)) {
     context.addIssue({
       code: "custom",

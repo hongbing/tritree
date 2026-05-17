@@ -65,6 +65,18 @@ function validArtifact() {
   };
 }
 
+function validGeneratedArtifact() {
+  return {
+    type: "social-post",
+    payload: {
+      title: "A working title",
+      body: "A short body.",
+      hashtags: ["#AI"],
+      imagePrompt: "A luminous tree on a writing desk."
+    }
+  };
+}
+
 describe("RootPreferencesSchema", () => {
   it("accepts a seed-driven first-run shape", () => {
     const result = RootPreferencesSchema.parse({
@@ -279,9 +291,53 @@ describe("DirectorOutputSchema", () => {
     });
 
     expect(parsed.options).toHaveLength(3);
-    expect(parsed.artifact.type).toBe("social-post");
-    expect(parsed.artifact.sourceArtifactIds).toEqual([]);
+    expect(parsed.artifact?.type).toBe("social-post");
+    expect(parsed.artifact?.sourceArtifactIds).toEqual([]);
     expect(parsed).not.toHaveProperty("memoryObservation");
+  });
+
+  it("accepts a structured AI director response with no artifact", () => {
+    const option = {
+      id: "a",
+      label: "先补背景",
+      description: "先确认背景是否足够。",
+      impact: "让下一步更准确。",
+      kind: "explore"
+    };
+
+    const parsed = DirectorOutputSchema.parse({
+      roundIntent: "先判断是否需要更多信息",
+      options: [
+        option,
+        { ...option, id: "b", kind: "deepen" },
+        { ...option, id: "c", kind: "finish" }
+      ],
+      artifact: null
+    });
+
+    expect(parsed.artifact).toBeNull();
+  });
+
+  it("rejects draft-shaped director output", () => {
+    const option = {
+      id: "a",
+      label: "先补背景",
+      description: "先确认背景是否足够。",
+      impact: "让下一步更准确。",
+      kind: "explore"
+    };
+
+    expect(
+      DirectorOutputSchema.safeParse({
+        roundIntent: "不要接受 draft 核心输出",
+        options: [
+          option,
+          { ...option, id: "b", kind: "deepen" },
+          { ...option, id: "c", kind: "finish" }
+        ],
+        draft: { title: "T", body: "B", hashtags: [], imagePrompt: "" }
+      }).success
+    ).toBe(false);
   });
 
   it("accepts generated artifact output without persistence metadata", () => {
@@ -360,7 +416,7 @@ describe("DirectorOutputSchema", () => {
       DirectorOutputSchema.parse({
         roundIntent: "Add tension",
         options: [option],
-        artifact: validArtifact(),
+        artifact: validGeneratedArtifact(),
         finishAvailable: false
       })
     ).toThrow("AI suggestions must include exactly three items.");
@@ -384,7 +440,7 @@ describe("DirectorOutputSchema", () => {
           { ...option, id: "c", kind: "finish" },
           { ...option, id: "a", label: "Try another angle" }
         ],
-        artifact: validArtifact(),
+        artifact: validGeneratedArtifact(),
         finishAvailable: false
       })
     ).toThrow("AI suggestions must include exactly three items.");
@@ -407,7 +463,7 @@ describe("DirectorOutputSchema", () => {
           { ...option, label: "Deepen the proof" },
           { ...option, label: "Try another angle" }
         ],
-        artifact: validArtifact(),
+        artifact: validGeneratedArtifact(),
         finishAvailable: false
       })
     ).toThrow("AI suggestions must include IDs a, b, and c exactly once.");
@@ -430,7 +486,7 @@ describe("DirectorOutputSchema", () => {
           { ...option, id: "b", kind: "deepen" },
           { ...option, id: "custom-user", label: "User custom branch" }
         ],
-        artifact: validArtifact(),
+        artifact: validGeneratedArtifact(),
         finishAvailable: false
       })
     ).toThrow("AI suggestions must include IDs a, b, and c exactly once.");

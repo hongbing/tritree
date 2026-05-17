@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   focusSessionStateForNode,
-  summarizeCurrentDraftOptionsForDirector,
-  summarizeEditedDraftForDirector,
-  summarizeSelectionRewriteForDirector,
+  summarizeArtifactSelectionRewriteForDirector,
+  summarizeCurrentArtifactOptionsForDirector,
+  summarizeEditedArtifactForDirector,
   summarizeSessionForDirector
 } from "./app-state";
 import type { Artifact, BranchOption, SessionState, Skill, TreeNode } from "./domain";
@@ -108,7 +108,7 @@ describe("summarizeSessionForDirector", () => {
     };
 
     const draftSummary = summarizeSessionForDirector(state, option("a", "补完整需求"));
-    const optionSummary = summarizeCurrentDraftOptionsForDirector(state);
+    const optionSummary = summarizeCurrentArtifactOptionsForDirector(state);
     const draftMessages = (draftSummary as any).messages as Array<{ role: string; content: string }>;
     const optionMessages = (optionSummary as any).messages as Array<{ role: string; content: string }>;
 
@@ -196,7 +196,7 @@ describe("summarizeSessionForDirector", () => {
       })
     ]);
 
-    const summary = summarizeCurrentDraftOptionsForDirector(state, "divergent");
+    const summary = summarizeCurrentArtifactOptionsForDirector(state, "divergent");
 
     expect(summary.selectedOptionLabel).not.toContain("避免重复已有方向");
     expect(summary.selectedOptionLabel).toContain("方向范围：发散");
@@ -222,7 +222,7 @@ describe("summarizeSessionForDirector", () => {
     ]);
 
     const draftSummary = summarizeSessionForDirector(state, option("a", "补一个细节"));
-    const optionSummary = summarizeCurrentDraftOptionsForDirector(state);
+    const optionSummary = summarizeCurrentArtifactOptionsForDirector(state);
     const draftMessages = (draftSummary as any).messages as Array<{ role: string; content: string }>;
     const optionMessages = (optionSummary as any).messages as Array<{ role: string; content: string }>;
 
@@ -267,7 +267,7 @@ describe("summarizeSessionForDirector", () => {
     ]);
 
     const draftSummary = summarizeSessionForDirector(state, option("a", "避开游客打卡视角"));
-    const optionSummary = summarizeCurrentDraftOptionsForDirector(state);
+    const optionSummary = summarizeCurrentArtifactOptionsForDirector(state);
     const draftMessages = (draftSummary as any).messages as Array<{ role: string; content: unknown }>;
     const optionMessages = (optionSummary as any).messages as Array<{ role: string; content: unknown }>;
 
@@ -292,7 +292,7 @@ describe("summarizeSessionForDirector", () => {
       })
     ]);
 
-    const summary = summarizeCurrentDraftOptionsForDirector(state, "focused");
+    const summary = summarizeCurrentArtifactOptionsForDirector(state, "focused");
     const messages = (summary as any).messages as Array<{ role: string; content: string }>;
     const finalMessage = messages.at(-1)?.content ?? "";
 
@@ -536,7 +536,7 @@ describe("summarizeSessionForDirector", () => {
       })
     ]);
 
-    const summary = summarizeCurrentDraftOptionsForDirector(state);
+    const summary = summarizeCurrentArtifactOptionsForDirector(state);
 
     expect(summary.pathSummary).toBe("");
     expect(summary.selectedOptionLabel).toBe("");
@@ -552,7 +552,7 @@ describe("summarizeSessionForDirector", () => {
       })
     ]);
 
-    const summary = summarizeCurrentDraftOptionsForDirector(state);
+    const summary = summarizeCurrentArtifactOptionsForDirector(state);
     const messages = (summary as any).messages as Array<{ role: string; content: string }>;
 
     expect(messages.map((message) => message.role)).toEqual(["user"]);
@@ -591,7 +591,7 @@ describe("summarizeSessionForDirector", () => {
       })
     ]);
 
-    const summary = summarizeCurrentDraftOptionsForDirector(state);
+    const summary = summarizeCurrentArtifactOptionsForDirector(state);
     const messages = (summary as any).messages as Array<{ role: string; content: string }>;
     const finalMessage = messages.at(-1)?.content ?? "";
 
@@ -658,7 +658,7 @@ describe("summarizeSessionForDirector", () => {
       })
     ]);
 
-    const summary = summarizeEditedDraftForDirector(state, socialPostArtifact("artifact-edited", "current", {
+    const summary = summarizeEditedArtifactForDirector(state, socialPostArtifact("artifact-edited", "current", {
       title: "Edited",
       body: "Edited body",
       hashtags: ["#edit"],
@@ -695,7 +695,7 @@ describe("summarizeSessionForDirector", () => {
       }
     ];
 
-    const summary = summarizeCurrentDraftOptionsForDirector(state);
+    const summary = summarizeCurrentArtifactOptionsForDirector(state);
 
     expect(summary.foldedSummary).toBe("");
     expect(summary.foldedSummary).not.toContain("旧路线里的选项");
@@ -710,9 +710,14 @@ describe("summarizeSessionForDirector", () => {
       skill("shared-skill", "标题不要夸张", "both")
     ];
 
-    const summary = summarizeSelectionRewriteForDirector(
+    const summary = summarizeArtifactSelectionRewriteForDirector(
       state,
-      { title: "标题", body: "第一句。第二句。", hashtags: [], imagePrompt: "" },
+      socialPostArtifact("artifact-selection", "node-selection", {
+        title: "标题",
+        body: "第一句。第二句。",
+        hashtags: [],
+        imagePrompt: ""
+      }),
       "第一句",
       "改自然一点",
       "body"
@@ -720,7 +725,8 @@ describe("summarizeSessionForDirector", () => {
 
     expect(summary.enabledSkills.map((item) => item.title)).toEqual(["自然短句", "标题不要夸张"]);
     expect(summary).not.toHaveProperty("currentDraft");
-    expect(summary.currentArtifact).toMatchObject({ title: "标题", body: "第一句。第二句。" });
+    expect(summary.currentArtifact).toContain("标题");
+    expect(summary.currentArtifact).toContain("第一句。第二句。");
   });
 });
 

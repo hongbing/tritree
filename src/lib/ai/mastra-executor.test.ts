@@ -284,7 +284,7 @@ describe("tree director compatibility generators", () => {
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:next-step]",
-      expect.stringContaining("决定下一步是继续澄清，还是授权生成草稿")
+      expect.stringContaining("决定下一步是继续澄清，还是授权生成产物")
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:next-step]",

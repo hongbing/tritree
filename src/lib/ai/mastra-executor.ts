@@ -15,10 +15,10 @@ import type { ToolsInput } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
 import { ZodError, type ZodIssue } from "zod";
 import { createSkillRuntimeTools } from "@/lib/skills/skill-runtime";
-import { createTreeDraftAgent as createTreeArtifactAgent, createTreeNextStepAgent, createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-agents";
+import { createTreeArtifactAgent, createTreeNextStepAgent, createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-agents";
 import { compactDirectorMessagesForModel } from "./model-context";
 import {
-  buildTreeDraftInstructions as buildTreeArtifactInstructions,
+  buildTreeArtifactInstructions,
   buildTreeNextStepInstructions,
   buildTreeOptionsInstructions,
   type SharedAgentContextInput

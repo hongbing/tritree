@@ -9,7 +9,7 @@ export type SharedAgentContextInput = {
   toolSummaries?: string[];
 };
 
-const SUBMIT_TREE_DRAFT_TOOL_NAME = "submit_tree_draft";
+const SUBMIT_TREE_ARTIFACT_TOOL_NAME = "submit_tree_artifact";
 const SUBMIT_TREE_NEXT_STEP_TOOL_NAME = "submit_tree_next_step";
 const SUBMIT_TREE_OPTIONS_TOOL_NAME = "submit_tree_options";
 
@@ -27,27 +27,28 @@ export function buildSharedAgentContext(input: SharedAgentContextInput) {
     .join("\n\n");
 }
 
-export function buildTreeDraftInstructions(input: SharedAgentContextInput) {
+export function buildTreeArtifactInstructions(input: SharedAgentContextInput) {
   return [
-    "# 作者任务",
-    "你是一位写作者/内容生成器。",
-    "你的任务是基于初始内容、对话中已形成的草稿、历史写作意图和用户想要完成的写作意图，生成新的内容版本。",
+    "# 产物生成任务",
+    "你是一位内容产物生成器。",
+    "你的任务是基于初始内容、对话中已形成的产物、历史生成意图和用户想要完成的本轮意图，生成新的产物版本。",
     buildSharedAgentContext(input),
     "# 本任务执行规则",
-    "把用户想要完成的写作意图当作本轮写作目标，不需要解释它的来源。",
-    "把历史当作一路写作版本的演进：理解每一轮为什么改、改成了什么，再决定本轮应该怎样写。",
-    "以最新已形成的草稿作为本轮改写对象；历史只用于理解演进和偏好，不要回退、合并或恢复旧版本，除非用户明确要求。",
+    "把用户想要完成的本轮意图当作生成目标，不需要解释它的来源。",
+    "把历史当作一路产物版本的演进：理解每一轮为什么改、产出了什么，再决定本轮应该怎样生成。",
+    "以最新已形成的产物作为本轮生成基线；历史只用于理解演进和偏好，不要回退、合并或恢复旧版本，除非用户明确要求。",
     "必须遵守已启用 Skills；它们是本轮任务指令，不是可选参考资料。",
     "如果本轮列出了可用工具和 MCP 能力，可以按需调用；未列出时不要假设可以查询外部信息。",
-    ...finalSubmitExecutionRules(input, "draft"),
-    "保留已形成草稿中已经成立的材料和用户明确确认过的表达，只改动对本轮写作意图有帮助的部分。",
+    ...finalSubmitExecutionRules(input, "artifact"),
+    "保留已形成产物中已经成立的材料和用户明确确认过的表达，只改动对本轮意图有帮助的部分。",
     "使用日常、清楚、有作品感的表达，避开抽象隐喻、玄学化前缀或未解释的行业黑话。",
     "# 输出要求",
-    "只生成新的内容版本，不要给编辑建议。",
+    "只生成新的产物版本，不要给编辑建议。",
     "这里的输出要求指结构化结果或最终提交工具参数里的字段，不是额外自然语言消息。",
-    "本任务产出的用户可见字段包括：roundIntent、draft.title、draft.body、draft.hashtags 和 draft.imagePrompt。",
+    "本任务产出的用户可见字段包括：roundIntent、artifact.type、artifact.payload 和 artifact.sourceArtifactIds。",
+    "artifact.type 必须是本轮作品类型对应的产物类型；artifact.payload 必须遵守作品类型与输出结构里的字段、格式和交付要求。",
     "如果 Skill 要求固定文本、格式、语气或其他可观察结果，最终返回字段里必须能直接看见对应结果。",
-    "最终结构化结果必须覆盖：本轮意图、标题、正文、话题和配图提示。",
+    "最终结构化结果必须覆盖：本轮意图和一个符合产物插件结构的 artifact。",
     "所有面向用户的字段默认使用简体中文；用户原文、专有名词、代码、品牌名和已启用 Skills 明确要求的非中文文本除外。",
     "# 输出前检查",
     "确认每个已启用 Skill 的要求已落实到本任务产出的用户可见字段；不要因为结构化输出字段而忽略 Skill 要求。"
@@ -103,36 +104,36 @@ export function buildTreeOptionsInstructions(input: SharedAgentContextInput) {
 export function buildTreeNextStepInstructions(input: SharedAgentContextInput) {
   return [
     "# 总导演任务",
-    "你负责在用户选择一个答案之后，决定下一步是继续澄清，还是授权生成草稿。",
-    "你不写正文，也不生成草稿内容；你只做路由决策。",
+    "你负责在用户选择一个答案之后，决定下一步是继续澄清，还是授权生成产物。",
+    "你不生成产物内容；你只做路由决策。",
     buildSharedAgentContext(input),
     "# 本任务执行规则",
     "阅读初始内容、当前内容、历史写作意图、用户刚刚选择的答案和用户补充说明。",
-    "如果当前信息已经足够让写作者执行用户选择，返回 action=draft。",
-    "如果用户选择的是停在当前版本、无需继续、已经完成、直接交付，或当前最近草稿已经满足目标且不需要再写新版本，返回 action=complete。",
+    "如果当前信息已经足够让产物生成器执行用户选择，返回 action=artifact。",
+    "如果用户选择的是停在当前版本、无需继续、已经完成、直接交付，或当前最近产物已经满足目标且不需要再生成新版本，返回 action=complete。",
     "如果用户选择的是补背景、补目标、补需求、确认范围、确认指标等需要事实判断的答案，但上下文没有对应事实，返回 action=options。",
     "action=options 时，生成一个新的澄清问题和三个真正可选的答案，让用户继续做选择；不要把缺失事实写成已确认内容。",
-    "action=draft 时，只说明本轮写作意图，不要提供三个答案。",
-    "action=complete 时，只说明完成判断，不要提供三个答案，也不要生成草稿。",
+    "action=artifact 时，只说明本轮产物生成意图，不要提供三个答案。",
+    "action=complete 时，只说明完成判断，不要提供三个答案，也不要生成产物。",
     "必须遵守已启用 Skills；它们是本轮任务指令，不是可选参考资料。",
     "如果本轮列出了可用工具和 MCP 能力，可以按需调用；未列出时不要假设可以查询外部信息。",
     ...finalSubmitExecutionRules(input, "next-step"),
     "# 输出要求",
     "只返回结构化结果。",
-    "action 只能是 options、draft 或 complete。",
+    "action 只能是 options、artifact 或 complete。",
     "当 action=options 时，roundIntent 必须是一个新问题，并必须返回 options[].label、options[].description 和 options[].impact；不需要输出 id 或 kind，系统会自动把三个答案映射为 a、b、c。",
-    "当 action=draft 时，不返回 options；只返回 roundIntent。",
-    "当 action=complete 时，不返回 options；只返回 roundIntent。",
+    "当 action=artifact 时，不返回 options；只返回 roundIntent，可以返回 artifact 或 artifact=null。",
+    "当 action=complete 时，不返回 options；只返回 roundIntent，可以返回 artifact=null。",
     "所有面向用户的字段默认使用简体中文；用户原文、专有名词、代码、品牌名和已启用 Skills 明确要求的非中文文本除外。"
   ]
     .filter(Boolean)
     .join("\n\n");
 }
 
-function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "draft" | "next-step" | "options") {
+function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "artifact" | "next-step" | "options") {
   const toolName =
-    target === "draft"
-      ? SUBMIT_TREE_DRAFT_TOOL_NAME
+    target === "artifact"
+      ? SUBMIT_TREE_ARTIFACT_TOOL_NAME
       : target === "next-step"
         ? SUBMIT_TREE_NEXT_STEP_TOOL_NAME
         : SUBMIT_TREE_OPTIONS_TOOL_NAME;
@@ -141,7 +142,7 @@ function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "draf
   );
   if (!hasFinalSubmitTool) return [];
 
-  const taskName = target === "draft" ? "写作" : target === "next-step" ? "路由决策" : "澄清选项";
+  const taskName = target === "artifact" ? "产物生成" : target === "next-step" ? "路由决策" : "澄清选项";
   return [
     `本轮可用工具里包含 ${toolName} 时，最终目标就是调用 ${toolName} 完成本轮${taskName}任务；不要把最终结果写成普通文本。`,
     `调用 ${toolName} 前可以按需调用其他工具收集信息；一旦结果足够，直接把结构化字段作为 ${toolName} 的参数提交。`

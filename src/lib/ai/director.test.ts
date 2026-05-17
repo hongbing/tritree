@@ -13,7 +13,7 @@ import {
   parseDirectorOptionsText,
   parseDirectorOutput
 } from "./director";
-import { DIRECTOR_DRAFT_SYSTEM_PROMPT, DIRECTOR_OPTIONS_SYSTEM_PROMPT, type DirectorInputParts } from "./prompts";
+import { DIRECTOR_ARTIFACT_SYSTEM_PROMPT, DIRECTOR_OPTIONS_SYSTEM_PROMPT, type DirectorInputParts } from "./prompts";
 
 describe("director artifact schemas", () => {
   it("parses artifact output and no-artifact output", () => {
@@ -37,8 +37,7 @@ describe("parseDirectorOutput", () => {
         roundIntent: "Start",
         options: [],
         artifact: { type: "social-post", payload: { title: "", body: "", hashtags: [], imagePrompt: "" } },
-        finishAvailable: false,
-        publishPackage: null
+        finishAvailable: false
       })
     ).toThrow("AI suggestions must include exactly three items.");
   });
@@ -61,8 +60,7 @@ describe("parseDirectorOutput", () => {
           { ...option, label: "Reframe" }
         ],
         artifact: { type: "social-post", payload: { title: "", body: "", hashtags: [], imagePrompt: "" } },
-        finishAvailable: false,
-        publishPackage: null
+        finishAvailable: false
       })
     ).toThrow("AI suggestions must include IDs a, b, and c exactly once.");
   });
@@ -122,7 +120,7 @@ describe("buildDirectorInput", () => {
   it("keeps base director prompt language artifact-generic", () => {
     const promptText = [
       DIRECTOR_OPTIONS_SYSTEM_PROMPT,
-      DIRECTOR_DRAFT_SYSTEM_PROMPT,
+      DIRECTOR_ARTIFACT_SYSTEM_PROMPT,
       buildTestDirectorInput({
         rootSummary: "Seed：一个内容念头",
         learnedSummary: "",

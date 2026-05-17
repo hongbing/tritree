@@ -93,7 +93,7 @@ function formatWritingIntentLabel(
     .join("\n");
 }
 
-export function summarizeEditedDraftForDirector(state: SessionState, artifact: Artifact): DirectorInputParts {
+export function summarizeEditedArtifactForDirector(state: SessionState, artifact: Artifact): DirectorInputParts {
   const selectedOptionLabel = "";
 
   return {
@@ -109,7 +109,7 @@ export function summarizeEditedDraftForDirector(state: SessionState, artifact: A
   };
 }
 
-export function summarizeCurrentDraftOptionsForDirector(
+export function summarizeCurrentArtifactOptionsForDirector(
   state: SessionState,
   optionMode: OptionGenerationMode = "balanced"
 ): DirectorInputParts {
@@ -129,18 +129,18 @@ export function summarizeCurrentDraftOptionsForDirector(
   };
 }
 
-export function summarizeSelectionRewriteForDirector(
+export function summarizeArtifactSelectionRewriteForDirector(
   state: SessionState,
-  artifactPayload: { title: string; body: string; hashtags: string[]; imagePrompt: string },
+  artifact: Artifact,
   selectedText: string,
   instruction: string,
-  field: "body"
+  field: string
 ) {
   return {
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
     pathSummary: "",
-    currentArtifact: artifactPayload,
+    currentArtifact: formatArtifactForDirector(artifact),
     enabledSkills: skillsForTarget(enabledSkillsForDirector(state), "writer"),
     field,
     selectedText,

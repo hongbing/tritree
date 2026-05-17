@@ -31,7 +31,7 @@ roundIntent 必须是一个用户可以直接回答的问题。
 引用词语时使用中文引号“”。
 `.trim();
 
-export const DIRECTOR_DRAFT_SYSTEM_PROMPT = `
+export const DIRECTOR_ARTIFACT_SYSTEM_PROMPT = `
 ${DIRECTOR_BASE_SYSTEM_PROMPT}
 
 Generate the artifact result for the current selected answer.

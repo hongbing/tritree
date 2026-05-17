@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSharedAgentContext,
-  buildTreeDraftInstructions,
+  buildTreeArtifactInstructions,
   buildTreeOptionsInstructions,
   type SharedAgentContextInput
 } from "./mastra-context";
@@ -87,47 +87,50 @@ describe("agent instructions", () => {
   });
 
   it("uses separate writer and director roles without leaking the tree choice mechanic", () => {
-    const draftInstructions = buildTreeDraftInstructions(input);
+    const artifactInstructions = buildTreeArtifactInstructions(input);
     const optionsInstructions = buildTreeOptionsInstructions(input);
 
-    expect(draftInstructions.startsWith("# 作者任务")).toBe(true);
-    expect(draftInstructions).toContain("作者");
-    expect(draftInstructions).toContain("用户想要完成的写作意图");
-    expect(draftInstructions).toContain("只生成新的内容版本");
-    expect(draftInstructions).toContain("对话中已形成的草稿");
-    expect(draftInstructions).toContain("以最新已形成的草稿作为本轮改写对象");
-    expect(draftInstructions).toContain("用户明确确认过的表达");
-    expect(draftInstructions).not.toContain("当前内容是唯一写作基线");
-    expect(draftInstructions).not.toContain("不可改动的用户原文");
-    expect(draftInstructions).not.toContain("用户本轮意图和补充要求优先于上一版草稿");
-    expect(draftInstructions).toContain("必须遵守已启用 Skills");
-    expect(draftInstructions).toContain("# 本任务执行规则");
-    expect(draftInstructions).toContain("# 输出要求");
-    expect(draftInstructions).toContain("# 输出前检查");
-    expect(draftInstructions).toContain("要求：种子或零散想法阶段可以大幅组织材料");
-    expect(draftInstructions).toContain("如果本轮列出了可用工具和 MCP 能力，可以按需调用");
-    expect(draftInstructions).toContain("未列出时不要假设可以查询外部信息");
-    expect(draftInstructions).toContain("本任务产出的用户可见字段包括：roundIntent、draft.title、draft.body、draft.hashtags 和 draft.imagePrompt");
-    expect(draftInstructions).toContain("如果 Skill 要求固定文本、格式、语气或其他可观察结果，最终返回字段里必须能直接看见对应结果");
-    expect(draftInstructions).toContain("这里的输出要求指结构化结果或最终提交工具参数里的字段，不是额外自然语言消息");
-    expect(draftInstructions).toContain("最终结构化结果必须覆盖：本轮意图、标题、正文、话题和配图提示");
-    expect(draftInstructions).toContain("已启用 Skills 明确要求的非中文文本除外");
-    expect(draftInstructions).toContain("确认每个已启用 Skill 的要求已落实");
-    expect(draftInstructions.indexOf("# 已启用 Skills")).toBeGreaterThan(draftInstructions.indexOf("# 作者任务"));
-    expect(draftInstructions.indexOf("# 已启用 Skills")).toBeLessThan(draftInstructions.indexOf("# 本任务执行规则"));
-    expect(draftInstructions.indexOf("# 本任务执行规则")).toBeLessThan(draftInstructions.indexOf("# 输出要求"));
-    expect(draftInstructions.indexOf("# 输出要求")).toBeLessThan(draftInstructions.indexOf("# 输出前检查"));
-    expect(draftInstructions).not.toContain("所有面向用户的字段都必须使用简体中文。");
-    expect(draftInstructions).not.toContain("Treeable");
-    expect(draftInstructions).not.toContain("Tritree");
-    expect(draftInstructions).not.toContain("产品机制");
-    expect(draftInstructions).not.toContain("AI Director");
-    expect(draftInstructions).not.toContain("三选一");
-    expect(draftInstructions).not.toContain("one-of-three");
-    expect(draftInstructions).not.toContain("AI 调用");
-    expect(draftInstructions).not.toContain("返回内容需要包含");
-    expect(draftInstructions).not.toContain("Seed：写一段天气文字");
-    expect(draftInstructions).not.toContain("用户喜欢具体、自然的表达。");
+    expect(artifactInstructions.startsWith("# 产物生成任务")).toBe(true);
+    expect(artifactInstructions).toContain("产物生成器");
+    expect(artifactInstructions).toContain("用户想要完成的本轮意图");
+    expect(artifactInstructions).toContain("只生成新的产物版本");
+    expect(artifactInstructions).toContain("对话中已形成的产物");
+    expect(artifactInstructions).toContain("以最新已形成的产物作为本轮生成基线");
+    expect(artifactInstructions).toContain("用户明确确认过的表达");
+    expect(artifactInstructions).not.toContain("当前内容是唯一写作基线");
+    expect(artifactInstructions).not.toContain("不可改动的用户原文");
+    expect(artifactInstructions).not.toContain("用户本轮意图和补充要求优先于上一版草稿");
+    expect(artifactInstructions).toContain("必须遵守已启用 Skills");
+    expect(artifactInstructions).toContain("# 本任务执行规则");
+    expect(artifactInstructions).toContain("# 输出要求");
+    expect(artifactInstructions).toContain("# 输出前检查");
+    expect(artifactInstructions).toContain("要求：种子或零散想法阶段可以大幅组织材料");
+    expect(artifactInstructions).toContain("如果本轮列出了可用工具和 MCP 能力，可以按需调用");
+    expect(artifactInstructions).toContain("未列出时不要假设可以查询外部信息");
+    expect(artifactInstructions).toContain("本任务产出的用户可见字段包括：roundIntent、artifact.type、artifact.payload 和 artifact.sourceArtifactIds");
+    expect(artifactInstructions).toContain("artifact.payload 必须遵守作品类型与输出结构里的字段、格式和交付要求");
+    expect(artifactInstructions).toContain("如果 Skill 要求固定文本、格式、语气或其他可观察结果，最终返回字段里必须能直接看见对应结果");
+    expect(artifactInstructions).toContain("这里的输出要求指结构化结果或最终提交工具参数里的字段，不是额外自然语言消息");
+    expect(artifactInstructions).toContain("最终结构化结果必须覆盖：本轮意图和一个符合产物插件结构的 artifact");
+    expect(artifactInstructions).toContain("已启用 Skills 明确要求的非中文文本除外");
+    expect(artifactInstructions).toContain("确认每个已启用 Skill 的要求已落实");
+    expect(artifactInstructions.indexOf("# 已启用 Skills")).toBeGreaterThan(artifactInstructions.indexOf("# 产物生成任务"));
+    expect(artifactInstructions.indexOf("# 已启用 Skills")).toBeLessThan(artifactInstructions.indexOf("# 本任务执行规则"));
+    expect(artifactInstructions.indexOf("# 本任务执行规则")).toBeLessThan(artifactInstructions.indexOf("# 输出要求"));
+    expect(artifactInstructions.indexOf("# 输出要求")).toBeLessThan(artifactInstructions.indexOf("# 输出前检查"));
+    expect(artifactInstructions).not.toContain("所有面向用户的字段都必须使用简体中文。");
+    expect(artifactInstructions).not.toContain("Treeable");
+    expect(artifactInstructions).not.toContain("Tritree");
+    expect(artifactInstructions).not.toContain("产品机制");
+    expect(artifactInstructions).not.toContain("AI Director");
+    expect(artifactInstructions).not.toContain("三选一");
+    expect(artifactInstructions).not.toContain("one-of-three");
+    expect(artifactInstructions).not.toContain("AI 调用");
+    expect(artifactInstructions).not.toContain("返回内容需要包含");
+    expect(artifactInstructions).not.toContain("draft.");
+    expect(artifactInstructions).not.toContain("submit_tree_draft");
+    expect(artifactInstructions).not.toContain("Seed：写一段天气文字");
+    expect(artifactInstructions).not.toContain("用户喜欢具体、自然的表达。");
 
     expect(optionsInstructions.startsWith("# 总导演任务")).toBe(true);
     expect(optionsInstructions).toContain("澄清问题设计者");

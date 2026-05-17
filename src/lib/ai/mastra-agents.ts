@@ -5,7 +5,7 @@ import { TokenLimiterProcessor } from "@mastra/core/processors";
 import { getDirectorAuthToken, getDirectorBaseUrl, getDirectorModel } from "./director";
 import { DEFAULT_MAX_OUTPUT_TOKENS, resolveModelContextBudget } from "./model-context";
 import {
-  buildTreeDraftInstructions,
+  buildTreeArtifactInstructions,
   buildTreeNextStepInstructions,
   buildTreeOptionsInstructions,
   type SharedAgentContextInput
@@ -30,15 +30,15 @@ export function getAnthropicProviderBaseUrl(env: Record<string, string | undefin
   return baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
 }
 
-export function createTreeDraftAgent(
+export function createTreeArtifactAgent(
   context: SharedAgentContextInput,
   env: Record<string, string | undefined> = process.env,
   tools?: ToolsInput
 ) {
   return new Agent({
-    id: "treeable-tree-draft-agent",
-    name: "Treeable Tree Draft Agent",
-    instructions: buildTreeDraftInstructions(context),
+    id: "treeable-tree-artifact-agent",
+    name: "Treeable Tree Artifact Agent",
+    instructions: buildTreeArtifactInstructions(context),
     model: createTreeableAnthropicModel(env),
     defaultOptions: { modelSettings: { maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS } },
     inputProcessors: [new TokenLimiterProcessor({ limit: resolveModelContextBudget(env).inputBudgetTokens })],

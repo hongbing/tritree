@@ -1703,9 +1703,11 @@ export function createTreeableRepository(
     const timestamp = now();
     return withTransaction(db, () => {
       saveNodeSelection(sessionId, nodeId, selectedOptions, selectedOptionId, timestamp);
-      const artifact = db
-        .prepare("SELECT * FROM artifacts WHERE session_id = ? AND node_id = ? ORDER BY updated_at DESC, created_at DESC, rowid DESC LIMIT 1")
-        .get(sessionId, existingChild.id) as ArtifactRow | undefined;
+      const artifact = existingChild.produced_artifact_id
+        ? (db.prepare("SELECT * FROM artifacts WHERE id = ?").get(existingChild.produced_artifact_id) as
+            | ArtifactRow
+            | undefined)
+        : undefined;
       db.prepare(
         `
           UPDATE sessions
@@ -1804,20 +1806,16 @@ export function createTreeableRepository(
           LEFT JOIN tree_nodes AS current_node
             ON current_node.id = sessions.current_node_id
           LEFT JOIN artifacts AS current_artifact
-            ON current_artifact.id = (
-              SELECT id
-              FROM artifacts
-              WHERE session_id = sessions.id
-                AND node_id = sessions.current_node_id
-              ORDER BY updated_at DESC, created_at DESC, rowid DESC
-              LIMIT 1
-            )
+            ON current_artifact.id = current_node.produced_artifact_id
           LEFT JOIN artifacts AS latest_artifact
             ON latest_artifact.id = (
-              SELECT id
-              FROM artifacts
-              WHERE session_id = sessions.id
-              ORDER BY updated_at DESC, created_at DESC, rowid DESC
+              SELECT linked_artifacts.id
+              FROM tree_nodes AS linked_nodes
+              JOIN artifacts AS linked_artifacts
+                ON linked_artifacts.id = linked_nodes.produced_artifact_id
+              WHERE linked_nodes.session_id = sessions.id
+                AND linked_nodes.produced_artifact_id IS NOT NULL
+              ORDER BY linked_artifacts.updated_at DESC, linked_artifacts.created_at DESC, linked_artifacts.rowid DESC
               LIMIT 1
             )
           WHERE sessions.id = ?
@@ -1841,20 +1839,16 @@ export function createTreeableRepository(
           LEFT JOIN tree_nodes AS current_node
             ON current_node.id = sessions.current_node_id
           LEFT JOIN artifacts AS current_artifact
-            ON current_artifact.id = (
-              SELECT id
-              FROM artifacts
-              WHERE session_id = sessions.id
-                AND node_id = sessions.current_node_id
-              ORDER BY updated_at DESC, created_at DESC, rowid DESC
-              LIMIT 1
-            )
+            ON current_artifact.id = current_node.produced_artifact_id
           LEFT JOIN artifacts AS latest_artifact
             ON latest_artifact.id = (
-              SELECT id
-              FROM artifacts
-              WHERE session_id = sessions.id
-              ORDER BY updated_at DESC, created_at DESC, rowid DESC
+              SELECT linked_artifacts.id
+              FROM tree_nodes AS linked_nodes
+              JOIN artifacts AS linked_artifacts
+                ON linked_artifacts.id = linked_nodes.produced_artifact_id
+              WHERE linked_nodes.session_id = sessions.id
+                AND linked_nodes.produced_artifact_id IS NOT NULL
+              ORDER BY linked_artifacts.updated_at DESC, linked_artifacts.created_at DESC, linked_artifacts.rowid DESC
               LIMIT 1
             )
           WHERE sessions.user_id = ?

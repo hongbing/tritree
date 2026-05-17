@@ -414,6 +414,68 @@ describe("Treeable repository", () => {
     expect(completed.artifacts).toHaveLength(2);
   });
 
+  it("summaries ignore stale current-node artifact rows after updateNodeArtifact clears the link", async () => {
+    const { repo, user } = await createRepositoryHarness();
+    const first = await createSessionWithOptions(repo, user.id);
+    const child = repo.createArtifactChild({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: first.currentNode!.id,
+      selectedOptionId: "a",
+      roundIntent: "写出版本",
+      artifact: {
+        type: "social-post",
+        payload: socialPostPayload("写出版本"),
+        sourceArtifactIds: [first.currentArtifact!.id]
+      }
+    });
+
+    repo.updateNodeArtifact({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: child.currentNode!.id,
+      roundIntent: "仅分析",
+      artifact: null
+    });
+
+    const [summary] = repo.listSessionSummaries(user.id);
+
+    expect(summary.currentNodeId).toBe(child.currentNode!.id);
+    expect(summary.bodyExcerpt).toBe("种子念头");
+    expect(summary.bodyExcerpt).not.toBe("写出版本");
+  });
+
+  it("summaries ignore stale current-node artifact rows after completeNode clears the link", async () => {
+    const { repo, user } = await createRepositoryHarness();
+    const first = await createSessionWithOptions(repo, user.id);
+    const child = repo.createArtifactChild({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: first.currentNode!.id,
+      selectedOptionId: "a",
+      roundIntent: "先写一个版本",
+      artifact: {
+        type: "social-post",
+        payload: socialPostPayload("先写一个版本"),
+        sourceArtifactIds: [first.currentArtifact!.id]
+      }
+    });
+
+    repo.completeNode({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: child.currentNode!.id,
+      output: { roundIntent: "只保留分析结论" },
+      artifact: null
+    });
+
+    const [summary] = repo.listSessionSummaries(user.id);
+
+    expect(summary.currentNodeId).toBe(child.currentNode!.id);
+    expect(summary.bodyExcerpt).toBe("种子念头");
+    expect(summary.bodyExcerpt).not.toBe("先写一个版本");
+  });
+
   it("completeNode can finish a workflow node while storing an artifact", async () => {
     const { repo, user } = await createRepositoryHarness();
     const first = await createSessionWithOptions(repo, user.id);
@@ -605,6 +667,47 @@ describe("Treeable repository", () => {
     expect(switched?.currentNode?.id).toBe(oldRoute.currentNode!.id);
     expect(switched?.currentArtifact?.payload).toEqual(socialPostPayload("旧路线"));
     expect(switched?.treeNodes).toHaveLength(3);
+  });
+
+  it("reactivating an analysis branch does not title the session from stale artifact rows", async () => {
+    const repo = createTreeableRepository(testDbPath());
+    const user = await createTestUser(repo, "writer");
+    const first = await createSessionWithOptions(repo, user.id);
+    const oldRoute = repo.createArtifactChild({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: first.currentNode!.id,
+      selectedOptionId: "b",
+      artifact: { type: "social-post", payload: socialPostPayload("旧路线") }
+    });
+    repo.updateNodeArtifact({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: oldRoute.currentNode!.id,
+      roundIntent: "旧路线仅保留分析",
+      artifact: null
+    });
+    const newRoute = repo.createArtifactChild({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: first.currentNode!.id,
+      selectedOptionId: "a",
+      artifact: { type: "social-post", payload: socialPostPayload("新路线") }
+    });
+
+    const switched = repo.activateHistoricalBranch({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: first.currentNode!.id,
+      selectedOptionId: "b"
+    });
+
+    expect(newRoute.session.title).toBe("新路线");
+    expect(switched?.currentNode?.id).toBe(oldRoute.currentNode!.id);
+    expect(switched?.currentNode?.producedArtifactId).toBeNull();
+    expect(switched?.currentArtifact).toBeNull();
+    expect(switched?.session.title).toBe("新路线");
+    expect(switched?.session.title).not.toBe("旧路线");
   });
 
   it("creates sessions with default enabled skills and replaces them", async () => {

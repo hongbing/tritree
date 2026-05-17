@@ -24,7 +24,7 @@ import {
   type SharedAgentContextInput
 } from "./mastra-context";
 import { logTritreeAiDebug, logTritreeAiResponse, logTritreeAiStream } from "./debug-log";
-import { buildDirectorInput, parseDirectorJsonObject } from "./director";
+import { buildDirectorInput } from "./director";
 import { createMcpRuntimeTools, type McpRuntimeTools } from "./mcp-runtime";
 import type { DirectorInputParts } from "./prompts";
 
@@ -1115,121 +1115,6 @@ function stringifyDiagnosticValue(value: unknown) {
   return text ?? String(value);
 }
 
-function parseRuntimeRawTextJson(rawText: string) {
-  try {
-    return parseDirectorJsonObject(rawText);
-  } catch (error) {
-    const roundIntentIndex = rawText.lastIndexOf('"roundIntent"');
-    if (roundIntentIndex >= 0) {
-      const objectStart = rawText.lastIndexOf("{", roundIntentIndex);
-      if (objectStart >= 0) {
-        return parseDirectorJsonObject(rawText.slice(objectStart));
-      }
-    }
-
-    const fencedJsonIndex = rawText.toLowerCase().lastIndexOf("```json");
-    if (fencedJsonIndex >= 0) {
-      return parseDirectorJsonObject(rawText.slice(fencedJsonIndex));
-    }
-
-    throw error;
-  }
-}
-
-function parseRuntimeMarkdownOutput(rawText: string, target: "artifact" | "options") {
-  if (target === "options") return parseRuntimeOptionsMarkdown(rawText);
-  return parseRuntimeArtifactMarkdown(rawText);
-}
-
-function parseRuntimeOptionsMarkdown(rawText: string) {
-  const options = (["A", "B", "C"] as const).map((letter, index) => {
-    const block = runtimeOptionBlock(rawText, letter);
-    const fields = markdownFields(block);
-    const id = ["a", "b", "c"][index] as BranchOption["id"];
-    return {
-      id,
-      label: fields.label || runtimeOptionHeadingLabel(block, letter) || `选项${letter}`,
-      description: fields.description || fields.label || `选择选项${letter}继续。`,
-      impact: fields.impact || fields.description || "帮助下一步创作更清楚。",
-      kind: normalizeOptionKind(fields.kind, index)
-    };
-  });
-
-  if (options.some((option) => !option.label || !option.description || !option.impact)) {
-    throw new Error("Runtime markdown options are incomplete.");
-  }
-
-  return {
-    roundIntent: markdownLineField(rawText, "roundIntent") || "选择下一步",
-    options
-  };
-}
-
-function parseRuntimeArtifactMarkdown(rawText: string) {
-  const hashtags = markdownLineField(rawText, "hashtags") || markdownLineField(rawText, "话题");
-  return {
-    roundIntent: markdownLineField(rawText, "roundIntent") || "继续完善",
-    artifact: {
-      type: markdownLineField(rawText, "type") || markdownLineField(rawText, "产物类型") || "social-post",
-      payload: {
-        title: markdownLineField(rawText, "title") || markdownLineField(rawText, "标题") || "未命名",
-        body: markdownLineField(rawText, "body") || markdownLineField(rawText, "正文") || rawText.trim(),
-        hashtags: hashtags ? hashtags.split(/[、,\s]+/).filter(Boolean) : [],
-        imagePrompt: markdownLineField(rawText, "imagePrompt") || markdownLineField(rawText, "配图提示") || ""
-      }
-    }
-  };
-}
-
-function runtimeOptionBlock(rawText: string, letter: "A" | "B" | "C") {
-  const pattern = new RegExp(
-    `(?:^|\\n)\\s*(?:\\*\\*)?选项\\s*${letter}[\\s\\S]*?(?=(?:\\n\\s*(?:\\*\\*)?选项\\s*[ABC]|$))`,
-    "i"
-  );
-  return pattern.exec(rawText)?.[0] ?? "";
-}
-
-function runtimeOptionHeadingLabel(block: string, letter: "A" | "B" | "C") {
-  const heading = new RegExp(`选项\\s*${letter}(?:[（(][^)）]+[)）])?\\s*(?:\\*\\*)?\\s*([^\\n]+)?`, "i").exec(block)?.[1];
-  return cleanMarkdownValue(heading ?? "");
-}
-
-function markdownLineField(text: string, field: string) {
-  const escaped = escapeRegExp(field);
-  const match = new RegExp(`(?:^|\\n)\\s*(?:[-*]\\s*)?(?:\\*\\*)?${escaped}(?:\\*\\*)?\\s*[：:]\\s*([^\\n]+)`, "i").exec(text);
-  return cleanMarkdownValue(match?.[1] ?? "");
-}
-
-function markdownFields(text: string) {
-  const fields: Record<string, string> = {};
-  const pattern = /\*\*(id|label|description|impact|kind|mode)\*\*\s*[：:]\s*/gi;
-  const matches = Array.from(text.matchAll(pattern));
-
-  matches.forEach((match, index) => {
-    const field = match[1]?.toLowerCase();
-    if (!field) return;
-    const valueStart = (match.index ?? 0) + match[0].length;
-    const valueEnd = matches[index + 1]?.index ?? text.length;
-    fields[field] = cleanMarkdownValue(text.slice(valueStart, valueEnd));
-  });
-
-  for (const field of ["id", "label", "description", "impact", "kind", "mode"]) {
-    fields[field] ||= markdownLineField(text, field);
-  }
-
-  return fields;
-}
-
-function cleanMarkdownValue(value: string) {
-  return value
-    .replace(/\s+/g, " ")
-    .replace(/^[：:\-–—\s]+/, "")
-    .replace(/[\-–—\s]+$/, "")
-    .replace(/^\*+|\*+$/g, "")
-    .replace(/^["“”]+|["“”]+$/g, "")
-    .trim();
-}
-
 function normalizeOptionKind(value: string | undefined, index: number): BranchOption["kind"] {
   if (value?.startsWith("explore")) return "explore";
   if (value?.startsWith("deepen")) return "deepen";
@@ -1920,19 +1805,7 @@ function partialArtifactSubmitOutputFromArgsText(argsText: string) {
   if (artifactMatch) {
     const artifactText = argsText.slice(artifactMatch.index);
     const type = extractVisibleJsonStringField(artifactText, "type");
-    const payloadMatch = /"payload"\s*:\s*\{/.exec(artifactText);
-    const payloadText = payloadMatch ? artifactText.slice(payloadMatch.index) : artifactText;
-    const payload: Record<string, unknown> = {};
-    const title = extractVisibleJsonStringField(payloadText, "title");
-    const body = extractVisibleJsonStringField(payloadText, "body");
-    const markdown = extractVisibleJsonStringField(payloadText, "markdown");
-    const imagePrompt = extractVisibleJsonStringField(payloadText, "imagePrompt");
-    const hashtags = extractVisibleJsonStringArrayField(payloadText, "hashtags");
-    if (title) payload.title = title;
-    if (body) payload.body = body;
-    if (markdown) payload.markdown = markdown;
-    if (hashtags.length > 0) payload.hashtags = hashtags;
-    if (imagePrompt) payload.imagePrompt = imagePrompt;
+    const payload = extractVisibleJsonObjectField(artifactText, "payload");
     if (type || Object.keys(payload).length > 0) {
       output.artifact = {
         ...(type ? { type } : {}),
@@ -1944,28 +1817,32 @@ function partialArtifactSubmitOutputFromArgsText(argsText: string) {
   return Object.keys(output).length > 0 ? output : undefined;
 }
 
-function extractVisibleJsonStringField(text: string, fieldName: string) {
-  const match = new RegExp(`"${escapeRegExp(fieldName)}"\\s*:\\s*"`).exec(text);
-  if (!match) return "";
-  const parsed = readVisibleJsonString(text, match.index + match[0].length);
-  return parseJsonStringValue(parsed.rawValue);
+function extractVisibleJsonObjectField(text: string, fieldName: string) {
+  const match = new RegExp(`"${escapeRegExp(fieldName)}"\\s*:\\s*\\{`).exec(text);
+  if (!match) return {};
+
+  const objectStart = match.index + match[0].lastIndexOf("{");
+  const objectEnd = findMatchingJsonObjectEnd(text, objectStart);
+  const objectText = objectEnd === -1 ? text.slice(objectStart) : text.slice(objectStart, objectEnd + 1);
+  return extractVisibleJsonObjectFields(objectText);
 }
 
-function extractVisibleJsonStringArrayField(text: string, fieldName: string) {
-  const match = new RegExp(`"${escapeRegExp(fieldName)}"\\s*:\\s*\\[`).exec(text);
-  if (!match) return [];
+function extractVisibleJsonObjectFields(text: string): Record<string, unknown> {
+  const objectStart = text.indexOf("{");
+  if (objectStart === -1) return {};
 
-  const arrayStart = match.index + match[0].lastIndexOf("[");
-  const arrayEnd = findMatchingJsonArrayEnd(text, arrayStart);
-  if (arrayEnd !== -1) {
-    const parsed = parseMaybeJson(text.slice(arrayStart, arrayEnd + 1));
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  const objectEnd = findMatchingJsonObjectEnd(text, objectStart);
+  if (objectEnd !== -1) {
+    const parsed = parseMaybeJson(text.slice(objectStart, objectEnd + 1));
+    return isObjectRecord(parsed) ? parsed : {};
   }
 
-  const values: string[] = [];
-  let index = arrayStart + 1;
+  const fields: Record<string, unknown> = {};
+  let index = objectStart + 1;
+
   while (index < text.length) {
     const char = text[index];
+    if (char === "}") break;
     if (char === "," || /\s/.test(char)) {
       index += 1;
       continue;
@@ -1976,12 +1853,105 @@ function extractVisibleJsonStringArrayField(text: string, fieldName: string) {
       continue;
     }
 
+    const key = readVisibleJsonString(text, index + 1);
+    const fieldName = parseJsonStringValue(key.rawValue);
+    index = skipJsonWhitespace(text, key.nextIndex);
+    if (!fieldName || text[index] !== ":") {
+      index += 1;
+      continue;
+    }
+
+    const value = readVisibleJsonValue(text, skipJsonWhitespace(text, index + 1));
+    if (value.found) {
+      fields[fieldName] = value.value;
+    }
+    index = value.nextIndex > index ? value.nextIndex : index + 1;
+  }
+
+  return fields;
+}
+
+function readVisibleJsonValue(
+  text: string,
+  startIndex: number
+): { found: true; nextIndex: number; value: unknown } | { found: false; nextIndex: number } {
+  const index = skipJsonWhitespace(text, startIndex);
+  const char = text[index];
+  if (!char) return { found: false, nextIndex: index };
+
+  if (char === '"') {
     const parsed = readVisibleJsonString(text, index + 1);
-    values.push(parseJsonStringValue(parsed.rawValue));
-    index = parsed.nextIndex;
+    return { found: true, nextIndex: parsed.nextIndex, value: parseJsonStringValue(parsed.rawValue) };
+  }
+
+  if (char === "{") {
+    const objectEnd = findMatchingJsonObjectEnd(text, index);
+    if (objectEnd !== -1) {
+      return { found: true, nextIndex: objectEnd + 1, value: parseMaybeJson(text.slice(index, objectEnd + 1)) };
+    }
+    return { found: true, nextIndex: text.length, value: extractVisibleJsonObjectFields(text.slice(index)) };
+  }
+
+  if (char === "[") {
+    const arrayEnd = findMatchingJsonArrayEnd(text, index);
+    if (arrayEnd !== -1) {
+      return { found: true, nextIndex: arrayEnd + 1, value: parseMaybeJson(text.slice(index, arrayEnd + 1)) };
+    }
+    return { found: true, nextIndex: text.length, value: extractVisibleJsonArrayItems(text, index) };
+  }
+
+  const primitive = readVisibleJsonPrimitive(text, index);
+  return primitive.found ? primitive : { found: false, nextIndex: primitive.nextIndex };
+}
+
+function extractVisibleJsonArrayItems(text: string, startIndex: number) {
+  const values: unknown[] = [];
+  let index = startIndex + 1;
+
+  while (index < text.length) {
+    const char = text[index];
+    if (char === "]") break;
+    if (char === "," || /\s/.test(char)) {
+      index += 1;
+      continue;
+    }
+
+    const value = readVisibleJsonValue(text, index);
+    if (value.found) values.push(value.value);
+    index = value.nextIndex > index ? value.nextIndex : index + 1;
   }
 
   return values;
+}
+
+function readVisibleJsonPrimitive(
+  text: string,
+  startIndex: number
+): { found: true; nextIndex: number; value: unknown } | { found: false; nextIndex: number } {
+  let index = startIndex;
+  while (index < text.length && !/[,\]}\s]/.test(text[index])) {
+    index += 1;
+  }
+
+  const rawValue = text.slice(startIndex, index).trim();
+  if (!rawValue) return { found: false, nextIndex: index };
+  const parsed = parseMaybeJson(rawValue);
+  return parsed !== rawValue ? { found: true, nextIndex: index, value: parsed } : { found: false, nextIndex: index };
+}
+
+function skipJsonWhitespace(text: string, startIndex: number) {
+  let index = startIndex;
+  while (index < text.length && /\s/.test(text[index])) {
+    index += 1;
+  }
+  return index;
+}
+
+function extractVisibleJsonStringField(text: string, fieldName: string) {
+  const match = new RegExp(`"${escapeRegExp(fieldName)}"\\s*:\\s*"`).exec(text);
+  if (!match) return "";
+  const parsed = readVisibleJsonString(text, match.index + match[0].length);
+  return parseJsonStringValue(parsed.rawValue);
 }
 
 function extractVisibleJsonObjectBlocks(text: string) {

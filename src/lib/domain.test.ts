@@ -610,6 +610,50 @@ describe("ArtifactSchema", () => {
     expect(node.producedArtifactId).toBeNull();
   });
 
+  it("requires artifact nodes to declare a produced artifact", () => {
+    const result = TreeNodeSchema.safeParse({
+      id: "node-1",
+      sessionId: "session-1",
+      parentId: null,
+      parentOptionId: null,
+      kind: "artifact",
+      producedArtifactId: null,
+      sourceArtifactIds: [],
+      roundIndex: 1,
+      roundIntent: "生成产物",
+      options: [],
+      selectedOptionId: null,
+      foldedOptions: [],
+      agentMessages: [],
+      createdAt: "2026-05-18T00:00:00.000Z"
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects produced artifacts on non-artifact workflow nodes", () => {
+    for (const kind of ["decision", "analysis", "action"] as const) {
+      const result = TreeNodeSchema.safeParse({
+        id: `node-${kind}`,
+        sessionId: "session-1",
+        parentId: null,
+        parentOptionId: null,
+        kind,
+        producedArtifactId: "artifact-1",
+        sourceArtifactIds: [],
+        roundIndex: 1,
+        roundIntent: "不生成产物",
+        options: [],
+        selectedOptionId: null,
+        foldedOptions: [],
+        agentMessages: [],
+        createdAt: "2026-05-18T00:00:00.000Z"
+      });
+
+      expect(result.success).toBe(false);
+    }
+  });
+
   it("rejects legacy draft fields in session state", () => {
     const result = SessionStateSchema.safeParse({
       rootMemory: validRootMemory(),

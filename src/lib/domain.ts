@@ -281,6 +281,22 @@ export const TreeNodeSchema = z.object({
   agentMessages: z.array(AgentMessageSchema),
   isTerminal: z.boolean().optional(),
   createdAt: z.string()
+}).superRefine((node, context) => {
+  if (node.kind === "artifact" && node.producedArtifactId === null) {
+    context.addIssue({
+      code: "custom",
+      path: ["producedArtifactId"],
+      message: "Artifact workflow nodes must declare a produced artifact."
+    });
+  }
+
+  if (node.kind !== "artifact" && node.producedArtifactId !== null) {
+    context.addIssue({
+      code: "custom",
+      path: ["producedArtifactId"],
+      message: "Only artifact workflow nodes can declare a produced artifact."
+    });
+  }
 });
 
 export const FoldedBranchSchema = z.object({

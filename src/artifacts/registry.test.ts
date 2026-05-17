@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { getArtifactPlugin, listArtifactPlugins, validateArtifactPayload } from "@/artifacts/registry";
+import type { ArtifactPluginServer } from "@/artifacts/types";
+import { buildArtifactRegistry, getArtifactPlugin, listArtifactPlugins, validateArtifactPayload } from "@/artifacts/registry";
+import { socialPostPlugin } from "@/artifacts/plugins/social-post/server";
 
 describe("artifact plugin registry", () => {
   it("loads social-post and prd as plugins", () => {
@@ -16,5 +18,18 @@ describe("artifact plugin registry", () => {
       imagePrompt: ""
     });
     expect(() => validateArtifactPayload("prd", { title: "T", body: "B" })).toThrow("Invalid artifact payload");
+  });
+
+  it("rejects duplicate plugin ids while building a registry", () => {
+    expect(() => buildArtifactRegistry([socialPostPlugin, socialPostPlugin])).toThrow(
+      "Duplicate artifact plugin id: social-post"
+    );
+  });
+
+  it("returns a plugin list copy so callers cannot mutate bundled state", () => {
+    const plugins = listArtifactPlugins() as ArtifactPluginServer<unknown, unknown>[];
+    plugins.push(socialPostPlugin);
+
+    expect(listArtifactPlugins().map((plugin) => plugin.id)).toEqual(["social-post", "prd"]);
   });
 });

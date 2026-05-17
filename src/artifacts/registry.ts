@@ -4,7 +4,7 @@ import { socialPostPlugin } from "@/artifacts/plugins/social-post/server";
 
 const bundledPlugins = [socialPostPlugin, prdPlugin] satisfies ArtifactPluginServer<unknown, unknown>[];
 
-function buildRegistry(plugins: ArtifactPluginServer<unknown, unknown>[]) {
+export function buildArtifactRegistry(plugins: readonly ArtifactPluginServer<unknown, unknown>[]) {
   const registry = new Map<string, ArtifactPluginServer<unknown, unknown>>();
   for (const plugin of plugins) {
     if (registry.has(plugin.id)) throw new Error(`Duplicate artifact plugin id: ${plugin.id}`);
@@ -13,10 +13,10 @@ function buildRegistry(plugins: ArtifactPluginServer<unknown, unknown>[]) {
   return registry;
 }
 
-const registry = buildRegistry(bundledPlugins);
+const registry = buildArtifactRegistry(bundledPlugins);
 
 export function listArtifactPlugins() {
-  return bundledPlugins;
+  return [...bundledPlugins];
 }
 
 export function getArtifactPlugin(type: string) {

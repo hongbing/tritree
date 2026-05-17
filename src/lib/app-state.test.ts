@@ -719,6 +719,8 @@ describe("summarizeSessionForDirector", () => {
     );
 
     expect(summary.enabledSkills.map((item) => item.title)).toEqual(["自然短句", "标题不要夸张"]);
+    expect(summary).not.toHaveProperty("currentDraft");
+    expect(summary.currentArtifact).toMatchObject({ title: "标题", body: "第一句。第二句。" });
   });
 });
 

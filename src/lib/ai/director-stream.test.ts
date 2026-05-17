@@ -2,14 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mastraMocks = vi.hoisted(() => ({
   generateTreeNextStep: vi.fn(),
-  streamTreeDraft: vi.fn(),
+  streamTreeArtifact: vi.fn(),
   streamTreeNextStep: vi.fn(),
   streamTreeOptions: vi.fn()
 }));
 
 vi.mock("./mastra-executor", () => ({
   generateTreeNextStep: mastraMocks.generateTreeNextStep,
-  streamTreeDraft: mastraMocks.streamTreeDraft,
+  streamTreeArtifact: mastraMocks.streamTreeArtifact,
   streamTreeNextStep: mastraMocks.streamTreeNextStep,
   streamTreeOptions: mastraMocks.streamTreeOptions
 }));
@@ -36,7 +36,7 @@ const directorInput = {
 
 beforeEach(() => {
   mastraMocks.generateTreeNextStep.mockReset();
-  mastraMocks.streamTreeDraft.mockReset();
+  mastraMocks.streamTreeArtifact.mockReset();
   mastraMocks.streamTreeNextStep.mockReset();
   mastraMocks.streamTreeOptions.mockReset();
 });
@@ -266,7 +266,7 @@ describe("streamDirectorArtifact", () => {
       roundIntent: "扩写",
       artifact: { type: "social-post", payload: { title: "新标题", body: "新正文", hashtags: ["#AI"], imagePrompt: "新图" } },
     };
-    mastraMocks.streamTreeDraft.mockImplementation(async ({ onPartialObject }) => {
+    mastraMocks.streamTreeArtifact.mockImplementation(async ({ onPartialObject }) => {
       onPartialObject({ roundIntent: "扩写", artifact: { type: "social-post", payload: { title: "新标题" } } });
       onPartialObject({ roundIntent: "扩写", artifact: { type: "social-post", payload: { title: "新标题", body: "新正文" } } });
       return output;
@@ -282,7 +282,7 @@ describe("streamDirectorArtifact", () => {
       })
     ).resolves.toEqual(output);
 
-    expect(mastraMocks.streamTreeDraft).toHaveBeenCalledWith(
+    expect(mastraMocks.streamTreeArtifact).toHaveBeenCalledWith(
       expect.objectContaining({
         parts: directorInput,
         signal,
@@ -376,8 +376,8 @@ describe("streamDirectorOptions", () => {
       ],
     };
     mastraMocks.streamTreeOptions.mockImplementation(async ({ onReasoningText }) => {
-      onReasoningText({ delta: "先看当前草稿。", accumulatedText: "先看当前草稿。" });
-      onReasoningText({ delta: "再拆三个选择。", accumulatedText: "先看当前草稿。再拆三个选择。" });
+      onReasoningText({ delta: "先看当前产物。", accumulatedText: "先看当前产物。" });
+      onReasoningText({ delta: "再拆三个选择。", accumulatedText: "先看当前产物。再拆三个选择。" });
       return output;
     });
     const onReasoningText = vi.fn();
@@ -389,7 +389,7 @@ describe("streamDirectorOptions", () => {
     expect(onReasoningText).toHaveBeenCalledTimes(2);
     expect(onReasoningText).toHaveBeenLastCalledWith({
       delta: "再拆三个选择。",
-      accumulatedText: "先看当前草稿。再拆三个选择。"
+      accumulatedText: "先看当前产物。再拆三个选择。"
     });
   });
 });

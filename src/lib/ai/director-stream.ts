@@ -3,7 +3,7 @@ import { DirectorArtifactOutputSchema, type DirectorArtifactOutput } from "./dir
 import { logTritreeAiDebug } from "./debug-log";
 import {
   generateTreeNextStep,
-  streamTreeDraft as streamTreeArtifact,
+  streamTreeArtifact,
   streamTreeNextStep,
   streamTreeOptions,
   type DirectorAgentTrace,

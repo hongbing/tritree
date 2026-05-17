@@ -13,7 +13,7 @@ import {
   parseDirectorOptionsText,
   parseDirectorOutput
 } from "./director";
-import type { DirectorInputParts } from "./prompts";
+import { DIRECTOR_DRAFT_SYSTEM_PROMPT, DIRECTOR_OPTIONS_SYSTEM_PROMPT, type DirectorInputParts } from "./prompts";
 
 describe("director artifact schemas", () => {
   it("parses artifact output and no-artifact output", () => {
@@ -119,6 +119,29 @@ describe("parseDirectorOptionsText", () => {
 });
 
 describe("buildDirectorInput", () => {
+  it("keeps base director prompt language artifact-generic", () => {
+    const promptText = [
+      DIRECTOR_OPTIONS_SYSTEM_PROMPT,
+      DIRECTOR_DRAFT_SYSTEM_PROMPT,
+      buildTestDirectorInput({
+        rootSummary: "Seed：一个内容念头",
+        learnedSummary: "",
+        currentArtifact: "",
+        pathSummary: "",
+        foldedSummary: "",
+        selectedOptionLabel: "",
+        enabledSkills: []
+      })
+    ].join("\n");
+
+    expect(promptText).not.toContain("social media draft");
+    expect(promptText).not.toContain("current draft");
+    expect(promptText).not.toContain("draft result");
+    expect(promptText).not.toContain("社媒内容。按默认社交媒体草稿结构输出");
+    expect(promptText).not.toContain("草稿生成");
+    expect(promptText).toContain("当前产物");
+  });
+
   it("includes root memory, selected option, and draft without tree path context", () => {
     const input = buildTestDirectorInput({
       rootSummary: "Seed：我想写 AI 产品经理的真实困境",
@@ -155,8 +178,8 @@ describe("buildDirectorInput", () => {
     });
 
     expect(input).toContain("暂无已学习偏好。");
-    expect(input).toContain("暂无已选技能。请基于 seed、草稿和用户选择继续判断创作下一步。");
-    expect(input).toContain("还没有选择答案。请先判断 seed 和当前草稿最需要创作者澄清、选择或推进什么");
+    expect(input).toContain("暂无已选技能。请基于 seed、当前产物和用户选择继续判断创作下一步。");
+    expect(input).toContain("还没有选择答案。请先判断 seed 和当前产物最需要创作者澄清、选择或推进什么");
     expect(input).toContain("暂无产物。");
     expect(input).not.toContain("暂无已选路径。");
     expect(input).not.toContain("暂无未选方向。");

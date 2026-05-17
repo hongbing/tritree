@@ -4,7 +4,7 @@ import { createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-a
 import {
   generateTreeDraft,
   generateTreeNextStep,
-  streamTreeDraft,
+  streamTreeArtifact,
   streamTreeNextStep,
   streamTreeOptions
 } from "./mastra-executor";
@@ -169,9 +169,10 @@ describe("createTreeOptionsAgent", () => {
 
 describe("tree director compatibility generators", () => {
   const directorParts: DirectorInputParts = {
+    artifactContext: "",
     rootSummary: "Seed：写一篇解释为什么要写作的文章",
     learnedSummary: "用户喜欢具体表达。",
-    currentDraft: "标题：写作为什么重要\n正文：写作让我想清楚事情。",
+    currentArtifact: "标题：写作为什么重要\n正文：写作让我想清楚事情。",
     pathSummary: "第 1 轮：选择起始方式",
     foldedSummary: "暂无未选方向。",
     selectedOptionLabel: "A 继续完善",
@@ -680,7 +681,7 @@ describe("tree director compatibility generators", () => {
     const partials: unknown[] = [];
 
     await expect(
-      streamTreeDraft({
+      streamTreeArtifact({
         parts: directorParts,
         memory: { resource: "root", thread: "session-1" },
         treeDraftAgent: fakeAgent,
@@ -1343,7 +1344,7 @@ describe("tree director compatibility generators", () => {
     const progressEvents: Array<{ delta: string; accumulatedText: string }> = [];
 
     await expect(
-      streamTreeDraft({
+      streamTreeArtifact({
         parts: directorParts,
         env: { KIMI_API_KEY: "token" },
         onReasoningText: (event) => progressEvents.push(event)
@@ -2120,7 +2121,7 @@ describe("tree director compatibility generators", () => {
     });
 
     await expect(
-      streamTreeDraft({
+      streamTreeArtifact({
         parts: directorParts,
         env: { KIMI_API_KEY: "token" },
         signal: abortController.signal
@@ -2470,7 +2471,7 @@ describe("tree director compatibility generators", () => {
     const progressEvents: Array<{ delta: string; accumulatedText: string }> = [];
 
     await expect(
-      streamTreeDraft({
+      streamTreeArtifact({
         parts: directorParts,
         env: { KIMI_API_KEY: "token" },
         onPartialObject: (partial) => partials.push(partial),
@@ -2559,7 +2560,7 @@ describe("tree director compatibility generators", () => {
     const partials: unknown[] = [];
 
     await expect(
-      streamTreeDraft({
+      streamTreeArtifact({
         parts: directorParts,
         env: { KIMI_API_KEY: "token" },
         onPartialObject: (partial) => partials.push(partial)
@@ -2671,7 +2672,7 @@ describe("tree director compatibility generators", () => {
     };
 
     await expect(
-      streamTreeDraft({
+      streamTreeArtifact({
         parts: directorParts,
         treeDraftAgent: fakeAgent
       })

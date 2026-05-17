@@ -374,7 +374,7 @@ export async function streamTreeNextStep({
   }
 }
 
-export async function streamTreeDraft({
+export async function streamTreeArtifact({
   parts,
   signal,
   env,
@@ -1468,7 +1468,7 @@ function normalizeSkill(skill: Skill): Skill {
 }
 
 function memoryScopeForDirectorParts(parts: DirectorInputParts): MemoryScope {
-  const basis = parts.pathSummary || parts.currentDraft || parts.rootSummary || "default";
+  const basis = parts.pathSummary || parts.currentArtifact || parts.rootSummary || "default";
   return {
     resource: "treeable-director",
     thread: encodeURIComponent(basis).slice(0, 128) || "default"

@@ -140,7 +140,7 @@ export function summarizeSelectionRewriteForDirector(
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
     pathSummary: "",
-    currentDraft: artifactPayload,
+    currentArtifact: artifactPayload,
     enabledSkills: skillsForTarget(enabledSkillsForDirector(state), "writer"),
     field,
     selectedText,
@@ -357,7 +357,7 @@ function formatArtifactUserRequest({
         selectedOptionNote ? `用户补充要求：${selectedOptionNote}` : "",
         modeHint
       ].filter(Boolean)
-    : ["基于初始内容和上一版草稿生成新的内容版本。"];
+    : ["基于初始内容和上一版产物生成新的内容版本。"];
 
   return [
     ...selectedLines

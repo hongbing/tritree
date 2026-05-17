@@ -215,6 +215,8 @@ describe("defaults config loader", () => {
     expect(systemSkillsById.get("system-writer")?.title).toBe("写手");
     expect(systemSkillsById.get("system-reviewer")?.title).toBe("审稿");
     expect(systemSkillsById.get("system-publisher")?.title).toBe("发布编辑");
+    expect(systemSkillsById.get("system-researcher")?.prompt).toContain("material-search");
+    expect(systemSkillsById.get("system-publisher")?.prompt).toContain("platform-rewrite");
 
     for (const skillId of defaultSystemSkillIds) {
       const skill = systemSkillsById.get(skillId);

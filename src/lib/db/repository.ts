@@ -1603,13 +1603,15 @@ export function createTreeableRepository(
     sessionId,
     nodeId,
     output,
-    agentMessages
+    agentMessages,
+    artifact = null
   }: {
     userId: string;
     sessionId: string;
     nodeId: string;
     output: { roundIntent: string };
     agentMessages?: AgentMessage[];
+    artifact?: { type: string; payload: unknown; sourceArtifactIds?: string[] } | null;
   }) {
     const session = getActiveSession(userId, sessionId);
     if (!session) {
@@ -1621,24 +1623,43 @@ export function createTreeableRepository(
     }
 
     const timestamp = now();
+    const sourceArtifactIds = artifact?.sourceArtifactIds ?? [];
     const agentMessagesJson = appendAgentMessagesJson(target.agent_messages_json, agentMessages);
+    const title = artifactTreeTitle(artifact) ?? session.title;
 
     return withTransaction(db, () => {
+      const artifactId = artifact
+        ? insertArtifact({
+            sessionId,
+            nodeId,
+            type: artifact.type,
+            payload: artifact.payload,
+            sourceArtifactIds,
+            timestamp
+          })
+        : null;
+
       db.prepare(
         `
           UPDATE tree_nodes
-          SET round_intent = ?, options_json = '[]', agent_messages_json = ?, is_terminal = 1
+          SET round_intent = ?,
+              options_json = '[]',
+              kind = ?,
+              produced_artifact_id = ?,
+              source_artifact_ids_json = ?,
+              agent_messages_json = ?,
+              is_terminal = 1
           WHERE id = ?
         `
-      ).run(output.roundIntent, agentMessagesJson, nodeId);
+      ).run(output.roundIntent, artifact ? "artifact" : "analysis", artifactId, JSON.stringify(sourceArtifactIds), agentMessagesJson, nodeId);
 
       db.prepare(
         `
           UPDATE sessions
-          SET updated_at = ?
+          SET title = ?, updated_at = ?
           WHERE id = ? AND user_id = ?
         `
-      ).run(timestamp, sessionId, userId);
+      ).run(title, timestamp, sessionId, userId);
 
       const state = getSessionState(userId, sessionId);
       if (!state) {

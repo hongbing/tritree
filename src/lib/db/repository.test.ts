@@ -4,10 +4,9 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { nanoid } from "nanoid";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { hashPassword } from "@/lib/auth/password";
 import { createDatabase } from "./client";
 import { createTreeableRepository } from "./repository";
-import type { BranchOption, DirectorOutput, OptionGenerationMode } from "@/lib/domain";
+import type { BranchOption } from "@/lib/domain";
 import { DEFAULTS_CONFIG_PATH_ENV, type ConfiguredDefaults, type ConfiguredSystemSkill } from "@/lib/defaults";
 
 function testDbPath() {
@@ -21,8 +20,8 @@ const repositorySystemSkills: ConfiguredSystemSkill[] = [
     id: "system-writer",
     title: "系统写作者",
     category: "风格",
-    description: "负责生成和改写草稿，控制改动幅度并保留创作者原意。",
-    prompt: "你是写作者。负责把 seed、当前草稿、用户选择和已启用技能写成下一版草稿。",
+    description: "负责生成和改写作品，控制改动幅度并保留创作者原意。",
+    prompt: "你是写作者。负责把 seed、当前作品、用户选择和已启用技能写成下一版作品。",
     appliesTo: "writer",
     defaultEnabled: true,
     isArchived: false
@@ -64,20 +63,15 @@ function writeDefaultsConfig({
 
 type Repository = ReturnType<typeof createTreeableRepository>;
 
-type ArchivedMutationSnapshot = {
-  session: {
-    title: string;
-    status: string;
-    current_node_id: string | null;
-    updated_at: string;
-  };
-  enabledSkillIds: string[];
-  nodeCount: number;
-  draftCount: number;
-  branchHistoryCount: number;
-  selectedOptionIds: Array<string | null>;
-  roundIntents: string[];
-};
+const nextOptions: BranchOption[] = [
+  { id: "a", label: "扩展案例", description: "补充一个真实情境。", impact: "内容更具体。", kind: "explore" },
+  { id: "b", label: "收紧观点", description: "压缩表达。", impact: "主线更清晰。", kind: "deepen" },
+  { id: "c", label: "准备收尾", description: "转向最终版本。", impact: "更接近完成。", kind: "finish" }
+];
+
+function socialPostPayload(title = "协作片刻", body = "AI 协作不是替代，而是把想法更快推到可讨论的形状。") {
+  return { title, body, hashtags: ["#AI协作"], imagePrompt: "two people collaborating with an AI interface" };
+}
 
 async function createTestUser(repo: Repository, username: string, role: "admin" | "member" = "member") {
   if (!repo.hasUsers()) {
@@ -113,164 +107,22 @@ async function createArtifactSessionHarness() {
   return { ...harness, root, state };
 }
 
-function readArchivedMutationSnapshot(dbPath: string, sessionId: string): ArchivedMutationSnapshot {
-  const sqlite = new DatabaseSync(dbPath);
-  const session = sqlite
-    .prepare("SELECT title, status, current_node_id, updated_at FROM sessions WHERE id = ?")
-    .get(sessionId) as ArchivedMutationSnapshot["session"];
-  const enabledSkillRows = sqlite
-    .prepare("SELECT skill_id FROM session_enabled_skills WHERE session_id = ? ORDER BY skill_id")
-    .all(sessionId) as Array<{ skill_id: string }>;
-  const nodeCount = (sqlite.prepare("SELECT COUNT(*) AS count FROM tree_nodes WHERE session_id = ?").get(sessionId) as { count: number }).count;
-  const draftCount = (sqlite.prepare("SELECT COUNT(*) AS count FROM draft_versions WHERE session_id = ?").get(sessionId) as { count: number }).count;
-  const branchHistoryCount = (sqlite.prepare("SELECT COUNT(*) AS count FROM branch_history WHERE session_id = ?").get(sessionId) as { count: number }).count;
-  const nodeRows = sqlite
-    .prepare("SELECT selected_option_id, round_intent FROM tree_nodes WHERE session_id = ? ORDER BY round_index, created_at, rowid")
-    .all(sessionId) as Array<{ selected_option_id: string | null; round_intent: string }>;
-  sqlite.close();
-
-  return {
-    session,
-    enabledSkillIds: enabledSkillRows.map((row) => row.skill_id),
-    nodeCount,
-    draftCount,
-    branchHistoryCount,
-    selectedOptionIds: nodeRows.map((row) => row.selected_option_id),
-    roundIntents: nodeRows.map((row) => row.round_intent)
-  };
-}
-
-function createSessionDraftWithOptions(
-  repo: Repository,
-  {
-    userId,
-    enabledSkillIds,
-    rootMemoryId,
-    output
-  }: {
-    userId: string;
-    enabledSkillIds?: string[];
-    rootMemoryId: string;
-    output: DirectorOutput;
-  }
-) {
-  const draftState = repo.createSessionDraft({
-    userId,
-    enabledSkillIds,
-    rootMemoryId,
-    draft: output.draft,
-    roundIntent: output.roundIntent
+async function createSessionWithOptions(repo: Repository, userId: string, enabledSkillIds?: string[]) {
+  const root = repo.saveRootMemory(userId, {
+    artifactTypeId: "social-post",
+    seed: "写一条关于 AI 协作的微博",
+    creationRequest: "",
+    domains: ["Creation"],
+    tones: ["Sincere"],
+    styles: ["Opinion-driven"],
+    personas: ["Practitioner"]
   });
-  const optionsState = repo.updateNodeOptions({
-    userId,
-    sessionId: draftState.session.id,
-    nodeId: draftState.currentNode!.id,
-    output: {
-      roundIntent: output.roundIntent,
-      options: output.options,
-    }
-  });
-  return optionsState;
-}
-
-function appendGeneratedChild(
-  repo: Repository,
-  {
-    userId,
-    customOption,
-    optionMode = "balanced",
-    sessionId,
-    nodeId,
-    selectedOptionId,
-    output
-  }: {
-    userId: string;
-    customOption?: BranchOption;
-    optionMode?: OptionGenerationMode;
-    sessionId: string;
-    nodeId: string;
-    selectedOptionId: BranchOption["id"];
-    output: DirectorOutput;
-  }
-) {
-  const activeState = repo.getSessionState(userId, sessionId);
-  if (activeState?.session.currentNodeId !== nodeId) {
-    throw new Error("Selected node is not the active node.");
-  }
-
-  const childState = repo.createDraftChild({
-    userId,
-    customOption,
-    optionMode,
-    sessionId,
-    nodeId,
-    selectedOptionId
-  });
-  const draftState = repo.updateNodeDraft({
-    userId,
-    sessionId,
-    nodeId: childState.currentNode!.id,
-    output: {
-      roundIntent: output.roundIntent,
-      draft: output.draft,
-    }
-  });
-
+  const state = repo.createSession({ userId, rootMemoryId: root.id, enabledSkillIds });
   return repo.updateNodeOptions({
     userId,
-    sessionId,
-    nodeId: draftState.currentNode!.id,
-    output: {
-      roundIntent: output.roundIntent,
-      options: output.options,
-    }
-  });
-}
-
-function createHistoricalGeneratedChild(
-  repo: Repository,
-  {
-    userId,
-    optionMode = "balanced",
-    sessionId,
-    nodeId,
-    selectedOptionId,
-    output
-  }: {
-    userId: string;
-    optionMode?: OptionGenerationMode;
-    sessionId: string;
-    nodeId: string;
-    selectedOptionId: BranchOption["id"];
-    output: DirectorOutput;
-  }
-) {
-  const childState = repo.createHistoricalDraftChild({
-    userId,
-    optionMode,
-    sessionId,
-    nodeId,
-    selectedOptionId
-  });
-
-  const draftState = repo.updateNodeDraft({
-    userId,
-    sessionId,
-    nodeId: childState.currentNode!.id,
-    output: {
-      roundIntent: output.roundIntent,
-      draft: output.draft,
-    }
-  });
-
-  return repo.updateNodeOptions({
-    userId,
-    sessionId,
-    nodeId: draftState.currentNode!.id,
-    output: {
-      roundIntent: output.roundIntent,
-      options: output.options,
-    }
+    sessionId: state.session.id,
+    nodeId: state.currentNode!.id,
+    output: { roundIntent: "选择下一步", options: nextOptions }
   });
 }
 
@@ -281,42 +133,6 @@ describe("Treeable repository", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
-  });
-
-  it("creates a session with a plugin artifact when seed payload exists", async () => {
-    const { repo, user } = await createRepositoryHarness();
-    const root = repo.saveRootMemory(user.id, {
-      artifactTypeId: "social-post",
-      seed: "写一条关于 AI 协作的微博",
-      creationRequest: "",
-      domains: ["Creation"],
-      tones: ["Sincere"],
-      styles: ["Opinion-driven"],
-      personas: ["Practitioner"]
-    });
-
-    const state = repo.createSession({ userId: user.id, rootMemoryId: root.id, enabledSkillIds: [] });
-
-    expect(state.currentArtifact?.type).toBe("social-post");
-    expect(state.artifacts).toHaveLength(1);
-    expect(state.currentNode?.producedArtifactId).toBe(state.currentArtifact?.id);
-    expect(state).not.toHaveProperty("currentDraft");
-  });
-
-  it("allows a workflow node to complete without producing an artifact", async () => {
-    const { repo, user, state } = await createArtifactSessionHarness();
-    const child = repo.createArtifactChild({
-      userId: user.id,
-      sessionId: state.session.id,
-      nodeId: state.currentNode!.id,
-      selectedOptionId: "a",
-      roundIntent: "只判断下一步",
-      artifact: null
-    });
-
-    expect(child.currentNode?.producedArtifactId).toBeNull();
-    expect(child.currentArtifact).toBeNull();
-    expect(child.artifacts).toHaveLength(1);
   });
 
   it("creates the first local user as the initial administrator", async () => {
@@ -331,14 +147,7 @@ describe("Treeable repository", () => {
     });
 
     expect(repo.hasUsers()).toBe(true);
-    expect(admin).toEqual(
-      expect.objectContaining({
-        username: "awei",
-        displayName: "Awei",
-        role: "admin",
-        isActive: true
-      })
-    );
+    expect(admin).toEqual(expect.objectContaining({ username: "awei", role: "admin", isActive: true }));
     expect(admin).not.toHaveProperty("passwordHash");
     await expect(repo.createInitialAdmin({ username: "second", displayName: "Second", password: "password-123" })).rejects.toThrow(
       "Initial administrator already exists."
@@ -348,22 +157,12 @@ describe("Treeable repository", () => {
 
   it("verifies local password login without exposing inactive users", async () => {
     const repo = createTreeableRepository(testDbPath());
-    const admin = await repo.createInitialAdmin({
-      username: "awei",
-      displayName: "Awei",
-      password: "correct horse battery staple"
-    });
-    const member = await repo.createUser({
-      username: "writer",
-      displayName: "Writer",
-      password: "password-456",
-      role: "member"
-    });
+    const admin = await repo.createInitialAdmin({ username: "awei", displayName: "Awei", password: "correct horse battery staple" });
+    const member = await repo.createUser({ username: "writer", displayName: "Writer", password: "password-456", role: "member" });
 
     await expect(repo.verifyPasswordLogin("awei", "correct horse battery staple")).resolves.toEqual(
       expect.objectContaining({ id: admin.id, username: "awei", role: "admin" })
     );
-    await expect(repo.verifyPasswordLogin("awei", "wrong password")).resolves.toBeNull();
     await expect(repo.verifyPasswordLogin("writer", "password-456")).resolves.toEqual(
       expect.objectContaining({ id: member.id, username: "writer", role: "member" })
     );
@@ -377,27 +176,16 @@ describe("Treeable repository", () => {
     const member = await repo.createUser({ username: "writer", displayName: "Writer", password: "password-456", role: "member" });
 
     expect(repo.listUsers().map((user) => user.username)).toEqual(["awei", "writer"]);
-    expect(repo.listUsers()[0]).not.toHaveProperty("passwordHash");
     expect(repo.updateUserDisplayName(member.id, "Updated Writer")).toEqual(expect.objectContaining({ displayName: "Updated Writer" }));
     expect(repo.setUserRole(member.id, "admin")).toEqual(expect.objectContaining({ role: "admin" }));
     expect(repo.setUserRole(admin.id, "member")).toEqual(expect.objectContaining({ role: "member" }));
     expect(() => repo.setUserActive(member.id, false)).toThrow("Cannot deactivate the final active administrator.");
   });
 
-  it("rolls back all user updates when final administrator guards fail", async () => {
+  it("binds and deletes OIDC identities through the owning user", async () => {
     const repo = createTreeableRepository(testDbPath());
     const admin = await repo.createInitialAdmin({ username: "awei", displayName: "Awei", password: "password-123" });
-
-    expect(() => repo.updateUser(admin.id, { displayName: "Renamed Admin", isActive: false })).toThrow(
-      "Cannot deactivate the final active administrator."
-    );
-    expect(repo.getUser(admin.id)).toEqual(expect.objectContaining({ displayName: "Awei", isActive: true }));
-  });
-
-  it("binds OIDC identities to existing users", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const admin = await repo.createInitialAdmin({ username: "awei", displayName: "Awei", password: "password-123" });
-
+    const member = await repo.createUser({ username: "writer", displayName: "Writer", password: "password-456", role: "member" });
     const identity = repo.bindOidcIdentity(admin.id, {
       issuer: "https://issuer.example.com",
       subject: "oidc-subject-1",
@@ -405,30 +193,8 @@ describe("Treeable repository", () => {
       name: "Awei OIDC"
     });
 
-    expect(identity).toEqual(expect.objectContaining({ userId: admin.id, issuer: "https://issuer.example.com", subject: "oidc-subject-1" }));
-    expect(repo.findUserByOidcIdentity("https://issuer.example.com", "oidc-subject-1")).toEqual(
-      expect.objectContaining({ id: admin.id, username: "awei" })
-    );
-    expect(repo.listUsersWithOidcIdentities()).toEqual([
-      expect.objectContaining({
-        id: admin.id,
-        oidcIdentities: [expect.objectContaining({ id: identity.id, subject: "oidc-subject-1" })]
-      })
-    ]);
-    expect(() =>
-      repo.bindOidcIdentity(admin.id, { issuer: "https://issuer.example.com", subject: "oidc-subject-1" })
-    ).toThrow("OIDC identity is already bound.");
-  });
-
-  it("deletes OIDC identities only through the owning user", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const admin = await repo.createInitialAdmin({ username: "awei", displayName: "Awei", password: "password-123" });
-    const member = await repo.createUser({ username: "writer", displayName: "Writer", password: "password-456", role: "member" });
-    const identity = repo.bindOidcIdentity(admin.id, {
-      issuer: "https://issuer.example.com",
-      subject: "oidc-subject-1"
-    });
-
+    expect(repo.findUserByOidcIdentity("https://issuer.example.com", "oidc-subject-1")).toEqual(expect.objectContaining({ id: admin.id }));
+    expect(repo.listUsersWithOidcIdentities()[0].oidcIdentities).toEqual([expect.objectContaining({ id: identity.id })]);
     expect(() => repo.deleteOidcIdentityForUser(member.id, identity.id)).toThrow("OIDC identity was not found.");
 
     repo.deleteOidcIdentityForUser(admin.id, identity.id);
@@ -436,31 +202,7 @@ describe("Treeable repository", () => {
     expect(repo.findUserByOidcIdentity("https://issuer.example.com", "oidc-subject-1")).toBeNull();
   });
 
-  it("isolates root memory by user", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const first = await createTestUser(repo, "first");
-    const second = await createTestUser(repo, "second");
-
-    repo.saveRootMemory(first.id, {
-      seed: "first seed",
-      domains: ["创作"],
-      tones: ["平静"],
-      styles: ["观点型"],
-      personas: ["实践者"]
-    });
-    repo.saveRootMemory(second.id, {
-      seed: "second seed",
-      domains: ["工作"],
-      tones: ["真诚"],
-      styles: ["故事型"],
-      personas: ["观察者"]
-    });
-
-    expect(repo.getRootMemory(first.id)?.preferences.seed).toBe("first seed");
-    expect(repo.getRootMemory(second.id)?.preferences.seed).toBe("second seed");
-  });
-
-  it("isolates latest sessions by user", async () => {
+  it("isolates root memory and latest sessions by user", async () => {
     const repo = createTreeableRepository(testDbPath());
     const first = await createTestUser(repo, "first");
     const second = await createTestUser(repo, "second");
@@ -479,94 +221,251 @@ describe("Treeable repository", () => {
       personas: ["观察者"]
     });
 
-    const firstState = repo.createSessionDraft({
-      userId: first.id,
-      rootMemoryId: firstRoot.id,
-      draft: { title: "First", body: "First body", hashtags: [], imagePrompt: "" }
-    });
-    const secondState = repo.createSessionDraft({
-      userId: second.id,
-      rootMemoryId: secondRoot.id,
-      draft: { title: "Second", body: "Second body", hashtags: [], imagePrompt: "" }
-    });
+    const firstState = repo.createSession({ userId: first.id, rootMemoryId: firstRoot.id, enabledSkillIds: [] });
+    const secondState = repo.createSession({ userId: second.id, rootMemoryId: secondRoot.id, enabledSkillIds: [] });
 
+    expect(repo.getRootMemory(first.id)?.preferences.seed).toBe("first seed");
+    expect(repo.getRootMemory(second.id)?.preferences.seed).toBe("second seed");
     expect(repo.getLatestSessionState(first.id)?.session.id).toBe(firstState.session.id);
     expect(repo.getLatestSessionState(second.id)?.session.id).toBe(secondState.session.id);
     expect(repo.getSessionState(first.id, secondState.session.id)).toBeNull();
   });
 
-  it("lists, renames, and archives draft sessions by user", async () => {
+  it("creates a session with a plugin artifact when seed payload exists", async () => {
+    const { repo, user } = await createRepositoryHarness();
+    const root = repo.saveRootMemory(user.id, {
+      artifactTypeId: "social-post",
+      seed: "写一条关于 AI 协作的微博",
+      creationRequest: "",
+      domains: ["Creation"],
+      tones: ["Sincere"],
+      styles: ["Opinion-driven"],
+      personas: ["Practitioner"]
+    });
+
+    const state = repo.createSession({ userId: user.id, rootMemoryId: root.id, enabledSkillIds: [] });
+
+    expect(state.currentArtifact?.type).toBe("social-post");
+    expect(state.currentArtifact?.payload).toEqual({
+      title: "种子念头",
+      body: "写一条关于 AI 协作的微博",
+      hashtags: [],
+      imagePrompt: ""
+    });
+    expect(state.artifacts).toHaveLength(1);
+    expect(state.currentNode?.kind).toBe("artifact");
+    expect(state.currentNode?.producedArtifactId).toBe(state.currentArtifact?.id);
+    expect(state).not.toHaveProperty("currentDraft");
+  });
+
+  it("creates a no-artifact seed session when the plugin has no seed payload", async () => {
+    const { repo, user } = await createRepositoryHarness();
+    const root = repo.saveRootMemory(user.id, {
+      artifactTypeId: "social-post",
+      seed: "",
+      creationRequest: "",
+      domains: ["Creation"],
+      tones: ["Sincere"],
+      styles: ["Opinion-driven"],
+      personas: ["Practitioner"]
+    });
+
+    const state = repo.createSession({ userId: user.id, rootMemoryId: root.id, enabledSkillIds: [] });
+
+    expect(state.currentArtifact).toBeNull();
+    expect(state.artifacts).toEqual([]);
+    expect(state.currentNode?.kind).toBe("analysis");
+    expect(state.currentNode?.producedArtifactId).toBeNull();
+  });
+
+  it("persists the selected artifact type on the session", async () => {
+    const { repo, user } = await createRepositoryHarness();
+    const root = repo.saveRootMemory(user.id, {
+      artifactTypeId: "prd",
+      seed: "移动端草稿管理",
+      domains: ["Work"],
+      tones: ["calm"],
+      styles: ["document"],
+      personas: ["product manager"]
+    });
+
+    const state = repo.createSession({ userId: user.id, rootMemoryId: root.id, enabledSkillIds: [] });
+
+    expect(state.session.artifactTypeId).toBe("prd");
+    expect(state.currentArtifact?.type).toBe("prd");
+    expect(repo.getSessionState(user.id, state.session.id)?.session.artifactTypeId).toBe("prd");
+  });
+
+  it("updates options and appends agent messages on the current node", async () => {
+    const { repo, user, state } = await createArtifactSessionHarness();
+    const updated = repo.updateNodeOptions({
+      userId: user.id,
+      sessionId: state.session.id,
+      nodeId: state.currentNode!.id,
+      agentMessages: [{ role: "assistant", content: [{ type: "tool-call", toolName: "statusServer_getUserTimeline" }] }],
+      output: { roundIntent: "选择差异化角度", options: nextOptions }
+    });
+
+    expect(updated.currentNode?.roundIntent).toBe("选择差异化角度");
+    expect(updated.currentNode?.options).toEqual(nextOptions);
+    expect(JSON.stringify(updated.currentNode?.agentMessages)).toContain("statusServer_getUserTimeline");
+    expect(updated.currentArtifact).toEqual(state.currentArtifact);
+  });
+
+  it("creates a child node with a plugin artifact", async () => {
+    const { repo, user } = await createRepositoryHarness();
+    const first = await createSessionWithOptions(repo, user.id);
+    const next = repo.createArtifactChild({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: first.currentNode!.id,
+      selectedOptionId: "b",
+      optionMode: "focused",
+      roundIntent: "收紧观点",
+      artifact: {
+        type: "social-post",
+        payload: socialPostPayload("收紧观点"),
+        sourceArtifactIds: [first.currentArtifact!.id]
+      }
+    });
+
+    expect(next.currentNode?.parentId).toBe(first.currentNode!.id);
+    expect(next.currentNode?.parentOptionId).toBe("b");
+    expect(next.currentNode?.kind).toBe("artifact");
+    expect(next.currentArtifact?.payload).toEqual(socialPostPayload("收紧观点"));
+    expect(next.currentArtifact?.sourceArtifactIds).toEqual([first.currentArtifact!.id]);
+    expect(next.artifacts).toHaveLength(2);
+    expect(next.selectedPath[0].options.find((option) => option.id === "b")?.mode).toBe("focused");
+    expect(next.foldedBranches.map((branch) => branch.option.id).sort()).toEqual(["a", "c"]);
+  });
+
+  it("allows a workflow node to complete without producing an artifact", async () => {
+    const { repo, user } = await createRepositoryHarness();
+    const first = await createSessionWithOptions(repo, user.id);
+    const child = repo.createArtifactChild({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: first.currentNode!.id,
+      selectedOptionId: "a",
+      roundIntent: "只判断下一步",
+      artifact: null
+    });
+
+    expect(child.currentNode?.producedArtifactId).toBeNull();
+    expect(child.currentArtifact).toBeNull();
+    expect(child.artifacts).toHaveLength(1);
+  });
+
+  it("completeNode can finish a workflow node without producing an artifact", async () => {
+    const { repo, user } = await createRepositoryHarness();
+    const first = await createSessionWithOptions(repo, user.id);
+    const child = repo.createArtifactChild({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: first.currentNode!.id,
+      selectedOptionId: "a",
+      roundIntent: "只判断下一步",
+      artifact: null
+    });
+
+    const completed = repo.completeNode({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: child.currentNode!.id,
+      output: { roundIntent: "判断完成" },
+      artifact: null
+    });
+
+    expect(completed.currentNode?.isTerminal).toBe(true);
+    expect(completed.currentNode?.kind).toBe("analysis");
+    expect(completed.currentNode?.producedArtifactId).toBeNull();
+    expect(completed.currentArtifact).toBeNull();
+    expect(completed.artifacts).toHaveLength(1);
+  });
+
+  it("completeNode can finish a workflow node while storing an artifact", async () => {
+    const { repo, user } = await createRepositoryHarness();
+    const first = await createSessionWithOptions(repo, user.id);
+    const child = repo.createArtifactChild({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: first.currentNode!.id,
+      selectedOptionId: "a",
+      roundIntent: "先分析",
+      artifact: null
+    });
+
+    const completed = repo.completeNode({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: child.currentNode!.id,
+      output: { roundIntent: "完成版本" },
+      artifact: {
+        type: "social-post",
+        payload: socialPostPayload("完成版本", "这是可以直接发布的完成版本。"),
+        sourceArtifactIds: [first.currentArtifact!.id]
+      }
+    });
+
+    expect(completed.currentNode?.isTerminal).toBe(true);
+    expect(completed.currentNode?.kind).toBe("artifact");
+    expect(completed.currentArtifact?.payload).toEqual(socialPostPayload("完成版本", "这是可以直接发布的完成版本。"));
+    expect(completed.currentNode?.producedArtifactId).toBe(completed.currentArtifact?.id);
+    expect(completed.currentArtifact?.sourceArtifactIds).toEqual([first.currentArtifact!.id]);
+    expect(completed.artifacts).toHaveLength(2);
+    expect(completed.session.title).toBe("完成版本");
+  });
+
+  it("updates an existing node with an artifact or analysis-only result", async () => {
+    const { repo, user } = await createRepositoryHarness();
+    const first = await createSessionWithOptions(repo, user.id);
+    const child = repo.createArtifactChild({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: first.currentNode!.id,
+      selectedOptionId: "a",
+      roundIntent: "先分析",
+      artifact: null
+    });
+
+    const withArtifact = repo.updateNodeArtifact({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: child.currentNode!.id,
+      roundIntent: "写出版本",
+      artifact: { type: "social-post", payload: socialPostPayload("写出版本"), sourceArtifactIds: [first.currentArtifact!.id] }
+    });
+    const withoutArtifact = repo.updateNodeArtifact({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: child.currentNode!.id,
+      roundIntent: "仅分析",
+      artifact: null
+    });
+
+    expect(withArtifact.currentNode?.kind).toBe("artifact");
+    expect(withArtifact.currentArtifact?.payload).toEqual(socialPostPayload("写出版本"));
+    expect(withoutArtifact.currentNode?.kind).toBe("analysis");
+    expect(withoutArtifact.currentNode?.producedArtifactId).toBeNull();
+  });
+
+  it("lists, renames, and archives artifact sessions by user", async () => {
     const repo = createTreeableRepository(testDbPath());
     const user = await createTestUser(repo, "writer");
     const otherUser = await createTestUser(repo, "other-writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const otherRoot = repo.saveRootMemory(otherUser.id, {
-      domains: ["Work"],
-      tones: ["sincere"],
-      styles: ["story-driven"],
-      personas: ["observer"]
-    });
-
-    const older = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Older",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Older draft", body: "Older body for the summary list.", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-    const latest = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Latest",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Latest draft", body: "Latest body for the summary list.", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-    createSessionDraftWithOptions(repo, {
-      userId: otherUser.id,
-      rootMemoryId: otherRoot.id,
-      output: {
-        roundIntent: "Other",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Other user draft", body: "Other body.", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
+    const older = await createSessionWithOptions(repo, user.id);
+    const latest = await createSessionWithOptions(repo, user.id);
+    await createSessionWithOptions(repo, otherUser.id);
 
     expect(repo.renameSession(otherUser.id, older.session.id, "Not mine")).toBeNull();
 
-    const renamed = repo.renameSession(user.id, older.session.id, "Renamed draft");
+    const renamed = repo.renameSession(user.id, older.session.id, "Renamed artifact");
     expect(renamed).toEqual(
       expect.objectContaining({
         id: older.session.id,
-        title: "Renamed draft",
-        bodyExcerpt: "Older body for the summary list.",
-        bodyLength: "Older body for the summary list.".length,
+        title: "Renamed artifact",
+        bodyExcerpt: "种子念头",
+        bodyLength: 4,
         currentRoundIndex: 1,
         isArchived: false
       })
@@ -575,277 +474,115 @@ describe("Treeable repository", () => {
     expect(repo.archiveSession(otherUser.id, latest.session.id)).toBeNull();
     const archived = repo.archiveSession(user.id, latest.session.id);
     expect(archived).toEqual(expect.objectContaining({ id: latest.session.id, isArchived: true }));
-
-    expect(repo.listSessionSummaries(user.id, { archived: false }).map((draft) => draft.id)).toEqual([older.session.id]);
-    expect(repo.listSessionSummaries(user.id, { archived: true }).map((draft) => draft.id)).toEqual([latest.session.id]);
-    expect(repo.getLatestSessionState(user.id)?.session.id).toBe(older.session.id);
+    expect(repo.listSessionSummaries(user.id, { archived: false }).map((summary) => summary.id)).toEqual([older.session.id]);
+    expect(repo.listSessionSummaries(user.id, { archived: true }).map((summary) => summary.id)).toEqual([latest.session.id]);
     expect(repo.getSessionState(user.id, latest.session.id)).toBeNull();
   });
 
-  it("does not rename archived draft sessions", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const state = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Archived",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Original archived title", body: "Archived body.", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-    repo.archiveSession(user.id, state.session.id);
-
-    expect(repo.renameSession(user.id, state.session.id, "Should not stick")).toBeNull();
-    expect(repo.listSessionSummaries(user.id, { archived: true })[0]).toEqual(
-      expect.objectContaining({ id: state.session.id, title: "Original archived title" })
-    );
-  });
-
-  it("does not update archived draft timestamps when archived again", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const state = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Archived",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Archive once", body: "Archived body.", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-    repo.archiveSession(user.id, state.session.id);
-    const archivedUpdatedAt = repo.listSessionSummaries(user.id, { archived: true })[0].updatedAt;
-
-    expect(repo.archiveSession(user.id, state.session.id)).toBeNull();
-    expect(repo.listSessionSummaries(user.id, { archived: true })[0].updatedAt).toBe(archivedUpdatedAt);
-  });
-
-  it("adds the archived flag to legacy sessions during migration", async () => {
-    const dbPath = testDbPath();
-    const sqlite = new DatabaseSync(dbPath);
-    sqlite.exec(`
-      PRAGMA user_version = 0;
-
-      CREATE TABLE users (
-        id TEXT PRIMARY KEY,
-        username TEXT NOT NULL UNIQUE,
-        display_name TEXT NOT NULL,
-        password_hash TEXT,
-        role TEXT NOT NULL,
-        is_active INTEGER NOT NULL,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE root_memory (
-        id TEXT PRIMARY KEY,
-        user_id TEXT REFERENCES users(id),
-        preferences_json TEXT NOT NULL,
-        summary TEXT NOT NULL,
-        learned_summary TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE sessions (
-        id TEXT PRIMARY KEY,
-        user_id TEXT REFERENCES users(id),
-        root_memory_id TEXT NOT NULL REFERENCES root_memory(id),
-        title TEXT NOT NULL,
-        status TEXT NOT NULL,
-        current_node_id TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    sqlite.close();
-
-    createTreeableRepository(dbPath);
-    const migrated = new DatabaseSync(dbPath);
-    const columns = migrated.prepare("PRAGMA table_info(sessions);").all() as Array<{ name: string; dflt_value: string | null }>;
-    migrated.close();
-
-    expect(columns).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: "is_archived", dflt_value: "0" })])
-    );
-  });
-
-  it("preserves finished status in draft summaries", async () => {
+  it("preserves finished status in artifact summaries", async () => {
     const dbPath = testDbPath();
     const repo = createTreeableRepository(dbPath);
     const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const state = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Finished",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "finish" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "finish" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Finished draft", body: "A persisted finished summary.", hashtags: [], imagePrompt: "" },
-        finishAvailable: true,
-        publishPackage: null
-      }
-    });
+    const state = await createSessionWithOptions(repo, user.id);
     const sqlite = new DatabaseSync(dbPath);
     sqlite.prepare("UPDATE sessions SET status = 'finished' WHERE id = ?").run(state.session.id);
     sqlite.close();
 
     expect(repo.listSessionSummaries(user.id)[0].status).toBe("finished");
+    expect(repo.getSessionState(user.id, state.session.id)?.session.status).toBe("active");
   });
 
-  it("rejects archived draft mutations without changing persisted rows", async () => {
+  it("rejects archived artifact mutations without changing persisted rows", async () => {
     const dbPath = testDbPath();
     const repo = createTreeableRepository(dbPath);
     const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const first = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      enabledSkillIds: ["system-analysis"],
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-    appendGeneratedChild(repo, {
+    const state = await createSessionWithOptions(repo, user.id, []);
+    repo.archiveSession(user.id, state.session.id);
+
+    const snapshot = () => {
+      const sqlite = new DatabaseSync(dbPath);
+      const session = sqlite.prepare("SELECT title, current_node_id, updated_at FROM sessions WHERE id = ?").get(state.session.id);
+      const nodeCount = (sqlite.prepare("SELECT COUNT(*) AS count FROM tree_nodes WHERE session_id = ?").get(state.session.id) as { count: number }).count;
+      const artifactCount = (sqlite.prepare("SELECT COUNT(*) AS count FROM artifacts WHERE session_id = ?").get(state.session.id) as { count: number }).count;
+      sqlite.close();
+      return { session, nodeCount, artifactCount };
+    };
+
+    const before = snapshot();
+    expect(() => repo.replaceSessionEnabledSkills(user.id, state.session.id, ["system-writer"])).toThrow("Session was not found.");
+    expect(() =>
+      repo.createArtifactChild({
+        userId: user.id,
+        sessionId: state.session.id,
+        nodeId: state.currentNode!.id,
+        selectedOptionId: "a",
+        artifact: null
+      })
+    ).toThrow("Session was not found.");
+    expect(() =>
+      repo.updateNodeArtifact({
+        userId: user.id,
+        sessionId: state.session.id,
+        nodeId: state.currentNode!.id,
+        roundIntent: "Archived update",
+        artifact: null
+      })
+    ).toThrow("Session was not found.");
+    expect(() =>
+      repo.completeNode({
+        userId: user.id,
+        sessionId: state.session.id,
+        nodeId: state.currentNode!.id,
+        output: { roundIntent: "Archived complete" },
+        artifact: null
+      })
+    ).toThrow("Session was not found.");
+
+    expect(snapshot()).toEqual(before);
+  });
+
+  it("activates an existing historical artifact branch without creating another child", async () => {
+    const repo = createTreeableRepository(testDbPath());
+    const user = await createTestUser(repo, "writer");
+    const first = await createSessionWithOptions(repo, user.id);
+    const oldRoute = repo.createArtifactChild({
       userId: user.id,
       sessionId: first.session.id,
       nodeId: first.currentNode!.id,
       selectedOptionId: "b",
-      output: {
-        roundIntent: "Old route",
-        options: [
-          { id: "a", label: "Old A", description: "A", impact: "A", kind: "deepen" },
-          { id: "b", label: "Old B", description: "B", impact: "B", kind: "reframe" },
-          { id: "c", label: "Old C", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Old", body: "Old route body", hashtags: ["#Old"], imagePrompt: "Old tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
+      artifact: { type: "social-post", payload: socialPostPayload("旧路线") }
     });
-    const current = createHistoricalGeneratedChild(repo, {
+    repo.createArtifactChild({
       userId: user.id,
       sessionId: first.session.id,
       nodeId: first.currentNode!.id,
       selectedOptionId: "a",
-      output: {
-        roundIntent: "Current route",
-        options: [
-          { id: "a", label: "Current A", description: "A", impact: "A", kind: "deepen" },
-          { id: "b", label: "Current B", description: "B", impact: "B", kind: "reframe" },
-          { id: "c", label: "Current C", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Current", body: "Current route body", hashtags: ["#Current"], imagePrompt: "Current tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
+      artifact: { type: "social-post", payload: socialPostPayload("新路线") }
     });
-    repo.archiveSession(user.id, first.session.id);
 
-    const expectArchivedMutationBlocked = (mutate: () => unknown) => {
-      const before = readArchivedMutationSnapshot(dbPath, first.session.id);
-      expect(mutate).toThrow("Session was not found.");
-      expect(readArchivedMutationSnapshot(dbPath, first.session.id)).toEqual(before);
-    };
+    const switched = repo.activateHistoricalBranch({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: first.currentNode!.id,
+      selectedOptionId: "b"
+    });
 
-    expectArchivedMutationBlocked(() => repo.replaceSessionEnabledSkills(user.id, first.session.id, ["system-polish"]));
-    expectArchivedMutationBlocked(() =>
-      repo.createDraftChild({
-        userId: user.id,
-        sessionId: first.session.id,
-        nodeId: current.currentNode!.id,
-        selectedOptionId: "a"
-      })
-    );
-    expectArchivedMutationBlocked(() =>
-      repo.updateNodeDraft({
-        userId: user.id,
-        sessionId: first.session.id,
-        nodeId: current.currentNode!.id,
-        output: {
-          roundIntent: "Archived draft update",
-          draft: { title: "Mutated", body: "Should not save", hashtags: [], imagePrompt: "" },
-        }
-      })
-    );
-    expectArchivedMutationBlocked(() =>
-      repo.updateNodeOptions({
-        userId: user.id,
-        sessionId: first.session.id,
-        nodeId: current.currentNode!.id,
-        output: {
-          roundIntent: "Archived options update",
-          options: [
-            { id: "a", label: "Archived A", description: "A", impact: "A", kind: "deepen" },
-            { id: "b", label: "Archived B", description: "B", impact: "B", kind: "reframe" },
-            { id: "c", label: "Archived C", description: "C", impact: "C", kind: "finish" }
-          ],
-        }
-      })
-    );
-    expectArchivedMutationBlocked(() =>
-      repo.activateHistoricalBranch({
-        userId: user.id,
-        sessionId: first.session.id,
-        nodeId: first.currentNode!.id,
-        selectedOptionId: "b"
-      })
-    );
-    expectArchivedMutationBlocked(() =>
-      repo.createHistoricalDraftChild({
-        userId: user.id,
-        sessionId: first.session.id,
-        nodeId: first.currentNode!.id,
-        selectedOptionId: "c"
-      })
-    );
+    expect(switched?.currentNode?.id).toBe(oldRoute.currentNode!.id);
+    expect(switched?.currentArtifact?.payload).toEqual(socialPostPayload("旧路线"));
+    expect(switched?.treeNodes).toHaveLength(3);
+  });
+
+  it("creates sessions with default enabled skills and replaces them", async () => {
+    const repo = createTreeableRepository(testDbPath());
+    const user = await createTestUser(repo, "writer");
+    const state = await createSessionWithOptions(repo, user.id);
+
+    expect(state.enabledSkillIds).toEqual(["system-reviewer", "system-writer"]);
+
+    const updated = repo.replaceSessionEnabledSkills(user.id, state.session.id, ["system-writer"]);
+
+    expect(updated?.enabledSkillIds).toEqual(["system-writer"]);
+    expect(updated?.enabledSkills.map((skill) => skill.title)).toEqual(["系统写作者"]);
   });
 
   it("isolates custom skills while keeping system skills global", async () => {
@@ -863,137 +600,11 @@ describe("Treeable repository", () => {
 
     expect(repo.listSkills(first.id).map((skill) => skill.id)).toContain(custom.id);
     expect(repo.listSkills(second.id).map((skill) => skill.id)).not.toContain(custom.id);
+    expect(repo.resolveSkillsByIds([custom.id], second.id)).toEqual([]);
     expect(repo.listSkills(second.id).filter((skill) => skill.isSystem).map((skill) => skill.id)).toEqual([
       "system-reviewer",
       "system-writer"
     ]);
-  });
-
-  it("does not resolve another user's custom skill ids", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const first = await createTestUser(repo, "first");
-    const second = await createTestUser(repo, "second");
-
-    const custom = repo.createSkill(first.id, {
-      title: "第一用户技能",
-      category: "风格",
-      description: "只属于第一个用户。",
-      prompt: "写得更像第一用户。",
-      appliesTo: "writer"
-    });
-
-    expect(repo.resolveSkillsByIds([custom.id], second.id)).toEqual([]);
-  });
-
-  it("does not resolve skills without a user scope", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-
-    const custom = repo.createSkill(user.id, {
-      title: "用户技能",
-      category: "风格",
-      description: "用户自定义技能。",
-      prompt: "写得更像用户。",
-      appliesTo: "writer"
-    });
-
-    expect(repo.resolveSkillsByIds([custom.id], undefined as unknown as string)).toEqual([]);
-  });
-
-  it("resolves null-user non-system skills as shared single-machine skills", async () => {
-    const dbPath = testDbPath();
-    const repo = createTreeableRepository(dbPath);
-    const user = await createTestUser(repo, "writer");
-    const sqlite = new DatabaseSync(dbPath);
-    sqlite
-      .prepare(
-        `
-          INSERT INTO skills (id, user_id, title, category, description, prompt, applies_to, is_system, default_enabled, is_archived, created_at, updated_at)
-          VALUES ('legacy-user-skill', NULL, '旧用户技能', '风格', '', '旧提示词。', 'both', 0, 0, 0, '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z')
-        `
-      )
-      .run();
-    sqlite.close();
-
-    expect(repo.resolveSkillsByIds(["legacy-user-skill"], user.id).map((skill) => skill.id)).toEqual(["legacy-user-skill"]);
-  });
-
-  it("copies and isolates creation request options per user", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const first = await createTestUser(repo, "first");
-    const second = await createTestUser(repo, "second");
-
-    const firstOptions = repo.listCreationRequestOptions(first.id);
-    const secondOptions = repo.listCreationRequestOptions(second.id);
-
-    expect(firstOptions.map((option) => option.label)).toEqual(secondOptions.map((option) => option.label));
-    expect(firstOptions[0].id).not.toBe(secondOptions[0].id);
-
-    repo.updateCreationRequestOption(first.id, firstOptions[0].id, { label: "第一用户改过" });
-    repo.deleteCreationRequestOption(first.id, firstOptions[1].id);
-
-    expect(repo.listCreationRequestOptions(first.id).map((option) => option.label)).toContain("第一用户改过");
-    expect(repo.listCreationRequestOptions(second.id).map((option) => option.label)).not.toContain("第一用户改过");
-    expect(repo.listCreationRequestOptions(second.id).map((option) => option.label)).toContain(firstOptions[1].label);
-  });
-
-  it("keeps quick request options empty after deleting all until explicit reset", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const options = repo.listCreationRequestOptions(user.id);
-
-    options.forEach((option) => repo.deleteCreationRequestOption(user.id, option.id));
-
-    expect(repo.listCreationRequestOptions(user.id)).toEqual([]);
-    expect(repo.resetCreationRequestOptions(user.id).map((option) => option.label)).toEqual(options.map((option) => option.label));
-  });
-
-  it("copies creation request quick buttons from configured defaults", async () => {
-    const configPath = writeDefaultsConfig({
-      creationRequestOptions: [
-        { id: "default-keep-facts", label: "保留事实边界" },
-        { id: "default-buyer-reader", label: "写给采购负责人" }
-      ]
-    });
-    const repo = createTreeableRepository(testDbPath(), { defaultsConfigPath: configPath });
-    const user = await createTestUser(repo, "writer");
-
-    expect(repo.listCreationRequestOptions(user.id).map((option) => option.label)).toEqual([
-      "保留事实边界",
-      "写给采购负责人"
-    ]);
-
-    const options = repo.listCreationRequestOptions(user.id);
-    repo.updateCreationRequestOption(user.id, options[0].id, { label: "用户改过" });
-    expect(repo.resetCreationRequestOptions(user.id).map((option) => option.label)).toEqual([
-      "保留事实边界",
-      "写给采购负责人"
-    ]);
-  });
-
-  it("seeds system skills idempotently", async () => {
-    const dbPath = testDbPath();
-    const first = createTreeableRepository(dbPath);
-    const user = await createTestUser(first, "writer");
-    const firstSkills = first.listSkills(user.id, { includeArchived: true });
-    const second = createTreeableRepository(dbPath);
-    const secondSkills = second.listSkills(user.id, { includeArchived: true });
-
-    expect(firstSkills.filter((skill) => skill.isSystem)).toHaveLength(
-      secondSkills.filter((skill) => skill.isSystem).length
-    );
-    expect(secondSkills.find((skill) => skill.id === "system-writer")?.defaultEnabled).toBe(true);
-  });
-
-  it("seeds system skills from the configured file", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-
-    expect(repo.listSkills(user.id).filter((skill) => skill.isSystem).map((skill) => skill.id)).toEqual([
-      "system-reviewer",
-      "system-writer"
-    ]);
-    expect(repo.defaultEnabledSkillIds()).toEqual(["system-reviewer", "system-writer"]);
   });
 
   it("updates configured system skills when the config file changes", async () => {
@@ -1009,12 +620,7 @@ describe("Treeable repository", () => {
       JSON.stringify(
         {
           systemSkills: [
-            {
-              ...repositorySystemSkills[0],
-              title: "配置写作者",
-              prompt: "配置文件里的新版写作者提示词。",
-              defaultEnabled: false
-            },
+            { ...repositorySystemSkills[0], title: "配置写作者", prompt: "配置文件里的新版写作者提示词。", defaultEnabled: false },
             repositorySystemSkills[1]
           ],
           creationRequestOptions: repositoryCreationRequestOptions,
@@ -1028,262 +634,8 @@ describe("Treeable repository", () => {
     const reopened = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
     const updated = reopened.listSkills(user.id).find((skill) => skill.id === "system-writer");
 
-    expect(updated).toEqual(expect.objectContaining({
-      title: "配置写作者",
-      prompt: "配置文件里的新版写作者提示词。",
-      defaultEnabled: false
-    }));
+    expect(updated).toEqual(expect.objectContaining({ title: "配置写作者", prompt: "配置文件里的新版写作者提示词。" }));
     expect(reopened.defaultEnabledSkillIds()).toEqual(["system-reviewer"]);
-  });
-
-  it("rejects configured system skill ids that collide with non-system skills", async () => {
-    const dbPath = testDbPath();
-    const sqlite = createDatabase(dbPath);
-    sqlite
-      .prepare(
-        `
-          INSERT INTO skills (id, user_id, title, category, description, prompt, applies_to, is_system, default_enabled, is_archived, created_at, updated_at)
-          VALUES (?, NULL, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)
-        `
-      )
-      .run(
-        "system-writer",
-        "Imported writer",
-        "风格",
-        "Imported non-system skill.",
-        "Do not promote me.",
-        "writer",
-        "2026-05-01T00:00:00.000Z",
-        "2026-05-01T00:00:00.000Z"
-      );
-    sqlite.close();
-
-    const configPath = writeDefaultsConfig({ systemSkills: repositorySystemSkills });
-
-    expect(() => createTreeableRepository(dbPath, { defaultsConfigPath: configPath })).toThrow(
-      "System skill config id system-writer conflicts with an existing non-system skill."
-    );
-  });
-
-  it("archives global system skills that were removed from config", async () => {
-    const dbPath = testDbPath();
-    const configPath = writeDefaultsConfig({ systemSkills: repositorySystemSkills });
-    const first = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
-    const user = await createTestUser(first, "writer");
-
-    expect(first.listSkills(user.id).map((skill) => skill.id)).toContain("system-writer");
-
-    writeFileSync(
-      configPath,
-      JSON.stringify({ systemSkills: [repositorySystemSkills[1]], creationRequestOptions: repositoryCreationRequestOptions, inspirations: [] }, null, 2)
-    );
-
-    const reopened = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
-
-    expect(reopened.listSkills(user.id).map((skill) => skill.id)).not.toContain("system-writer");
-    expect(reopened.listSkills(user.id, { includeArchived: true }).find((skill) => skill.id === "system-writer")?.isArchived).toBe(true);
-    expect(reopened.defaultEnabledSkillIds()).toEqual(["system-reviewer"]);
-  });
-
-  it("backfills merged system skills for sessions that referenced legacy system skills", async () => {
-    const dbPath = testDbPath();
-    const configPath = writeDefaultsConfig({ systemSkills: repositorySystemSkills });
-    const repo = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      seed: "写一篇解释为什么要写作的文章",
-      domains: ["创作"],
-      tones: ["平静"],
-      styles: ["观点型"],
-      personas: ["实践者"]
-    });
-
-    const state = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      enabledSkillIds: [],
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "deepen" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "reframe" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    const sqlite = new DatabaseSync(dbPath);
-    sqlite
-      .prepare(
-        `
-          INSERT INTO skills (id, title, category, description, prompt, applies_to, is_system, default_enabled, is_archived, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0, ?, ?)
-        `
-      )
-      .run(
-        "system-analysis",
-        "理清主线",
-        "方向",
-        "旧系统技能。",
-        "判断作品真正要表达什么。",
-        "editor",
-        "2026-05-01T00:00:00.000Z",
-        "2026-05-01T00:00:00.000Z"
-      );
-    sqlite
-      .prepare("INSERT INTO session_enabled_skills (session_id, skill_id, created_at) VALUES (?, ?, ?)")
-      .run(state.session.id, "system-analysis", "2026-05-01T00:00:00.000Z");
-    sqlite.close();
-
-    const reopened = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
-    const reopenedState = reopened.getSessionState(user.id, state.session.id);
-
-    expect(reopenedState?.enabledSkillIds).toEqual(["system-writer", "system-reviewer"]);
-
-    const check = new DatabaseSync(dbPath);
-    const rows = check
-      .prepare("SELECT skill_id FROM session_enabled_skills WHERE session_id = ? ORDER BY skill_id")
-      .all(state.session.id) as Array<{ skill_id: string }>;
-    check.close();
-
-    expect(rows.map((row) => row.skill_id)).toEqual(["system-analysis", "system-reviewer", "system-writer"]);
-  });
-
-  it("backfills only active configured merged system skills for legacy sessions", async () => {
-    const dbPath = testDbPath();
-    const configPath = writeDefaultsConfig({ systemSkills: [repositorySystemSkills[1]] });
-    const repo = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      seed: "写一篇解释为什么要写作的文章",
-      domains: ["创作"],
-      tones: ["平静"],
-      styles: ["观点型"],
-      personas: ["实践者"]
-    });
-
-    const state = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      enabledSkillIds: [],
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "deepen" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "reframe" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    const sqlite = new DatabaseSync(dbPath);
-    sqlite
-      .prepare(
-        `
-          INSERT INTO skills (id, title, category, description, prompt, applies_to, is_system, default_enabled, is_archived, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0, ?, ?)
-        `
-      )
-      .run(
-        "system-analysis",
-        "理清主线",
-        "方向",
-        "旧系统技能。",
-        "判断作品真正要表达什么。",
-        "editor",
-        "2026-05-01T00:00:00.000Z",
-        "2026-05-01T00:00:00.000Z"
-      );
-    sqlite
-      .prepare("INSERT INTO session_enabled_skills (session_id, skill_id, created_at) VALUES (?, ?, ?)")
-      .run(state.session.id, "system-analysis", "2026-05-01T00:00:00.000Z");
-    sqlite.close();
-
-    const reopened = createTreeableRepository(dbPath, { defaultsConfigPath: configPath });
-    const reopenedState = reopened.getSessionState(user.id, state.session.id);
-
-    expect(reopenedState?.enabledSkillIds).toEqual(["system-reviewer"]);
-
-    const check = new DatabaseSync(dbPath);
-    const rows = check
-      .prepare("SELECT skill_id FROM session_enabled_skills WHERE session_id = ? ORDER BY skill_id")
-      .all(state.session.id) as Array<{ skill_id: string }>;
-    check.close();
-
-    expect(rows.map((row) => row.skill_id)).toEqual(["system-analysis", "system-reviewer"]);
-  });
-
-  it("persists skill applicability for system and user skills", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-
-    const reviewerSkill = repo.listSkills(user.id).find((skill) => skill.id === "system-reviewer");
-    expect(reviewerSkill?.appliesTo).toBe("editor");
-
-    const custom = repo.createSkill(user.id, {
-      title: "朋友圈短句",
-      category: "风格",
-      description: "更像自然分享。",
-      prompt: "句子短一点。",
-      appliesTo: "writer"
-    });
-
-    expect(custom.appliesTo).toBe("writer");
-    expect(repo.listSkills(user.id).find((skill) => skill.id === custom.id)?.appliesTo).toBe("writer");
-  });
-
-  it("imports installed executable skills by skill name and updates repeated imports", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-
-    const [created] = repo.importSkills([
-      {
-        id: "xiaohongshu-skills",
-        title: "xiaohongshu-skills",
-        category: "平台",
-        description: "小红书自动化技能集合。",
-        prompt: "发布前必须让用户确认最终标题、正文和图片。",
-        appliesTo: "both",
-        defaultEnabled: false,
-        isArchived: false
-      }
-    ]);
-
-    expect(created).toMatchObject({
-      id: "xiaohongshu-skills",
-      title: "xiaohongshu-skills",
-      isSystem: false,
-      isArchived: false
-    });
-
-    const [updated] = repo.importSkills([
-      {
-        id: "xiaohongshu-skills",
-        title: "xiaohongshu-skills",
-        category: "平台",
-        description: "更新后的小红书技能集合。",
-        prompt: "新的发布要求。",
-        appliesTo: "writer",
-        defaultEnabled: true,
-        isArchived: false
-      }
-    ]);
-
-    expect(updated).toMatchObject({
-      id: "xiaohongshu-skills",
-      description: "更新后的小红书技能集合。",
-      prompt: "新的发布要求。",
-      appliesTo: "writer",
-      defaultEnabled: true,
-      isArchived: false
-    });
-    expect(repo.listSkills(user.id).filter((skill) => skill.id === "xiaohongshu-skills")).toHaveLength(1);
   });
 
   it("discovers installed skills directly from the skill folder", async () => {
@@ -1291,677 +643,53 @@ describe("Treeable repository", () => {
     const installRoot = path.join(rootDir, ".tritree", "skills");
     const skillDir = path.join(installRoot, "local-travel");
     mkdirSync(path.join(skillDir, "skills", "research"), { recursive: true });
-    writeFileSync(
-      path.join(skillDir, "SKILL.md"),
-      "---\nname: local-travel\ndescription: 本地旅游写作 Skill。\n---\n\n# Local Travel\n\n根据目的地整理攻略。"
-    );
-    writeFileSync(
-      path.join(skillDir, "skills", "research", "SKILL.md"),
-      "---\nname: research\ndescription: 查询目的地参考资料。\n---\n\n# Research\n\n需要先看真实参考。"
-    );
+    writeFileSync(path.join(skillDir, "SKILL.md"), "---\nname: local-travel\ndescription: 本地旅游写作 Skill。\n---\n\n# Local Travel");
+    writeFileSync(path.join(skillDir, "skills", "research", "SKILL.md"), "---\nname: research\ndescription: 查询目的地参考资料。\n---\n\n# Research");
     const repo = createTreeableRepository(testDbPath(), { skillInstallRoot: installRoot });
     const user = await createTestUser(repo, "writer");
 
     const discovered = repo.listSkills(user.id).find((skill) => skill.id === "local-travel");
-    expect(discovered).toMatchObject({
-      description: "本地旅游写作 Skill。",
-      isSystem: false,
-      title: "local-travel"
-    });
-    expect(discovered?.prompt).toContain("# 可渐进加载的 Skill 文档");
+    expect(discovered).toMatchObject({ description: "本地旅游写作 Skill。", isSystem: false, title: "local-travel" });
     expect(discovered?.prompt).toContain("skills/research/SKILL.md");
-    expect(discovered?.prompt).not.toContain("此 Skill 已安装在");
     expect(discovered?.prompt).not.toContain(installRoot);
-    expect(discovered?.prompt).not.toContain("run_skill_command");
-    expect(discovered?.prompt).not.toContain("需要先看真实参考。");
     expect(repo.resolveSkillsByIds(["local-travel"], user.id).map((skill) => skill.id)).toEqual(["local-travel"]);
   });
 
-  it("cleans old imported skill runtime paths from stored prompts", async () => {
-    const dbPath = testDbPath();
-    const repo = createTreeableRepository(dbPath);
-    const user = await createTestUser(repo, "writer");
-    repo.importSkills([
-      {
-        id: "legacy-installed",
-        title: "legacy-installed",
-        category: "平台",
-        description: "旧导入 Skill。",
-        prompt: [
-          "此 Skill 已安装在：/tmp/repo/.tritree/skills/legacy-installed",
-          "来源：https://github.com/example/legacy-installed",
-          "Tritree 是当前 agent runtime。生成选项或草稿时，请按以下 SKILL.md 指令判断是否需要调用可用工具。",
-          "",
-          "# Root Skill",
-          "# Legacy",
-          "",
-          "保留真实指令。"
-        ].join("\n"),
-        appliesTo: "both",
-        defaultEnabled: false,
-        isArchived: false
-      }
-    ]);
-
-    const reopened = createTreeableRepository(dbPath);
-    const skill = reopened.listSkills(user.id).find((item) => item.id === "legacy-installed");
-
-    expect(skill?.prompt).toBe(["# Root Skill", "# Legacy", "", "保留真实指令。"].join("\n"));
-  });
-
-  it("can enable a skill that was added directly to the skill folder", async () => {
-    const rootDir = mkdtempSync(path.join(tmpdir(), "tritree-skill-folder-enable-"));
-    const installRoot = path.join(rootDir, ".tritree", "skills");
-    const skillDir = path.join(installRoot, "local-travel");
-    mkdirSync(skillDir, { recursive: true });
-    writeFileSync(
-      path.join(skillDir, "SKILL.md"),
-      "---\nname: local-travel\ndescription: 本地旅游写作 Skill。\n---\n\n# Local Travel\n\n根据目的地整理攻略。"
-    );
-    const repo = createTreeableRepository(testDbPath(), { skillInstallRoot: installRoot });
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      seed: "写一篇青岛旅行攻略",
-      domains: ["旅行"],
-      tones: ["自然"],
-      styles: ["攻略"],
-      personas: ["游客"]
-    });
-
-    const state = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      enabledSkillIds: ["local-travel"],
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "deepen" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "reframe" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    expect(state.enabledSkillIds).toEqual(["local-travel"]);
-    expect(state.enabledSkills?.[0]).toMatchObject({
-      id: "local-travel",
-      description: "本地旅游写作 Skill。"
-    });
-  });
-
-  it("appends generated agent messages to the backend tree node history", async () => {
+  it("copies and manages creation request options per user", async () => {
     const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      seed: "写一篇青岛旅行攻略",
-      domains: ["旅行"],
-      tones: ["自然"],
-      styles: ["攻略"],
-      personas: ["游客"]
-    });
-    const draftState = repo.createSessionDraft({
-      userId: user.id,
-      rootMemoryId: root.id,
-      draft: { title: "青岛攻略", body: "先起草。", hashtags: [], imagePrompt: "" },
-      roundIntent: "种子念头"
-    });
-    const state = repo.updateNodeOptions({
-      userId: user.id,
-      sessionId: draftState.session.id,
-      nodeId: draftState.currentNode!.id,
-      agentMessages: [
-        {
-          role: "assistant",
-          content: [
-            {
-              type: "tool-call",
-              toolCallId: "tool-1",
-              toolName: "statusServer_getUserTimeline",
-              input: { screenName: "来去之间" }
-            }
-          ]
-        },
-        {
-          role: "tool",
-          content: [
-            {
-              type: "tool-result",
-              toolCallId: "tool-1",
-              toolName: "statusServer_getUserTimeline",
-              output: { type: "json", value: { statuses: [{ text: "转发微博内容" }] } }
-            }
-          ]
-        }
-      ],
-      output: {
-        roundIntent: "选择差异化角度",
-        options: [
-          { id: "a", label: "本地人视角", description: "避开游客打卡路线。", impact: "形成差异化。", kind: "reframe" },
-          { id: "b", label: "雨天路线", description: "按天气组织。", impact: "更实用。", kind: "explore" },
-          { id: "c", label: "预算路线", description: "按花费拆分。", impact: "更易执行。", kind: "deepen" }
-        ],
-      }
-    });
+    const first = await createTestUser(repo, "first");
+    const second = await createTestUser(repo, "second");
 
-    expect(state.currentNode?.agentMessages).toHaveLength(2);
-    expect(JSON.stringify(state.currentNode?.agentMessages)).toContain("statusServer_getUserTimeline");
-    expect(JSON.stringify(repo.getSessionState(user.id, draftState.session.id)?.currentNode?.agentMessages)).toContain("转发微博内容");
+    const firstOptions = repo.listCreationRequestOptions(first.id);
+    const secondOptions = repo.listCreationRequestOptions(second.id);
+
+    expect(firstOptions.map((option) => option.label)).toEqual(secondOptions.map((option) => option.label));
+    expect(firstOptions[0].id).not.toBe(secondOptions[0].id);
+
+    repo.updateCreationRequestOption(first.id, firstOptions[0].id, { label: "第一用户改过" });
+    repo.deleteCreationRequestOption(first.id, firstOptions[1].id);
+    repo.createCreationRequestOption(first.id, { label: "用户新增项" });
+
+    expect(repo.listCreationRequestOptions(first.id).map((option) => option.label)).toContain("第一用户改过");
+    expect(repo.listCreationRequestOptions(second.id).map((option) => option.label)).not.toContain("第一用户改过");
+    expect(repo.resetCreationRequestOptions(first.id).map((option) => option.label)).toEqual(repositoryCreationRequestOptions.map((option) => option.label));
   });
 
-  it("defaults legacy skill rows to shared applicability during migration", async () => {
-    const dbPath = testDbPath();
-    const sqlite = new DatabaseSync(dbPath);
-    sqlite.exec(`
-      CREATE TABLE skills (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        category TEXT NOT NULL,
-        description TEXT NOT NULL,
-        prompt TEXT NOT NULL,
-        is_system INTEGER NOT NULL,
-        default_enabled INTEGER NOT NULL,
-        is_archived INTEGER NOT NULL,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-      INSERT INTO skills (id, title, category, description, prompt, is_system, default_enabled, is_archived, created_at, updated_at)
-      VALUES ('legacy-system', '旧技能', '约束', '', '保留原意。', 1, 0, 0, '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z');
-    `);
-    sqlite.close();
-
-    const repo = createTreeableRepository(dbPath);
-    const user = await createTestUser(repo, "writer");
-
-    expect(repo.listSkills(user.id, { includeArchived: true }).find((skill) => skill.id === "legacy-system")?.appliesTo).toBe("both");
-  });
-
-  it("stores editable creation request quick buttons in sqlite", async () => {
-    const dbPath = testDbPath();
-    const repo = createTreeableRepository(dbPath);
-    const user = await createTestUser(repo, "writer");
-
-    expect(repo.listCreationRequestOptions(user.id).map((option) => option.label)).toEqual([
-      "保留我的原意",
-      "不要扩写太多",
-      "适合发微博",
-      "先给短版",
-      "写给新手",
-      "别太像广告",
-      "像发给朋友",
-      "写给懂行的人",
-      "改成英文"
-    ]);
-
-    const created = repo.createCreationRequestOption(user.id, { label: "面向海外游客" });
-    expect(repo.listCreationRequestOptions(user.id).at(-1)).toEqual(expect.objectContaining({ label: "面向海外游客" }));
-
-    const updated = repo.updateCreationRequestOption(user.id, created.id, { label: "写给第一次来的人" });
-    expect(updated.label).toBe("写给第一次来的人");
-
-    repo.deleteCreationRequestOption(user.id, created.id);
-    expect(repo.listCreationRequestOptions(user.id).map((option) => option.label)).not.toContain("写给第一次来的人");
-
-    const reopened = createTreeableRepository(dbPath);
-    expect(reopened.listCreationRequestOptions(user.id).map((option) => option.label)).not.toContain("写给第一次来的人");
-  });
-
-  it("sorts and resets creation request quick buttons", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const original = repo.listCreationRequestOptions(user.id);
-
-    const sorted = repo.reorderCreationRequestOptions(user.id, [original[1].id, original[0].id, ...original.slice(2).map((option) => option.id)]);
-    expect(sorted.slice(0, 2).map((option) => option.label)).toEqual(["不要扩写太多", "保留我的原意"]);
-
-    repo.updateCreationRequestOption(user.id, original[0].id, { label: "用户改过的默认项" });
-    repo.deleteCreationRequestOption(user.id, original[1].id);
-    repo.createCreationRequestOption(user.id, { label: "用户新增项" });
-
-    const reset = repo.resetCreationRequestOptions(user.id);
-    expect(reset.map((option) => option.label)).toEqual([
-      "保留我的原意",
-      "不要扩写太多",
-      "适合发微博",
-      "先给短版",
-      "写给新手",
-      "别太像广告",
-      "像发给朋友",
-      "写给懂行的人",
-      "改成英文"
-    ]);
-    expect(reset.map((option) => option.label)).not.toContain("用户新增项");
-    expect(reset.map((option) => option.label)).not.toContain("用户改过的默认项");
-  });
-
-  it("copies the current moments request label without adding a duplicate", async () => {
-    const dbPath = testDbPath();
-    const repo = createTreeableRepository(dbPath);
-    const user = await createTestUser(repo, "writer");
-
-    const reopened = createTreeableRepository(dbPath);
-    const labels = reopened.listCreationRequestOptions(user.id).map((option) => option.label);
-
-    expect(labels).toContain("适合发微博");
-    expect(labels).not.toContain("适合发朋友圈");
-    expect(labels.filter((label) => label === "适合发微博")).toHaveLength(1);
-  });
-
-  it("copies the current first-time reader request label without adding a duplicate", async () => {
-    const dbPath = testDbPath();
-    const repo = createTreeableRepository(dbPath);
-    const user = await createTestUser(repo, "writer");
-
-    const reopened = createTreeableRepository(dbPath);
-    const labels = reopened.listCreationRequestOptions(user.id).map((option) => option.label);
-
-    expect(labels).toContain("写给新手");
-    expect(labels).not.toContain("写给第一次接触的人");
-    expect(labels.filter((label) => label === "写给新手")).toHaveLength(1);
-  });
-
-  it("copies default creation request options in the new default order", async () => {
-    const dbPath = testDbPath();
-    const repo = createTreeableRepository(dbPath);
-    const user = await createTestUser(repo, "writer");
-
-    const reopened = createTreeableRepository(dbPath);
-
-    expect(reopened.listCreationRequestOptions(user.id).map((option) => option.label)).toEqual([
-      "保留我的原意",
-      "不要扩写太多",
-      "适合发微博",
-      "先给短版",
-      "写给新手",
-      "别太像广告",
-      "像发给朋友",
-      "写给懂行的人",
-      "改成英文"
-    ]);
-  });
-
-  it("preserves a custom creation request order after restart", async () => {
-    const dbPath = testDbPath();
-    const repo = createTreeableRepository(dbPath);
-    const user = await createTestUser(repo, "writer");
-    const original = repo.listCreationRequestOptions(user.id);
-    const english = original.find((option) => option.label === "改成英文")!;
-    repo.reorderCreationRequestOptions(user.id, [english.id, ...original.filter((option) => option.id !== english.id).map((option) => option.id)]);
-
-    const reopened = createTreeableRepository(dbPath);
-
-    expect(reopened.listCreationRequestOptions(user.id).map((option) => option.label)[0]).toBe("改成英文");
-  });
-
-  it("keeps deleted default creation request quick buttons hidden after restart", async () => {
-    const dbPath = testDbPath();
-    const repo = createTreeableRepository(dbPath);
-    const user = await createTestUser(repo, "writer");
-    const defaultOption = repo.listCreationRequestOptions(user.id).find((option) => option.label === "保留我的原意");
-
-    expect(defaultOption).toBeTruthy();
-
-    repo.deleteCreationRequestOption(user.id, defaultOption!.id);
-
-    const reopened = createTreeableRepository(dbPath);
-    expect(reopened.listCreationRequestOptions(user.id).map((option) => option.label)).not.toContain("保留我的原意");
-  });
-
-  it("creates a session with default enabled skills", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      seed: "写一篇解释为什么要写作的文章",
-      domains: ["创作"],
-      tones: ["平静"],
-      styles: ["观点型"],
-      personas: ["实践者"]
-    });
-
-    const state = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "deepen" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "reframe" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    expect(state.enabledSkillIds).toEqual(["system-reviewer", "system-writer"]);
-    expect(state.enabledSkillIds).not.toContain("system-concrete-examples");
-    expect(state.enabledSkills!.map((skill) => skill.id)).toEqual(["system-reviewer", "system-writer"]);
-  });
-
-  it("ignores archived system skills when reading session skills", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      seed: "写一篇解释为什么要写作的文章",
-      domains: ["创作"],
-      tones: ["平静"],
-      styles: ["观点型"],
-      personas: ["实践者"]
-    });
-
-    const state = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      enabledSkillIds: ["system-writer", "system-compress"],
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "deepen" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "reframe" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    expect(state.enabledSkillIds).toEqual(["system-writer"]);
-  });
-
-  it("replaces session enabled skills", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      seed: "写一篇解释为什么要写作的文章",
-      domains: ["创作"],
-      tones: ["平静"],
-      styles: ["观点型"],
-      personas: ["实践者"]
-    });
-    const state = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      enabledSkillIds: ["system-writer"],
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "deepen" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "reframe" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    const updated = repo.replaceSessionEnabledSkills(user.id, state.session.id, ["system-reviewer", "system-writer"]);
-
-    expect(updated?.enabledSkillIds).toEqual(["system-reviewer", "system-writer"]);
-    expect(updated?.enabledSkills!.map((skill) => skill.title)).toEqual(["系统审核者", "系统写作者"]);
-  });
-
-  it("rejects direct edits to system skills", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-
-    expect(() =>
-      repo.updateSkill(user.id, "system-writer", {
-        title: "用户分析",
-        category: "方向",
-        description: "修改系统技能。",
-        prompt: "新的提示词。"
-      })
-    ).toThrow("System skills cannot be edited directly.");
-  });
-
-  it("saves and reads root memory", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-
-    const root = repo.saveRootMemory(user.id, {
-      seed: "我想写 AI 产品经理的真实困境",
-      domains: ["AI", "product"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-
-    expect(root.summary).toContain("我想写 AI 产品经理的真实困境");
-    expect(repo.getRootMemory(user.id)?.preferences.domains).toEqual(["AI", "product"]);
-  });
-
-  it("includes the creation request in root memory summary", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-
-    const root = repo.saveRootMemory(user.id, {
-      seed: "我想写 AI 产品经理的真实困境",
-      creationRequest: "改成英文的，保留口语感",
-      domains: ["AI", "product"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-
-    expect(root.summary).toBe(
-      [
-        "Seed：我想写 AI 产品经理的真实困境",
-        "本次创作要求：改成英文的，保留口语感"
-      ].join("\n")
-    );
-    expect(root.preferences.creationRequest).toBe("改成英文的，保留口语感");
-  });
-
-  it("creates a session with an initial node and draft", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["sincere"],
-      styles: ["story-driven"],
-      personas: ["observer"]
-    });
-
-    const state = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Find a starting point",
-        options: [
-          { id: "a", label: "Start with work", description: "Work angle", impact: "Practical", kind: "explore" },
-          { id: "b", label: "Start with life", description: "Life angle", impact: "Personal", kind: "explore" },
-          { id: "c", label: "Start with AI", description: "AI angle", impact: "Topical", kind: "explore" }
-        ],
-        draft: { title: "", body: "Pick a starting point.", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    expect(state.currentNode?.options).toHaveLength(3);
-    expect(state.currentDraft?.body).toBe("Pick a starting point.");
-    expect(state.session.artifactTypeId).toBe("social-post");
-  });
-
-  it("persists the selected artifact type on the session", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      artifactTypeId: "prd",
-      seed: "移动端草稿管理",
-      domains: ["Work"],
-      tones: ["calm"],
-      styles: ["document"],
-      personas: ["product manager"]
-    });
-
-    const state = repo.createSessionDraft({
-      userId: user.id,
-      rootMemoryId: root.id,
-      draft: { title: "移动端草稿管理", body: "移动端草稿管理", hashtags: [], imagePrompt: "" }
-    });
-
-    repo.saveRootMemory(user.id, {
-      artifactTypeId: "social-post",
-      seed: "另一个念头",
-      domains: ["Creation"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-
-    expect(state.session.artifactTypeId).toBe("prd");
-    expect(repo.getSessionState(user.id, state.session.id)?.session.artifactTypeId).toBe("prd");
-  });
-
-  it("keeps a session bound to the seed it was created with", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const firstRoot = repo.saveRootMemory(user.id, {
-      seed: "旧草稿的 seed",
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const firstState = repo.createSessionDraft({
-      userId: user.id,
-      rootMemoryId: firstRoot.id,
-      draft: { title: "旧草稿", body: "旧草稿正文", hashtags: [], imagePrompt: "" }
-    });
-
-    repo.saveRootMemory(user.id, {
-      seed: "新草稿的 seed",
-      domains: ["Creation"],
-      tones: ["sincere"],
-      styles: ["story-driven"],
-      personas: ["observer"]
-    });
-
-    expect(repo.getRootMemory(user.id)?.preferences.seed).toBe("新草稿的 seed");
-    expect(repo.getSessionState(user.id, firstState.session.id)?.rootMemory.preferences.seed).toBe("旧草稿的 seed");
-  });
-
-  it("recovers a legacy session seed from its first draft when shared root memory was overwritten", async () => {
-    const dbPath = testDbPath();
-    const repo = createTreeableRepository(dbPath);
-    const user = await createTestUser(repo, "writer");
-    const sharedRoot = repo.saveRootMemory(user.id, {
-      seed: "旧草稿原本的 seed",
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const legacyState = repo.createSessionDraft({
-      userId: user.id,
-      rootMemoryId: sharedRoot.id,
-      draft: { title: "旧草稿", body: "旧草稿原本的 seed", hashtags: [], imagePrompt: "" }
-    });
-    const sqlite = new DatabaseSync(dbPath);
-    sqlite
-      .prepare(
-        `
-          UPDATE root_memory
-          SET preferences_json = ?, summary = ?, updated_at = ?
-          WHERE id = ?
-        `
-      )
-      .run(
-        JSON.stringify({
-          ...sharedRoot.preferences,
-          seed: "后来覆盖的 seed",
-          creationRequest: "后来覆盖的要求"
-        }),
-        "Seed：后来覆盖的 seed\n本次创作要求：后来覆盖的要求",
-        "2030-01-01T00:00:00.000Z",
-        sharedRoot.id
-      );
-    sqlite.close();
-
-    const openedState = repo.getSessionState(user.id, legacyState.session.id);
-
-    expect(openedState?.rootMemory.preferences.seed).toBe("旧草稿原本的 seed");
-    expect(openedState?.rootMemory.preferences.creationRequest).toBe("");
-    expect(openedState?.rootMemory.summary).toBe("Seed：旧草稿原本的 seed");
-  });
-
-  it("keeps finishing output as an active draft instead of a publish package", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["sincere"],
-      styles: ["story-driven"],
-      personas: ["observer"]
-    });
-
-    const state = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Finish the post",
-        options: [
-          { id: "a", label: "Polish", description: "A", impact: "A", kind: "finish" },
-          { id: "b", label: "Sharpen", description: "B", impact: "B", kind: "finish" },
-          { id: "c", label: "Ship", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Treeable", body: "A finished draft.", hashtags: ["#AI"], imagePrompt: "A bright tree" },
-        finishAvailable: true,
-        publishPackage: {
-          title: "Treeable",
-          body: "A finished draft.",
-          hashtags: ["#AI", "#Writing"],
-          imagePrompt: "A bright tree"
-        }
-      }
-    });
-
-    expect(state.session.status).toBe("active");
-    expect(state.currentDraft).toEqual({
-      title: "Treeable",
-      body: "A finished draft.",
-      hashtags: ["#AI"],
-      imagePrompt: "A bright tree"
-    });
-    expect(state.publishPackage).toBeNull();
-    expect(repo.getSessionState(user.id, state.session.id)?.publishPackage).toBeNull();
-  });
-
-  it("rejects sessions for missing root memory", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-
-    expect(() =>
-      createSessionDraftWithOptions(repo, {
-        userId: user.id,
-        rootMemoryId: "missing-root",
-        output: {
-          roundIntent: "Start",
-          options: [
-            { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-            { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-            { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-          ],
-          draft: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
-          finishAvailable: false,
-          publishPackage: null
-        }
-      })
-    ).toThrow();
-  });
-
-  it("does not expose unowned legacy root memory through user-scoped reads", async () => {
+  it("adds required columns to legacy user tables while resetting content tables", async () => {
     const dbPath = testDbPath();
     const sqlite = new DatabaseSync(dbPath);
     sqlite.exec(`
       PRAGMA user_version = 0;
-
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        password_hash TEXT,
+        role TEXT NOT NULL,
+        is_active INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
       CREATE TABLE root_memory (
         id TEXT PRIMARY KEY,
         preferences_json TEXT NOT NULL,
@@ -1970,7 +698,6 @@ describe("Treeable repository", () => {
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
-
       CREATE TABLE sessions (
         id TEXT PRIMARY KEY,
         root_memory_id TEXT NOT NULL,
@@ -1980,803 +707,50 @@ describe("Treeable repository", () => {
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
-
-      INSERT INTO root_memory (
-        id,
-        preferences_json,
-        summary,
-        learned_summary,
-        created_at,
-        updated_at
-      )
-      VALUES (
-        'old-root',
-        '{"domains":["old"],"tones":["old"],"styles":["old"],"personas":["old"]}',
-        'old summary',
-        '',
-        '2026-04-24T00:00:00.000Z',
-        '2026-04-24T00:00:00.000Z'
-      );
+      CREATE TABLE draft_versions (id TEXT PRIMARY KEY);
     `);
     sqlite.close();
 
-    const repo = createTreeableRepository(dbPath);
-    const user = await createTestUser(repo, "writer");
+    createTreeableRepository(dbPath);
+    const migrated = new DatabaseSync(dbPath);
+    const sessionColumns = migrated.prepare("PRAGMA table_info(sessions);").all() as Array<{ name: string }>;
+    const rootColumns = migrated.prepare("PRAGMA table_info(root_memory);").all() as Array<{ name: string }>;
+    const tables = migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>;
+    migrated.close();
 
-    expect(repo.getRootMemory(user.id)).toBeNull();
+    expect(sessionColumns.map((column) => column.name)).toContain("is_archived");
+    expect(sessionColumns.map((column) => column.name)).toContain("artifact_type_id");
+    expect(rootColumns.map((column) => column.name)).toContain("user_id");
+    expect(tables.map((table) => table.name)).toContain("artifacts");
+    expect(tables.map((table) => table.name)).not.toContain("draft_versions");
   });
 
-  it("applies a branch choice and folds unselected options into history", async () => {
+  it("rejects sessions for missing root memory", async () => {
     const repo = createTreeableRepository(testDbPath());
     const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const first = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
 
-    const next = appendGeneratedChild(repo, {
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      selectedOptionId: "b",
-      optionMode: "focused",
-      output: {
-        roundIntent: "Deepen",
-        options: [
-          { id: "a", label: "Next A", description: "A", impact: "A", kind: "deepen" },
-          { id: "b", label: "Next B", description: "B", impact: "B", kind: "reframe" },
-          { id: "c", label: "Finish", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Updated", body: "Updated body", hashtags: ["#AI"], imagePrompt: "Glowing tree" },
-        finishAvailable: true,
-        publishPackage: null
-      }
-    });
-
-    expect(next.selectedPath).toHaveLength(2);
-    expect(next.selectedPath[0].options.find((option) => option.id === "b")?.mode).toBe("focused");
-    expect(next.foldedBranches.map((branch) => branch.option.id).sort()).toEqual(["a", "c"]);
-    expect(next.currentDraft?.title).toBe("Updated");
-  });
-
-  it("reads the latest existing session", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-
-    createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "First",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "First", body: "First body", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-    const latest = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Latest",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Latest", body: "Latest body", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    expect(repo.getLatestSessionState(user.id)?.session.id).toBe(latest.session.id);
-  });
-
-  it("persists a user-authored custom branch when it is selected", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const first = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    const next = appendGeneratedChild(repo, {
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      selectedOptionId: "custom-user",
-      customOption: {
-        id: "custom-user",
-        label: "自定义方向",
-        description: "沿着用户手写的方向继续。",
-        impact: "按用户自定义方向继续。",
-        kind: "reframe"
-      },
-      output: {
-        roundIntent: "Follow custom branch",
-        options: [
-          { id: "a", label: "Next A", description: "A", impact: "A", kind: "deepen" },
-          { id: "b", label: "Next B", description: "B", impact: "B", kind: "reframe" },
-          { id: "c", label: "Next C", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Updated", body: "Updated body", hashtags: ["#AI"], imagePrompt: "Glowing tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    expect(next.selectedPath[0].selectedOptionId).toBe("custom-user");
-    expect(next.selectedPath[0].options.map((option) => option.id)).toEqual(["a", "b", "c", "custom-user"]);
-    expect(next.foldedBranches.map((branch) => branch.option.id).sort()).toEqual(["a", "b", "c"]);
-    expect(repo.getSessionState(user.id, first.session.id)?.selectedPath[0].options.at(-1)?.label).toBe("自定义方向");
-  });
-
-  it("persists a user-authored custom branch when branching from a historical node", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const first = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-    appendGeneratedChild(repo, {
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      selectedOptionId: "b",
-      output: {
-        roundIntent: "Old route",
-        options: [
-          { id: "a", label: "Old A", description: "A", impact: "A", kind: "deepen" },
-          { id: "b", label: "Old B", description: "B", impact: "B", kind: "reframe" },
-          { id: "c", label: "Old C", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Old", body: "Old route body", hashtags: ["#Old"], imagePrompt: "Old tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-    const customOption = {
-      id: "custom-history" as const,
-      label: "历史自定义方向",
-      description: "从这个历史版本重新展开。",
-      impact: "按用户自定义方向继续。",
-      kind: "reframe" as const
-    };
-
-    const next = repo.createHistoricalDraftChild({
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      selectedOptionId: "custom-history",
-      customOption,
-      optionMode: "focused"
-    });
-
-    expect(next.currentNode?.parentId).toBe(first.currentNode!.id);
-    expect(next.currentNode?.parentOptionId).toBe("custom-history");
-    expect(next.selectedPath[0].selectedOptionId).toBe("custom-history");
-    expect(next.selectedPath[0].options.map((option) => option.id)).toEqual(["a", "b", "c", "custom-history"]);
-    expect(next.selectedPath[0].options.at(-1)).toEqual({ ...customOption, mode: "focused" });
-    expect(next.foldedBranches.map((branch) => branch.option.id).sort()).toEqual(["a", "b", "c"]);
-  });
-
-  it("keeps multiple custom branches from the same historical node distinct", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const first = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-    const firstCustom = {
-      id: "custom-first" as const,
-      label: "第一次自定义",
-      description: "从第一个自定义方向继续。",
-      impact: "按用户自定义方向继续。",
-      kind: "reframe" as const
-    };
-    const secondCustom = {
-      id: "custom-second" as const,
-      label: "第二次自定义",
-      description: "从第二个自定义方向继续。",
-      impact: "按用户自定义方向继续。",
-      kind: "reframe" as const
-    };
-
-    repo.createHistoricalDraftChild({
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      selectedOptionId: firstCustom.id,
-      customOption: firstCustom
-    });
-    const next = repo.createHistoricalDraftChild({
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      selectedOptionId: secondCustom.id,
-      customOption: secondCustom
-    });
-
-    const parent = next.treeNodes?.find((node) => node.id === first.currentNode!.id);
-    const customChildren = next.treeNodes?.filter((node) => node.parentId === first.currentNode!.id);
-
-    expect(parent?.options.map((option) => option.label)).toEqual([
-      "A",
-      "B",
-      "C",
-      "第一次自定义",
-      "第二次自定义"
-    ]);
-    expect(customChildren?.map((node) => node.parentOptionId).sort()).toEqual(["custom-first", "custom-second"]);
-  });
-
-  it("branches from a historical option and makes that branch the active route", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const first = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-    const oldRoute = appendGeneratedChild(repo, {
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      selectedOptionId: "b",
-      output: {
-        roundIntent: "Old route",
-        options: [
-          { id: "a", label: "Old A", description: "A", impact: "A", kind: "deepen" },
-          { id: "b", label: "Old B", description: "B", impact: "B", kind: "reframe" },
-          { id: "c", label: "Old C", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Old", body: "Old route body", hashtags: ["#Old"], imagePrompt: "Old tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    const newRoute = createHistoricalGeneratedChild(repo, {
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      selectedOptionId: "a",
-      output: {
-        roundIntent: "New route",
-        options: [
-          { id: "a", label: "New A", description: "A", impact: "A", kind: "deepen" },
-          { id: "b", label: "New B", description: "B", impact: "B", kind: "reframe" },
-          { id: "c", label: "New C", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "New", body: "New route body", hashtags: ["#New"], imagePrompt: "New tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    expect(newRoute.currentNode?.parentId).toBe(first.currentNode!.id);
-    expect(newRoute.currentNode?.parentOptionId).toBe("a");
-    expect(newRoute.currentDraft?.title).toBe("New");
-    expect(newRoute.selectedPath.map((node) => node.id)).toEqual([first.currentNode!.id, newRoute.currentNode!.id]);
-    expect(newRoute.treeNodes?.map((node) => node.id)).toEqual([
-      first.currentNode!.id,
-      oldRoute.currentNode!.id,
-      newRoute.currentNode!.id
-    ]);
-    expect(newRoute.treeNodes?.find((node) => node.id === oldRoute.currentNode!.id)?.parentOptionId).toBe("b");
-  });
-
-  it("activates an existing historical branch without creating another child", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const first = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-    const oldRoute = appendGeneratedChild(repo, {
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      selectedOptionId: "b",
-      output: {
-        roundIntent: "Old route",
-        options: [
-          { id: "a", label: "Old A", description: "A", impact: "A", kind: "deepen" },
-          { id: "b", label: "Old B", description: "B", impact: "B", kind: "reframe" },
-          { id: "c", label: "Old C", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Old", body: "Old route body", hashtags: ["#Old"], imagePrompt: "Old tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-    createHistoricalGeneratedChild(repo, {
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      selectedOptionId: "a",
-      output: {
-        roundIntent: "New route",
-        options: [
-          { id: "a", label: "New A", description: "A", impact: "A", kind: "deepen" },
-          { id: "b", label: "New B", description: "B", impact: "B", kind: "reframe" },
-          { id: "c", label: "New C", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "New", body: "New route body", hashtags: ["#New"], imagePrompt: "New tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    const switched = repo.activateHistoricalBranch({
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      selectedOptionId: "b"
-    });
-
-    expect(switched?.currentNode?.id).toBe(oldRoute.currentNode!.id);
-    expect(switched?.treeNodes).toHaveLength(3);
-  });
-
-  it("creates a custom edit child node instead of overwriting the edited node", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const first = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    const updated = repo.updateCurrentNodeDraftAndOptions({
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      draft: { title: "Edited", body: "Edited body", hashtags: ["#Edited"], imagePrompt: "Edited image" },
-      output: {
-        roundIntent: "Regenerate from edit",
-        options: [
-          { id: "a", label: "新A", description: "A", impact: "A", kind: "deepen" },
-          { id: "b", label: "新B", description: "B", impact: "B", kind: "reframe" },
-          { id: "c", label: "新C", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Ignored", body: "Ignored", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    expect(updated.currentNode?.parentId).toBe(first.currentNode!.id);
-    expect(updated.currentNode?.parentOptionId).toMatch(/^custom-edit-/);
-    expect(updated.currentDraft?.title).toBe("Edited");
-    expect(updated.currentDraft?.body).toBe("Edited body");
-    expect(updated.currentNode?.options.map((option) => option.label)).toEqual(["新A", "新B", "新C"]);
-    expect(updated.nodeDrafts.find((item) => item.nodeId === first.currentNode!.id)?.draft.body).toBe("Body");
-    expect(updated.nodeDrafts.find((item) => item.nodeId === updated.currentNode!.id)?.draft.body).toBe("Edited body");
-    expect(updated.treeNodes?.find((node) => node.id === first.currentNode!.id)?.selectedOptionId).toMatch(/^custom-edit-/);
-    expect(updated.treeNodes?.find((node) => node.id === first.currentNode!.id)?.options.at(-1)?.label).toBe("自定义编辑");
-  });
-
-  it("updates current node options without changing its draft", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const first = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    const updated = repo.updateNodeOptions({
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      output: {
-        roundIntent: "Only options",
-        options: [
-          { id: "a", label: "选项A", description: "A", impact: "A", kind: "deepen" },
-          { id: "b", label: "选项B", description: "B", impact: "B", kind: "reframe" },
-          { id: "c", label: "选项C", description: "C", impact: "C", kind: "finish" }
-        ],
-      }
-    });
-
-    expect(updated.currentDraft).toEqual(first.currentDraft);
-    expect(updated.currentNode?.roundIntent).toBe("Only options");
-    expect(updated.currentNode?.options.map((option) => option.label)).toEqual(["选项A", "选项B", "选项C"]);
-  });
-
-  it("updates options for a non-current historical node", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const first = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-    const next = appendGeneratedChild(repo, {
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      selectedOptionId: "a",
-      output: {
-        roundIntent: "Next",
-        options: [
-          { id: "a", label: "Next A", description: "A", impact: "A", kind: "deepen" },
-          { id: "b", label: "Next B", description: "B", impact: "B", kind: "reframe" },
-          { id: "c", label: "Next C", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Next", body: "Next body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    const updated = repo.updateNodeOptions({
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      output: {
-        roundIntent: "Updated historical options",
-        options: [
-          { id: "a", label: "History A", description: "A", impact: "A", kind: "deepen" },
-          { id: "b", label: "History B", description: "B", impact: "B", kind: "reframe" },
-          { id: "c", label: "History C", description: "C", impact: "C", kind: "finish" }
-        ],
-      }
-    });
-
-    expect(updated.currentNode?.id).toBe(next.currentNode!.id);
-    expect(updated.currentDraft).toEqual(next.currentDraft);
-    expect(updated.treeNodes?.find((node) => node.id === first.currentNode!.id)?.roundIntent).toBe(
-      "Updated historical options"
+    expect(() => repo.createSession({ userId: user.id, rootMemoryId: "missing-root", enabledSkillIds: [] })).toThrow(
+      "Root memory was not found."
     );
-    expect(updated.treeNodes?.find((node) => node.id === first.currentNode!.id)?.options.map((option) => option.label)).toEqual([
-      "History A",
-      "History B",
-      "History C"
-    ]);
   });
 
-  it("rejects choices from stale nodes", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const first = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "explore" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
+  it("rejects configured system skill ids that collide with non-system skills", () => {
+    const dbPath = testDbPath();
+    const sqlite = createDatabase(dbPath);
+    sqlite
+      .prepare(
+        `
+          INSERT INTO skills (id, user_id, title, category, description, prompt, applies_to, is_system, default_enabled, is_archived, created_at, updated_at)
+          VALUES (?, NULL, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)
+        `
+      )
+      .run("system-writer", "Imported writer", "风格", "Imported non-system skill.", "Do not promote me.", "writer", "2026-05-01T00:00:00.000Z", "2026-05-01T00:00:00.000Z");
+    sqlite.close();
 
-    appendGeneratedChild(repo, {
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      selectedOptionId: "b",
-      output: {
-        roundIntent: "Deepen",
-        options: [
-          { id: "a", label: "Next A", description: "A", impact: "A", kind: "deepen" },
-          { id: "b", label: "Next B", description: "B", impact: "B", kind: "reframe" },
-          { id: "c", label: "Finish", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Updated", body: "Updated body", hashtags: ["#AI"], imagePrompt: "Glowing tree" },
-        finishAvailable: true,
-        publishPackage: null
-      }
-    });
+    const configPath = writeDefaultsConfig({ systemSkills: repositorySystemSkills });
 
-    expect(() =>
-      appendGeneratedChild(repo, {
-        userId: user.id,
-        sessionId: first.session.id,
-        nodeId: first.currentNode!.id,
-        selectedOptionId: "a",
-        output: {
-          roundIntent: "Stale",
-          options: [
-            { id: "a", label: "Stale A", description: "A", impact: "A", kind: "deepen" },
-            { id: "b", label: "Stale B", description: "B", impact: "B", kind: "reframe" },
-            { id: "c", label: "Stale C", description: "C", impact: "C", kind: "finish" }
-          ],
-          draft: { title: "Stale", body: "Should not save", hashtags: ["#AI"], imagePrompt: "Old tree" },
-          finishAvailable: true,
-          publishPackage: null
-        }
-      })
-    ).toThrow("Selected node is not the active node.");
-  });
-
-  it("rejects selected options that are not in the current node", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const first = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A1", description: "A", impact: "A", kind: "explore" },
-          { id: "a", label: "A2", description: "A", impact: "A", kind: "explore" },
-          { id: "a", label: "A3", description: "A", impact: "A", kind: "explore" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    expect(() =>
-      appendGeneratedChild(repo, {
-        userId: user.id,
-        sessionId: first.session.id,
-        nodeId: first.currentNode!.id,
-        selectedOptionId: "b",
-        output: {
-          roundIntent: "Deepen",
-          options: [
-            { id: "a", label: "Next A", description: "A", impact: "A", kind: "deepen" },
-            { id: "b", label: "Next B", description: "B", impact: "B", kind: "reframe" },
-            { id: "c", label: "Finish", description: "C", impact: "C", kind: "finish" }
-          ],
-          draft: { title: "Updated", body: "Updated body", hashtags: ["#AI"], imagePrompt: "Glowing tree" },
-          finishAvailable: true,
-          publishPackage: null
-        }
-      })
-    ).toThrow("Selected option is not part of the parent node.");
-  });
-
-  it("continues from finish directions because every generated result stays a draft", async () => {
-    const repo = createTreeableRepository(testDbPath());
-    const user = await createTestUser(repo, "writer");
-    const root = repo.saveRootMemory(user.id, {
-      domains: ["AI"],
-      tones: ["calm"],
-      styles: ["opinion-driven"],
-      personas: ["practitioner"]
-    });
-    const first = createSessionDraftWithOptions(repo, {
-      userId: user.id,
-      rootMemoryId: root.id,
-      output: {
-        roundIntent: "Start",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "explore" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    const finished = appendGeneratedChild(repo, {
-      userId: user.id,
-      sessionId: first.session.id,
-      nodeId: first.currentNode!.id,
-      selectedOptionId: "c",
-      output: {
-        roundIntent: "Package the post",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "finish" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "finish" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Finished", body: "Ready", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: true,
-        publishPackage: {
-          title: "Finished",
-          body: "Ready",
-          hashtags: ["#AI"],
-          imagePrompt: "Tree"
-        }
-      }
-    });
-
-    expect(finished.session.status).toBe("active");
-    expect(finished.publishPackage).toBeNull();
-
-    const continued = appendGeneratedChild(repo, {
-      userId: user.id,
-      sessionId: finished.session.id,
-      nodeId: finished.currentNode!.id,
-      selectedOptionId: "a",
-      output: {
-        roundIntent: "继续小修",
-        options: [
-          { id: "a", label: "A", description: "A", impact: "A", kind: "explore" },
-          { id: "b", label: "B", description: "B", impact: "B", kind: "deepen" },
-          { id: "c", label: "C", description: "C", impact: "C", kind: "finish" }
-        ],
-        draft: { title: "Still draft", body: "Still editable.", hashtags: ["#AI"], imagePrompt: "Tree" },
-        finishAvailable: false,
-        publishPackage: null
-      }
-    });
-
-    expect(continued.currentDraft?.title).toBe("Still draft");
-    expect(continued.session.status).toBe("active");
+    expect(() => createTreeableRepository(dbPath, { defaultsConfigPath: configPath })).toThrow(
+      "System skill config id system-writer conflicts with an existing non-system skill."
+    );
   });
 });

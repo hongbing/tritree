@@ -264,7 +264,11 @@ describe("streamDirectorArtifact", () => {
   it("uses the Mastra tree artifact stream", async () => {
     const output = {
       roundIntent: "扩写",
-      artifact: { type: "social-post", payload: { title: "新标题", body: "新正文", hashtags: ["#AI"], imagePrompt: "新图" } },
+      artifact: {
+        type: "social-post",
+        payload: { title: "新标题", body: "新正文", hashtags: ["#AI"], imagePrompt: "新图" },
+        sourceArtifactIds: []
+      },
     };
     mastraMocks.streamTreeArtifact.mockImplementation(async ({ onPartialObject }) => {
       onPartialObject({ roundIntent: "扩写", artifact: { type: "social-post", payload: { title: "新标题" } } });
@@ -300,7 +304,10 @@ describe("streamDirectorArtifact", () => {
     expect(onText).toHaveBeenCalledWith(
       expect.objectContaining({
         accumulatedText: JSON.stringify(output),
-        partialArtifact: output.artifact
+        partialArtifact: {
+          type: output.artifact.type,
+          payload: output.artifact.payload
+        }
       })
     );
   });

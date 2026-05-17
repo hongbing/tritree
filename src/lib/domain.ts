@@ -211,17 +211,20 @@ export const DirectorOptionsOutputSchema = z.object({
 
 const DirectorNextStepArtifactSchema = z.object({
   action: z.literal("artifact"),
-  roundIntent: z.string().min(1)
-});
+  roundIntent: z.string().min(1),
+  artifact: GeneratedArtifactSchema.nullable().optional()
+}).strict();
 
 const DirectorNextStepCompleteSchema = z.object({
   action: z.literal("complete"),
-  roundIntent: z.string().min(1)
-});
+  roundIntent: z.string().min(1),
+  artifact: z.null().optional()
+}).strict();
 
 const DirectorNextStepOptionsSchema = z.object({
   action: z.literal("options").default("options"),
   roundIntent: z.string().min(1),
+  artifact: z.null().optional(),
   options: z
     .array(
       z.object({
@@ -234,7 +237,7 @@ const DirectorNextStepOptionsSchema = z.object({
       })
     )
     .length(3, "AI suggestions must include exactly three items.")
-}).transform((output) => {
+}).strict().transform((output) => {
   const options = output.options.map((option, index) => ({
     id: option.id ?? PRIMARY_BRANCH_OPTION_IDS[index],
     label: option.label,
@@ -266,8 +269,8 @@ export const DirectorNextStepOutputSchema = z.union([
 
 export const DirectorArtifactOutputSchema = z.object({
   roundIntent: z.string().min(1),
-  artifact: GeneratedArtifactSchema
-});
+  artifact: GeneratedArtifactSchema.nullable().optional()
+}).strict();
 
 export const SessionStatusSchema = z.enum(["active", "finished"]);
 

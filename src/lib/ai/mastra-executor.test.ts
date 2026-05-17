@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Skill } from "@/lib/domain";
 import { createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-agents";
 import {
-  generateTreeDraft,
+  generateTreeArtifact,
   generateTreeNextStep,
   streamTreeArtifact,
   streamTreeNextStep,
@@ -184,32 +184,32 @@ describe("tree director compatibility generators", () => {
     ]
   };
 
-  it("passes writer and shared skills to the draft agent", async () => {
+  it("passes writer and shared skills to the artifact agent", async () => {
     const fakeAgent = {
       generate: vi.fn(async () => ({
         object: {
           roundIntent: "继续完善",
-          draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+          artifact: { type: "social-post", payload: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" } },
         }
       }))
     };
 
-    await generateTreeDraft({
+    await generateTreeArtifact({
       parts: directorParts,
-      treeDraftAgent: fakeAgent
+      treeArtifactAgent: fakeAgent
     });
 
     expect(fakeAgent.generate).toHaveBeenCalled();
     expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "[treeable:mastra-prompt:draft]",
+      "[treeable:mastra-prompt:artifact]",
       expect.stringContaining("自然短句")
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "[treeable:mastra-prompt:draft]",
+      "[treeable:mastra-prompt:artifact]",
       expect.stringContaining("标题不要夸张")
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "[treeable:mastra-prompt:draft]",
+      "[treeable:mastra-prompt:artifact]",
       expect.not.stringContaining("逻辑链审查")
     );
   });
@@ -250,7 +250,7 @@ describe("tree director compatibility generators", () => {
     );
   });
 
-  it("lets the director route a selected choice to either options or draft", async () => {
+  it("lets the director route a selected choice to either options or artifact", async () => {
     const fakeAgent = {
       generate: vi.fn(async () => ({
         object: {
@@ -412,7 +412,7 @@ describe("tree director compatibility generators", () => {
     const disconnect = vi.fn(async () => undefined);
     const finalObject = {
       roundIntent: "继续完善",
-      draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+      artifact: { type: "social-post", payload: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" }, sourceArtifactIds: [] },
     };
 
     mocks.createMcpRuntimeTools.mockResolvedValueOnce({
@@ -430,7 +430,7 @@ describe("tree director compatibility generators", () => {
       };
     });
 
-    await generateTreeDraft({
+    await generateTreeArtifact({
       parts: directorParts,
       env: { KIMI_API_KEY: "token" }
     });
@@ -458,7 +458,7 @@ describe("tree director compatibility generators", () => {
     });
 
     await expect(
-      generateTreeDraft({
+      generateTreeArtifact({
         parts: directorParts,
         env: { KIMI_API_KEY: "token" }
       })
@@ -475,7 +475,7 @@ describe("tree director compatibility generators", () => {
     });
     const finalObject = {
       roundIntent: "继续完善",
-      draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+      artifact: { type: "social-post", payload: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" }, sourceArtifactIds: [] },
     };
 
     mocks.createMcpRuntimeTools.mockResolvedValueOnce({
@@ -494,7 +494,7 @@ describe("tree director compatibility generators", () => {
     });
 
     await expect(
-      generateTreeDraft({
+      generateTreeArtifact({
         parts: directorParts,
         env: { KIMI_API_KEY: "token" }
       })
@@ -516,14 +516,14 @@ describe("tree director compatibility generators", () => {
       generate: vi.fn(async () => ({
         object: {
           roundIntent: "继续完善",
-          draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+          artifact: { type: "social-post", payload: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" } },
         }
       }))
     };
 
-    await generateTreeDraft({
+    await generateTreeArtifact({
       parts: directorParts,
-      treeDraftAgent: fakeAgent
+      treeArtifactAgent: fakeAgent
     });
 
     expect(mocks.createMcpRuntimeTools).not.toHaveBeenCalled();
@@ -554,26 +554,29 @@ describe("tree director compatibility generators", () => {
     expect(mocks.createMcpRuntimeTools).not.toHaveBeenCalled();
   });
 
-  it("generates old UI draft output through a Mastra-compatible structured agent", async () => {
+  it("generates artifact output through a Mastra-compatible structured agent", async () => {
     const fakeAgent = {
       generate: vi.fn(async () => ({
         object: {
           roundIntent: "继续完善",
-          draft: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" },
+          artifact: {
+            type: "social-post",
+            payload: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" }
+          },
         }
       }))
     };
 
     await expect(
-      generateTreeDraft({
+      generateTreeArtifact({
         parts: directorParts,
         signal: new AbortController().signal,
         memory: { resource: "root", thread: "session-1" },
-        treeDraftAgent: fakeAgent
+        treeArtifactAgent: fakeAgent
       })
     ).resolves.toMatchObject({
       roundIntent: "继续完善",
-      draft: { title: "写作为什么重要" }
+      artifact: { type: "social-post", payload: { title: "写作为什么重要" } }
     });
 
     expect(fakeAgent.generate).toHaveBeenCalledWith(
@@ -585,10 +588,32 @@ describe("tree director compatibility generators", () => {
     );
   });
 
-  it("compacts oversized historical agent messages before passing them to the draft agent", async () => {
+  it("rejects draft-shaped output from artifact generation", async () => {
+    const fakeAgent = {
+      generate: vi.fn(async () => ({
+        object: {
+          roundIntent: "继续完善",
+          draft: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" }
+        }
+      }))
+    };
+
+    await expect(
+      generateTreeArtifact({
+        parts: directorParts,
+        treeArtifactAgent: fakeAgent
+      })
+    ).rejects.toThrow();
+  });
+
+  it("compacts oversized historical agent messages before passing them to the artifact agent", async () => {
     const finalObject = {
       roundIntent: "继续完善",
-      draft: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" },
+      artifact: {
+        type: "social-post",
+        payload: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" },
+        sourceArtifactIds: []
+      },
     };
     const fakeAgent = {
       generate: vi.fn(async () => ({ object: finalObject }))
@@ -618,14 +643,14 @@ describe("tree director compatibility generators", () => {
     };
 
     await expect(
-      generateTreeDraft({
+      generateTreeArtifact({
         parts: partsWithLargeHistory,
         env: {
           TRITREE_CONTEXT_SAFETY_TOKENS: "128",
           TRITREE_MAX_OUTPUT_TOKENS: "128",
           TRITREE_MODEL_CONTEXT_TOKENS: "900"
         },
-        treeDraftAgent: fakeAgent
+        treeArtifactAgent: fakeAgent
       })
     ).resolves.toEqual(finalObject);
 
@@ -638,41 +663,48 @@ describe("tree director compatibility generators", () => {
     expect(serialized).not.toContain("RAW_TIMELINE_SHOULD_NOT_BE_REPLAYED");
   });
 
-  it("logs the full generated draft response once by default", async () => {
+  it("logs the full generated artifact response once by default", async () => {
     const finalObject = {
       roundIntent: "继续完善",
-      draft: {
-        title: "写作为什么重要",
-        body: "写作让我想清楚事情。\n\n这一段需要原样出现在日志里。",
-        hashtags: ["#写作"],
-        imagePrompt: "桌面上的笔记"
+      artifact: {
+        type: "social-post",
+        payload: {
+          title: "写作为什么重要",
+          body: "写作让我想清楚事情。\n\n这一段需要原样出现在日志里。",
+          hashtags: ["#写作"],
+          imagePrompt: "桌面上的笔记"
+        }
       },
     };
     const fakeAgent = {
       generate: vi.fn(async () => ({ object: finalObject }))
     };
 
-    await generateTreeDraft({
+    await generateTreeArtifact({
       parts: directorParts,
-      treeDraftAgent: fakeAgent
+      treeArtifactAgent: fakeAgent
     });
 
-    const responseLogs = consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-response:draft]");
+    const responseLogs = consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-response:artifact]");
     expect(responseLogs).toHaveLength(1);
     expect(responseLogs[0]?.[1]).toContain('"mode": "generate"');
     expect(responseLogs[0]?.[1]).toContain("这一段需要原样出现在日志里。");
   });
 
-  it("streams partial old UI draft objects before returning the final object", async () => {
+  it("streams partial artifact objects before returning the final object", async () => {
     const finalObject = {
       roundIntent: "继续完善",
-      draft: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" },
+      artifact: {
+        type: "social-post",
+        payload: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" },
+        sourceArtifactIds: []
+      },
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({
         objectStream: async function* () {
-          yield { roundIntent: "继续完善", draft: { title: "写作为什么重要" } };
-          yield { roundIntent: "继续完善", draft: { title: "写作为什么重要", body: "写作让我想清楚事情。" } };
+          yield { roundIntent: "继续完善", artifact: { type: "social-post", payload: { title: "写作为什么重要" } } };
+          yield { roundIntent: "继续完善", artifact: { type: "social-post", payload: { title: "写作为什么重要", body: "写作让我想清楚事情。" } } };
         },
         object: Promise.resolve(finalObject)
       })),
@@ -684,7 +716,7 @@ describe("tree director compatibility generators", () => {
       streamTreeArtifact({
         parts: directorParts,
         memory: { resource: "root", thread: "session-1" },
-        treeDraftAgent: fakeAgent,
+        treeArtifactAgent: fakeAgent,
         onPartialObject: (partial) => partials.push(partial)
       })
     ).resolves.toEqual(finalObject);
@@ -698,8 +730,8 @@ describe("tree director compatibility generators", () => {
     );
     expect(fakeAgent.generate).not.toHaveBeenCalled();
     expect(partials).toEqual([
-      { roundIntent: "继续完善", draft: { title: "写作为什么重要" } },
-      { roundIntent: "继续完善", draft: { title: "写作为什么重要", body: "写作让我想清楚事情。" } }
+      { roundIntent: "继续完善", artifact: { type: "social-post", payload: { title: "写作为什么重要" } } },
+      { roundIntent: "继续完善", artifact: { type: "social-post", payload: { title: "写作为什么重要", body: "写作让我想清楚事情。" } } }
     ]);
   });
 
@@ -1281,7 +1313,7 @@ describe("tree director compatibility generators", () => {
     expect(progressEvents.map((event) => event.accumulatedText).join("\n")).not.toContain("```json");
   });
 
-  it("retries runtime draft JSON text until the final submit tool is called", async () => {
+  it("retries runtime artifact JSON text until the final submit tool is called", async () => {
     const runSkillCommand = {
       id: "run_skill_command",
       description: "Run an installed skill command.",
@@ -1289,11 +1321,14 @@ describe("tree director compatibility generators", () => {
     };
     const finalObject = {
       roundIntent: "继续成稿",
-      draft: {
-        title: "青岛反攻略",
-        body: "第一段继续写完整。",
-        hashtags: ["#青岛"],
-        imagePrompt: "青岛老城街道"
+      artifact: {
+        type: "social-post",
+        payload: {
+          title: "青岛反攻略",
+          body: "第一段继续写完整。",
+          hashtags: ["#青岛"],
+          imagePrompt: "青岛老城街道"
+        }
       },
     };
     const stream = vi
@@ -1322,7 +1357,7 @@ describe("tree director compatibility generators", () => {
             type: "tool-call",
             payload: {
               toolCallId: "submit-1",
-              toolName: "submit_tree_draft",
+              toolName: "submit_tree_artifact",
               args: finalObject
             }
           };
@@ -1351,12 +1386,12 @@ describe("tree director compatibility generators", () => {
       })
     ).resolves.toMatchObject({
       roundIntent: finalObject.roundIntent,
-      draft: finalObject.draft
+      artifact: finalObject.artifact
     });
 
     expect(stream).toHaveBeenCalledTimes(2);
     const retryMessages = stream.mock.calls[1]?.[0] as Array<{ content: string; role: string }>;
-    expect(retryMessages.at(-1)?.content).toContain("必须调用 submit_tree_draft");
+    expect(retryMessages.at(-1)?.content).toContain("必须调用 submit_tree_artifact");
     expect(generate).not.toHaveBeenCalled();
     const visibleProgress = progressEvents.map((event) => event.accumulatedText).join("\n");
     expect(visibleProgress).not.toContain("roundIntent");
@@ -2130,11 +2165,11 @@ describe("tree director compatibility generators", () => {
 
     expect(stream).toHaveBeenCalledTimes(1);
     expect(
-      consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-response:draft:stream-parse-failed-details]")
+      consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-response:artifact:stream-parse-failed-details]")
     ).toEqual([]);
     expect(
       consoleInfoSpy.mock.calls.filter(
-        ([label, payload]) => label === "[tritree:ai-response:draft]" && String(payload).includes("stream-parse-failed")
+        ([label, payload]) => label === "[tritree:ai-response:artifact]" && String(payload).includes("stream-parse-failed")
       )
     ).toEqual([]);
   });
@@ -2405,7 +2440,7 @@ describe("tree director compatibility generators", () => {
     expect(partials).toContainEqual(finalObject);
   });
 
-  it("streams submit_tree_draft argument deltas as partial draft objects instead of progress text", async () => {
+  it("streams submit_tree_artifact argument deltas as partial artifact objects instead of progress text", async () => {
     const runSkillCommand = {
       id: "run_skill_command",
       description: "Run an installed skill command.",
@@ -2413,11 +2448,14 @@ describe("tree director compatibility generators", () => {
     };
     const finalObject = {
       roundIntent: "继续成稿",
-      draft: {
-        title: "青岛反攻略",
-        body: "第一段继续写完整。",
-        hashtags: ["#青岛"],
-        imagePrompt: "青岛老城街道"
+      artifact: {
+        type: "social-post",
+        payload: {
+          title: "青岛反攻略",
+          body: "第一段继续写完整。",
+          hashtags: ["#青岛"],
+          imagePrompt: "青岛老城街道"
+        }
       },
     };
     const stream = vi.fn(async () => ({
@@ -2426,30 +2464,30 @@ describe("tree director compatibility generators", () => {
           type: "tool-call-streaming-start",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft"
+            toolName: "submit_tree_artifact"
           }
         };
         yield {
           type: "tool-call-delta",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft",
-            argsTextDelta: '{"roundIntent":"继续成稿","draft":{"title":"青岛反攻略","body":"第一段'
+            toolName: "submit_tree_artifact",
+            argsTextDelta: '{"roundIntent":"继续成稿","artifact":{"type":"social-post","payload":{"title":"青岛反攻略","body":"第一段'
           }
         };
         yield {
           type: "tool-call-delta",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft",
-            argsTextDelta: '继续写完整。","hashtags":["#青岛"],"imagePrompt":"青岛老城街道"}'
+            toolName: "submit_tree_artifact",
+            argsTextDelta: '继续写完整。","hashtags":["#青岛"],"imagePrompt":"青岛老城街道"}}'
           }
         };
         yield {
           type: "tool-call",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft",
+            toolName: "submit_tree_artifact",
             args: finalObject
           }
         };
@@ -2479,23 +2517,23 @@ describe("tree director compatibility generators", () => {
       })
     ).resolves.toMatchObject({
       roundIntent: finalObject.roundIntent,
-      draft: finalObject.draft
+      artifact: finalObject.artifact
     });
 
     expect(progressEvents).toEqual([]);
     expect(mocks.agentConstructor).toHaveBeenCalledWith(
       expect.objectContaining({
-        instructions: expect.stringContaining("最终目标就是调用 submit_tree_draft 完成本轮写作任务")
+        instructions: expect.stringContaining("submit_tree_artifact")
       })
     );
     expect(partials[0]).toMatchObject({
       roundIntent: "继续成稿",
-      draft: { title: "青岛反攻略", body: "第一段" }
+      artifact: { type: "social-post", payload: { title: "青岛反攻略", body: "第一段" } }
     });
     expect(partials).toContainEqual(finalObject);
   });
 
-  it("does not expose incomplete escaped newlines from submit_tree_draft argument deltas", async () => {
+  it("does not expose incomplete escaped newlines from submit_tree_artifact argument deltas", async () => {
     const runSkillCommand = {
       id: "run_skill_command",
       description: "Run an installed skill command.",
@@ -2503,11 +2541,14 @@ describe("tree director compatibility generators", () => {
     };
     const finalObject = {
       roundIntent: "继续成稿",
-      draft: {
-        title: "青岛反攻略",
-        body: "第一段。\n\n第二段。",
-        hashtags: ["#青岛"],
-        imagePrompt: "青岛老城街道"
+      artifact: {
+        type: "social-post",
+        payload: {
+          title: "青岛反攻略",
+          body: "第一段。\n\n第二段。",
+          hashtags: ["#青岛"],
+          imagePrompt: "青岛老城街道"
+        }
       },
     };
     const stream = vi.fn(async () => ({
@@ -2516,30 +2557,30 @@ describe("tree director compatibility generators", () => {
           type: "tool-call-streaming-start",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft"
+            toolName: "submit_tree_artifact"
           }
         };
         yield {
           type: "tool-call-delta",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft",
-            argsTextDelta: '{"roundIntent":"继续成稿","draft":{"title":"青岛反攻略","body":"第一段。\\'
+            toolName: "submit_tree_artifact",
+            argsTextDelta: '{"roundIntent":"继续成稿","artifact":{"type":"social-post","payload":{"title":"青岛反攻略","body":"第一段。\\'
           }
         };
         yield {
           type: "tool-call-delta",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft",
-            argsTextDelta: 'n\\n第二段。","hashtags":["#青岛"],"imagePrompt":"青岛老城街道"}'
+            toolName: "submit_tree_artifact",
+            argsTextDelta: 'n\\n第二段。","hashtags":["#青岛"],"imagePrompt":"青岛老城街道"}}'
           }
         };
         yield {
           type: "tool-call",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft",
+            toolName: "submit_tree_artifact",
             args: finalObject
           }
         };
@@ -2567,15 +2608,15 @@ describe("tree director compatibility generators", () => {
       })
     ).resolves.toMatchObject({
       roundIntent: finalObject.roundIntent,
-      draft: finalObject.draft
+      artifact: finalObject.artifact
     });
 
     expect(partials[0]).toMatchObject({
       roundIntent: "继续成稿",
-      draft: { title: "青岛反攻略", body: "第一段。" }
+      artifact: { type: "social-post", payload: { title: "青岛反攻略", body: "第一段。" } }
     });
     expect(partials[0]).not.toMatchObject({
-      draft: { body: expect.stringContaining("\\") }
+      artifact: { payload: { body: expect.stringContaining("\\") } }
     });
     expect(partials).toContainEqual(finalObject);
   });
@@ -2661,10 +2702,10 @@ describe("tree director compatibility generators", () => {
     ]);
   });
 
-  it("uses JSON prompt injection for structured draft streams", async () => {
+  it("uses JSON prompt injection for structured artifact streams", async () => {
     const finalObject = {
       roundIntent: "继续完善",
-      draft: { title: "测试", body: "测试正文", hashtags: [], imagePrompt: "" },
+      artifact: { type: "social-post", payload: { title: "测试", body: "测试正文", hashtags: [], imagePrompt: "" }, sourceArtifactIds: [] },
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({ object: Promise.resolve(finalObject) })),
@@ -2674,7 +2715,7 @@ describe("tree director compatibility generators", () => {
     await expect(
       streamTreeArtifact({
         parts: directorParts,
-        treeDraftAgent: fakeAgent
+        treeArtifactAgent: fakeAgent
       })
     ).resolves.toEqual(finalObject);
 

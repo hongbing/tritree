@@ -293,7 +293,12 @@ function extractPartialJsonObject(text: string) {
   const payload: Record<string, unknown> = {};
   const payloadMatch = /"payload"\s*:\s*\{/.exec(artifactText);
   if (payloadMatch) {
-    const payloadText = artifactText.slice(payloadMatch.index + payloadMatch[0].length);
+    const payloadStart = payloadMatch.index + payloadMatch[0].length - 1;
+    const payloadEnd = findMatchingJsonObjectEnd(artifactText, payloadStart);
+    const payloadText =
+      payloadEnd === -1
+        ? artifactText.slice(payloadMatch.index + payloadMatch[0].length)
+        : artifactText.slice(payloadMatch.index + payloadMatch[0].length, payloadEnd);
     const fieldPattern = /"([^"]+)"\s*:\s*"/g;
     let fieldMatch = fieldPattern.exec(payloadText);
     while (fieldMatch) {

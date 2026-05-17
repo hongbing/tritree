@@ -159,10 +159,17 @@ describe("DirectorNextStepOutputSchema", () => {
   it("accepts a decision to generate an artifact without options", () => {
     const parsed = DirectorNextStepOutputSchema.parse({
       action: "artifact",
-      roundIntent: "信息足够，生成一版 PRD"
+      roundIntent: "信息足够，生成一版 PRD",
+      artifact: {
+        type: "prd",
+        payload: { title: "登录 PRD", markdown: "## 背景\n登录慢。" }
+      }
     });
 
     expect(parsed.action).toBe("artifact");
+    if (parsed.action === "artifact") {
+      expect(parsed.artifact?.type).toBe("prd");
+    }
     expect(parsed).not.toHaveProperty("options");
     expect(parsed).not.toHaveProperty("memoryObservation");
   });
@@ -170,10 +177,12 @@ describe("DirectorNextStepOutputSchema", () => {
   it("accepts a decision to complete the current path without more options or a draft", () => {
     const parsed = DirectorNextStepOutputSchema.parse({
       action: "complete",
-      roundIntent: "当前版本已经可以交付"
+      roundIntent: "当前版本已经可以交付",
+      artifact: null
     });
 
     expect(parsed.action).toBe("complete");
+    expect(parsed.artifact).toBeNull();
     expect(parsed).not.toHaveProperty("options");
     expect(parsed).not.toHaveProperty("memoryObservation");
   });
@@ -289,6 +298,21 @@ describe("DirectorOutputSchema", () => {
       payload: { title: "T", body: "B", hashtags: [], imagePrompt: "" },
       sourceArtifactIds: []
     });
+  });
+
+  it("accepts no-artifact output without draft fallback", () => {
+    const parsed = DirectorArtifactOutputSchema.parse({
+      roundIntent: "这一步只判断",
+      artifact: null
+    });
+
+    expect(parsed.artifact).toBeNull();
+    expect(
+      DirectorArtifactOutputSchema.safeParse({
+        roundIntent: "不要接受 draft 核心输出",
+        draft: { title: "T", body: "B", hashtags: [], imagePrompt: "" }
+      }).success
+    ).toBe(false);
   });
 
   it("rejects persisted artifact metadata in generated artifact output", () => {

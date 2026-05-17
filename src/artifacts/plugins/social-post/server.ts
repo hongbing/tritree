@@ -1,5 +1,34 @@
+import { z } from "zod";
 import type { ArtifactPluginServer } from "@/artifacts/types";
 import { SocialPostPayloadSchema, type SocialPostPayload } from "./schema";
+
+const RewriteSelectionInputSchema = z
+  .object({
+    field: z.literal("body"),
+    replacementText: z.string().max(6000).refine((value) => value.trim().length > 0),
+    selectedText: z.string().max(6000).refine((value) => value.trim().length > 0),
+    selectionEnd: z.number().int().nonnegative().optional(),
+    selectionStart: z.number().int().nonnegative().optional()
+  })
+  .strict()
+  .superRefine((input, context) => {
+    const hasStart = input.selectionStart !== undefined;
+    const hasEnd = input.selectionEnd !== undefined;
+    if (hasStart !== hasEnd) {
+      context.addIssue({
+        code: "custom",
+        message: "selectionStart and selectionEnd must be provided together."
+      });
+      return;
+    }
+
+    if (input.selectionStart !== undefined && input.selectionEnd !== undefined && input.selectionEnd < input.selectionStart) {
+      context.addIssue({
+        code: "custom",
+        message: "selectionEnd must be greater than or equal to selectionStart."
+      });
+    }
+  });
 
 export const socialPostPlugin: ArtifactPluginServer<SocialPostPayload> = {
   id: "social-post",
@@ -29,6 +58,19 @@ export const socialPostPlugin: ArtifactPluginServer<SocialPostPayload> = {
   normalizeAiOutput(output) {
     return SocialPostPayloadSchema.parse(output);
   },
+  async handleAction({ artifact, input }) {
+    const payload = SocialPostPayloadSchema.parse(artifact.payload);
+    const rewriteInput = RewriteSelectionInputSchema.parse(input);
+    const body = replaceSelectedText(payload.body, rewriteInput);
+
+    return {
+      payload: {
+        ...payload,
+        body
+      },
+      sourceArtifactIds: [artifact.id]
+    };
+  },
   summarizeForDirector(payload) {
     return [
       `标题：${payload.title || "未命名"}`,
@@ -41,3 +83,24 @@ export const socialPostPlugin: ArtifactPluginServer<SocialPostPayload> = {
     return payload.title.trim() || Array.from(payload.body.trim()).slice(0, 24).join("") || "社媒内容";
   }
 };
+
+function replaceSelectedText(
+  body: string,
+  input: z.infer<typeof RewriteSelectionInputSchema>
+) {
+  if (input.selectionStart !== undefined && input.selectionEnd !== undefined) {
+    const selectedText = body.slice(input.selectionStart, input.selectionEnd);
+    if (selectedText !== input.selectedText) {
+      throw new Error("Selected text no longer matches the artifact body.");
+    }
+
+    return `${body.slice(0, input.selectionStart)}${input.replacementText}${body.slice(input.selectionEnd)}`;
+  }
+
+  const selectionIndex = body.indexOf(input.selectedText);
+  if (selectionIndex === -1) {
+    throw new Error("Selected text was not found in the artifact body.");
+  }
+
+  return `${body.slice(0, selectionIndex)}${input.replacementText}${body.slice(selectionIndex + input.selectedText.length)}`;
+}

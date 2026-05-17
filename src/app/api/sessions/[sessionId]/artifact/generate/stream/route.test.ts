@@ -224,4 +224,54 @@ describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
     expect(text).not.toContain('"type":"artifact.replace"');
     expect(text).toContain('"type":"done"');
   });
+
+  it("does not persist a second artifact when one appears after director generation starts", async () => {
+    const generatedArtifact = {
+      type: "social-post",
+      payload: { title: "并发新稿", body: "并发新正文", hashtags: [], imagePrompt: "" },
+      sourceArtifactIds: ["artifact-1"]
+    };
+    const existingArtifact = {
+      id: "artifact-existing",
+      version: 1,
+      createdByNodeId: "node-2",
+      createdAt: "2026-04-27T00:00:02.000Z",
+      updatedAt: "2026-04-27T00:00:02.000Z",
+      type: "social-post",
+      payload: { title: "已保存", body: "另一个请求已经保存。", hashtags: [], imagePrompt: "" },
+      sourceArtifactIds: ["artifact-1"]
+    };
+    const latestState = {
+      ...state,
+      currentArtifact: existingArtifact,
+      artifacts: [...state.artifacts, existingArtifact],
+      nodeArtifacts: [...state.nodeArtifacts, { nodeId: "node-2", artifact: existingArtifact }],
+      currentNode: { ...childNode, kind: "artifact", producedArtifactId: "artifact-existing" }
+    };
+    const getSessionState = vi.fn().mockReturnValueOnce(state).mockReturnValueOnce(latestState);
+    const updateNodeArtifact = vi.fn().mockReturnValue(latestState);
+    getRepositoryMock.mockReturnValue({
+      getSessionState,
+      updateNodeArtifact
+    });
+    streamDirectorArtifactMock.mockResolvedValue({
+      roundIntent: "扩写",
+      artifact: generatedArtifact
+    });
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/artifact/generate/stream", {
+        method: "POST",
+        body: JSON.stringify({ nodeId: "node-2" })
+      }),
+      { params: Promise.resolve({ sessionId: "session-1" }) }
+    );
+    const text = await response.text();
+
+    expect(getSessionState).toHaveBeenCalledTimes(2);
+    expect(updateNodeArtifact).not.toHaveBeenCalled();
+    expect(text).not.toContain('"type":"artifact.replace"');
+    expect(text).toContain('"type":"done"');
+    expect(text).toContain('"id":"artifact-existing"');
+  });
 });

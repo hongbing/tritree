@@ -8,7 +8,7 @@ export const prdPlugin: ArtifactPluginServer<PrdPayload> = {
   payloadSchema: PrdPayloadSchema,
   aiOutputSchema: PrdPayloadSchema,
   capabilities: {
-    actions: ["export-markdown"],
+    actions: [],
     deliver: true,
     diff: true,
     edit: true,

@@ -1,8 +1,6 @@
-import { z } from "zod";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
-const getArtifactPluginMock = vi.hoisted(() => vi.fn());
 const getRepositoryMock = vi.hoisted(() => vi.fn());
 const requireCurrentUserMock = vi.hoisted(() => vi.fn());
 
@@ -18,9 +16,9 @@ const currentUser = {
 
 const artifact = {
   id: "artifact-1",
-  type: "test-artifact",
+  type: "social-post",
   version: 1,
-  payload: { title: "Original", body: "Original body" },
+  payload: { title: "Original", body: "Original body", hashtags: [], imagePrompt: "" },
   sourceArtifactIds: [],
   createdByNodeId: "node-1",
   createdAt: "2026-04-27T00:00:00.000Z",
@@ -42,6 +40,23 @@ const node = {
   foldedOptions: [],
   agentMessages: [],
   createdAt: "2026-04-27T00:00:00.000Z"
+};
+
+const otherNode = {
+  id: "node-2",
+  sessionId: "session-1",
+  parentId: "node-1",
+  parentOptionId: "custom-rewrite-selection",
+  kind: "decision",
+  producedArtifactId: null,
+  sourceArtifactIds: [],
+  roundIndex: 2,
+  roundIntent: "Other",
+  options: [],
+  selectedOptionId: null,
+  foldedOptions: [],
+  agentMessages: [],
+  createdAt: "2026-04-27T00:00:01.000Z"
 };
 
 const state = {
@@ -75,17 +90,13 @@ const state = {
   artifacts: [artifact],
   nodeArtifacts: [{ nodeId: "node-1", artifact }],
   selectedPath: [node],
-  treeNodes: [node],
+  treeNodes: [node, otherNode],
   enabledSkillIds: [],
   enabledSkills: [],
   foldedBranches: []
 };
 
 vi.mock("server-only", () => ({}));
-
-vi.mock("@/artifacts/registry", () => ({
-  getArtifactPlugin: getArtifactPluginMock
-}));
 
 vi.mock("@/lib/auth/current-user", async () => {
   const actual = await vi.importActual<typeof import("@/lib/auth/current-user")>("@/lib/auth/current-user");
@@ -100,26 +111,14 @@ vi.mock("@/lib/db/repository", () => ({
 }));
 
 beforeEach(() => {
-  getArtifactPluginMock.mockReset();
   getRepositoryMock.mockReset();
   requireCurrentUserMock.mockReset();
   requireCurrentUserMock.mockResolvedValue(currentUser);
 });
 
 describe("POST /api/sessions/:sessionId/artifact/actions/:actionId", () => {
-  it("dispatches a supported plugin action", async () => {
-    const actionResult = {
-      payload: { title: "Rewritten", body: "Rewritten body" }
-    };
-    const handleAction = vi.fn().mockResolvedValue(actionResult);
-    getArtifactPluginMock.mockReturnValue({
-      id: "test-artifact",
-      label: "Test artifact",
-      payloadSchema: z.object({ title: z.string(), body: z.string() }),
-      capabilities: { actions: ["rewrite-selection"] },
-      handleAction,
-      summarizeForTree: vi.fn().mockReturnValue("Rewritten")
-    });
+  it("dispatches a supported action through the bundled artifact plugin", async () => {
+    const expectedPayload = { title: "Original", body: "Rewritten body", hashtags: [], imagePrompt: "" };
     const nextState = {
       ...state,
       session: { ...state.session, currentNodeId: "node-2" }
@@ -136,28 +135,23 @@ describe("POST /api/sessions/:sessionId/artifact/actions/:actionId", () => {
         body: JSON.stringify({
           nodeId: "node-1",
           artifactId: "artifact-1",
-          input: { selectedText: "Original", instruction: "Make it clearer" }
+          input: { field: "body", selectedText: "Original body", replacementText: "Rewritten body" }
         })
       }),
       { params: Promise.resolve({ sessionId: "session-1", actionId: "rewrite-selection" }) }
     );
 
     expect(response.status).toBe(200);
-    expect(handleAction).toHaveBeenCalledWith({
-      artifact,
-      input: { selectedText: "Original", instruction: "Make it clearer" },
-      sessionState: state
-    });
     expect(createArtifactChild).toHaveBeenCalledWith({
       userId: "user-1",
       sessionId: "session-1",
       nodeId: "node-1",
       selectedOptionId: "custom-rewrite-selection",
       customOption: expect.objectContaining({ id: "custom-rewrite-selection" }),
-      roundIntent: "Rewritten",
+      roundIntent: "Original",
       artifact: {
-        type: "test-artifact",
-        payload: actionResult.payload,
+        type: "social-post",
+        payload: expectedPayload,
         sourceArtifactIds: ["artifact-1"]
       }
     });
@@ -166,13 +160,6 @@ describe("POST /api/sessions/:sessionId/artifact/actions/:actionId", () => {
 
   it("rejects unsupported plugin actions", async () => {
     const createArtifactChild = vi.fn();
-    getArtifactPluginMock.mockReturnValue({
-      id: "test-artifact",
-      label: "Test artifact",
-      payloadSchema: z.object({ title: z.string(), body: z.string() }),
-      capabilities: { actions: ["supported-action"] },
-      handleAction: vi.fn()
-    });
     getRepositoryMock.mockReturnValue({
       getSessionState: vi.fn().mockReturnValue(state),
       createArtifactChild
@@ -192,6 +179,30 @@ describe("POST /api/sessions/:sessionId/artifact/actions/:actionId", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "这个作品操作暂不支持。" });
+    expect(createArtifactChild).not.toHaveBeenCalled();
+  });
+
+  it("rejects applying an artifact action through an unrelated node", async () => {
+    const createArtifactChild = vi.fn();
+    getRepositoryMock.mockReturnValue({
+      getSessionState: vi.fn().mockReturnValue(state),
+      createArtifactChild
+    });
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/artifact/actions/rewrite-selection", {
+        method: "POST",
+        body: JSON.stringify({
+          nodeId: "node-2",
+          artifactId: "artifact-1",
+          input: { field: "body", selectedText: "Original body", replacementText: "Rewritten body" }
+        })
+      }),
+      { params: Promise.resolve({ sessionId: "session-1", actionId: "rewrite-selection" }) }
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "这个作品不属于当前节点。" });
     expect(createArtifactChild).not.toHaveBeenCalled();
   });
 });

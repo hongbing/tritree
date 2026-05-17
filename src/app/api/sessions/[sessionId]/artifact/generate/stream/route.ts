@@ -160,6 +160,16 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
               });
 
         const agentMessages = agentMessagesArgument(nextStep.agentMessages, output.agentMessages);
+        const latestState = repository.getSessionState(user.id, sessionId);
+        if (!latestState) {
+          throw new Error("Session disappeared before generated artifact could be saved.");
+        }
+
+        if (artifactForNode(latestState, targetNode.id)) {
+          send({ type: "done", state: latestState });
+          return;
+        }
+
         if (!output.artifact) {
           const nextState = repository.completeNode({
             userId: user.id,

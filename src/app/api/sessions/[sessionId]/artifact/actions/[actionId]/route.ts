@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getArtifactPlugin } from "@/artifacts/registry";
 import { badRequestResponse, isBadRequestError, publicServerErrorMessage } from "@/lib/api/errors";
+import { focusSessionStateForNode } from "@/lib/app-state";
 import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
 import { getRepository } from "@/lib/db/repository";
 import type { BranchOption } from "@/lib/domain";
@@ -46,6 +47,15 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
     return NextResponse.json({ error: "没有找到要操作的作品。" }, { status: 404 });
   }
 
+  const focusedState = focusSessionStateForNode(sessionState, body.nodeId);
+  if (!focusedState?.currentNode) {
+    return NextResponse.json({ error: "没有找到要操作的节点。" }, { status: 404 });
+  }
+
+  if (focusedState.currentArtifact?.id !== artifact.id || artifact.createdByNodeId !== body.nodeId) {
+    return NextResponse.json({ error: "这个作品不属于当前节点。" }, { status: 409 });
+  }
+
   const plugin = getArtifactPlugin(artifact.type);
   if (!plugin || !plugin.capabilities.actions.includes(actionId) || !plugin.handleAction) {
     return NextResponse.json({ error: "这个作品操作暂不支持。" }, { status: 400 });
@@ -55,7 +65,7 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
     const result = await plugin.handleAction({
       artifact,
       input: body.input,
-      sessionState
+      sessionState: focusedState
     });
     const payload = plugin.payloadSchema.parse(result.payload);
     const selectedOptionId = actionOptionId(actionId);

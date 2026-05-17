@@ -208,6 +208,7 @@ describe("ArtifactWorkspace", () => {
     renderWorkspace({
       artifacts: [social],
       currentNode: analysisNode(),
+      generationStage: "artifact",
       isBusy: true,
       isGenerating: true,
       selectedArtifactId: social.id,
@@ -218,6 +219,54 @@ describe("ArtifactWorkspace", () => {
     expect(screen.getByRole("status")).toHaveTextContent("本步未生成产物");
     expect(screen.getByText("正在分析当前版本")).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "产物" })).toHaveClass("module--generating");
+  });
+
+  it("starts and renders artifact comparison through generic previews", async () => {
+    const user = userEvent.setup();
+    const social = socialPostArtifact();
+    const prd = prdArtifact();
+    const onStartComparison = vi.fn();
+    const onCancelComparison = vi.fn();
+    const { rerender } = renderWorkspace({
+      artifacts: [social, prd],
+      canCompareArtifacts: true,
+      currentNode: artifactNode(prd.id),
+      onStartComparison,
+      selectedArtifactId: prd.id
+    });
+
+    await user.click(screen.getByRole("button", { name: "对比" }));
+
+    expect(onStartComparison).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <ArtifactWorkspace
+        artifacts={[social, prd]}
+        canCompareArtifacts={true}
+        comparisonArtifacts={{ from: social, to: prd }}
+        comparisonLabels={{ from: "第 1 轮", to: "第 2 轮" }}
+        comparisonSelectionCount={2}
+        currentNode={artifactNode(prd.id)}
+        isBusy={false}
+        isComparisonMode={true}
+        isGenerating={false}
+        onAction={vi.fn()}
+        onCancelComparison={onCancelComparison}
+        onSave={vi.fn()}
+        onSelectArtifact={vi.fn()}
+        onStartComparison={onStartComparison}
+        selectedArtifactId={prd.id}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "退出对比" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("status")).toHaveTextContent("第 1 轮 -> 第 2 轮");
+    expect(screen.getByTestId("social-post-renderer")).toHaveTextContent("A short social post body.");
+    expect(screen.getByTestId("prd-renderer")).toHaveTextContent("Workspace PRD");
+
+    await user.click(screen.getByRole("button", { name: "退出对比" }));
+
+    expect(onCancelComparison).toHaveBeenCalledTimes(1);
   });
 
   it("shows raw payload fallback when plugin unavailable", () => {

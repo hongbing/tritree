@@ -1,12 +1,9 @@
-import { prdPlugin } from "./server";
 import { PrdRenderer } from "./PrdRenderer";
+import { prdManifest } from "./manifest";
 
 export const prdClientPlugin = {
   manifest: {
-    capabilities: prdPlugin.capabilities,
-    description: prdPlugin.description,
-    id: prdPlugin.id,
-    label: prdPlugin.label,
+    ...prdManifest,
     rendererKey: "prd/default"
   },
   renderers: {

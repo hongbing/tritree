@@ -27,14 +27,12 @@ describe("defaultDbPath", () => {
 });
 
 describe("database schema", () => {
-  it("creates artifact storage and removes draft storage from the active schema", () => {
+  it("creates artifact storage in the active schema", () => {
     const db = createDatabase(":memory:");
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>;
     const names = tables.map((table) => table.name);
 
     expect(names).toContain("artifacts");
-    expect(names).not.toContain("draft_versions");
-    expect(names).not.toContain("publish_packages");
 
     const artifactColumns = db.prepare("PRAGMA table_info(artifacts)").all() as Array<{ name: string }>;
     expect(artifactColumns.map((column) => column.name)).toEqual([

@@ -42,7 +42,7 @@ const enabledSkills: Skill[] = [
     id: "writer-skill",
     title: "自然短句",
     category: "风格",
-    description: "草稿更自然。",
+    description: "作品更自然。",
     prompt: "句子短一点。",
     appliesTo: "writer",
     isSystem: false,
@@ -259,7 +259,7 @@ describe("tree director compatibility generators", () => {
           options: [
             { id: "a", label: "补系统范围", description: "先确认哪些模块要改。", impact: "避免 PRD 编造范围。", kind: "deepen" },
             { id: "b", label: "补目标风格", description: "先确认要改成什么风格。", impact: "让需求更明确。", kind: "reframe" },
-            { id: "c", label: "补验收标准", description: "先确认怎么算改好。", impact: "让后续草稿可执行。", kind: "finish" }
+            { id: "c", label: "补验收标准", description: "先确认怎么算改好。", impact: "让后续作品可执行。", kind: "finish" }
           ],
         }
       }))
@@ -536,7 +536,7 @@ describe("tree director compatibility generators", () => {
       options: [
         { id: "a", label: "补系统范围", description: "先确认哪些模块要改。", impact: "避免 PRD 编造范围。", kind: "deepen" },
         { id: "b", label: "补目标风格", description: "先确认要改成什么风格。", impact: "让需求更明确。", kind: "reframe" },
-        { id: "c", label: "补验收标准", description: "先确认怎么算改好。", impact: "让后续草稿可执行。", kind: "finish" }
+        { id: "c", label: "补验收标准", description: "先确认怎么算改好。", impact: "让后续作品可执行。", kind: "finish" }
       ],
     };
     const fakeAgent = {
@@ -588,12 +588,12 @@ describe("tree director compatibility generators", () => {
     );
   });
 
-  it("rejects draft-shaped output from artifact generation", async () => {
+  it("rejects work-shaped output from artifact generation", async () => {
     const fakeAgent = {
       generate: vi.fn(async () => ({
         object: {
           roundIntent: "继续完善",
-          draft: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" }
+          work: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" }
         }
       }))
     };
@@ -638,7 +638,7 @@ describe("tree director compatibility generators", () => {
             }
           ]
         },
-        { role: "user", content: "最终请求：请生成下一版草稿。" }
+        { role: "user", content: "最终请求：请生成下一版作品。" }
       ]
     };
 

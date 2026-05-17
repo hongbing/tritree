@@ -4,23 +4,14 @@ import {
   replaceSocialPostSelection,
   SocialPostRewriteSelectionInputSchema
 } from "./actions";
+import { socialPostManifest } from "./manifest";
 import { SocialPostPayloadSchema, type SocialPostPayload } from "./schema";
 import { rewriteSelectedSocialPostText } from "./selection-rewrite";
 
 export const socialPostPlugin: ArtifactPluginServer<SocialPostPayload> = {
-  id: "social-post",
-  label: "社媒内容",
-  description: "微博、小红书、朋友圈等社交媒体内容。",
+  ...socialPostManifest,
   payloadSchema: SocialPostPayloadSchema,
   aiOutputSchema: SocialPostPayloadSchema,
-  capabilities: {
-    actions: ["rewrite-selection"],
-    deliver: true,
-    diff: true,
-    edit: true,
-    generate: true,
-    streamFields: ["title", "body", "hashtags", "imagePrompt"]
-  },
   createSeedPayload(input) {
     const body = input.seed.trim();
     return body ? { title: "种子念头", body, hashtags: [], imagePrompt: "" } : null;

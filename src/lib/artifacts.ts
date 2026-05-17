@@ -1,10 +1,6 @@
-import {
-  ArtifactTypeIdSchema,
-  DEFAULT_ARTIFACT_TYPE_ID,
-  type ArtifactTypeId,
-  type Draft
-} from "@/lib/domain";
-import { resolveDraftTitle } from "@/lib/seed-draft";
+import { ArtifactTypeIdSchema, DEFAULT_ARTIFACT_TYPE_ID, type ArtifactTypeId } from "@/lib/domain";
+import { PrdPayloadSchema, type PrdPayload } from "@/artifacts/plugins/prd/schema";
+import { SocialPostPayloadSchema, type SocialPostPayload } from "@/artifacts/plugins/social-post/schema";
 
 export { DEFAULT_ARTIFACT_TYPE_ID };
 
@@ -34,7 +30,7 @@ export type ArtifactType = {
   actionLabel: string;
   bodyLabel: string;
   description: string;
-  draftInstructions: string;
+  generationInstructions: string;
   historyPanelTitle: string;
   id: ArtifactTypeId;
   label: string;
@@ -53,9 +49,9 @@ const ARTIFACT_TYPES = [
   {
     id: "social-post",
     label: "社媒内容",
-    description: "微博、小红书、朋友圈等社交媒体草稿。",
-    currentPanelTitle: "实时草稿",
-    historyPanelTitle: "历史草稿",
+    description: "微博、小红书、朋友圈等社交媒体内容。",
+    currentPanelTitle: "实时作品",
+    historyPanelTitle: "历史作品",
     titleLabel: "标题",
     bodyLabel: "正文",
     actionLabel: "发布",
@@ -66,7 +62,7 @@ const ARTIFACT_TYPES = [
     showTopics: true,
     showImagePrompt: true,
     showPublishAssistant: true,
-    draftInstructions:
+    generationInstructions:
       "作品类型：社媒内容。输出 artifact.type=\"social-post\"。artifact.payload.title 是可选标题，artifact.payload.body 是正文，artifact.payload.hashtags 是话题数组，artifact.payload.imagePrompt 是可选配图提示。",
     optionInstructions:
       "澄清问题和三个答案应该围绕社交媒体表达决策，例如读者、角度、故事、观点、结构、压缩、标题、话题或发布前收口。"
@@ -87,7 +83,7 @@ const ARTIFACT_TYPES = [
     showTopics: false,
     showImagePrompt: false,
     showPublishAssistant: false,
-    draftInstructions: [
+    generationInstructions: [
       "作品类型：PRD 文档。",
       "输出 artifact.type=\"prd\"。",
       "artifact.payload.title 必须是清楚的 PRD 文档标题。",
@@ -154,42 +150,44 @@ export function getArtifactType(typeId: string | null | undefined): ArtifactType
 
 export function formatArtifactInstructionsForDirector(typeId: string | null | undefined) {
   const artifactType = getArtifactType(typeId);
-  return [artifactType.draftInstructions, artifactType.optionInstructions].join("\n");
+  return [artifactType.generationInstructions, artifactType.optionInstructions].join("\n");
 }
 
-export function buildArtifactDelivery(typeId: string | null | undefined, draft: Draft): ArtifactDelivery {
+export function buildArtifactDelivery(typeId: string | null | undefined, payload: unknown): ArtifactDelivery {
   const artifactType = getArtifactType(typeId);
   if (artifactType.id === "prd") {
+    const prd = PrdPayloadSchema.parse(payload);
     return {
       title: "PRD 交付稿",
       textLabel: "PRD Markdown",
       copyLabel: "复制 PRD Markdown",
-      text: formatPrdMarkdown(draft),
-      checks: buildPrdChecks(draft)
+      text: formatPrdMarkdown(prd),
+      checks: buildPrdChecks(prd)
     };
   }
 
+  const socialPost = SocialPostPayloadSchema.parse(payload);
   return {
     title: artifactType.actionDialogTitle,
     textLabel: "正文",
     copyLabel: "复制正文",
-    text: draft.body,
-    checks: [{ text: draft.body.trim() ? "正文已生成" : "缺少正文", tone: draft.body.trim() ? "ok" : "warn" }]
+    text: socialPost.body,
+    checks: [{ text: socialPost.body.trim() ? "正文已生成" : "缺少正文", tone: socialPost.body.trim() ? "ok" : "warn" }]
   };
 }
 
-function formatPrdMarkdown(draft: Draft) {
-  const title = resolveDraftTitle(draft.title, draft.body).trim();
-  const body = draft.body.trim();
+function formatPrdMarkdown(payload: PrdPayload) {
+  const title = resolveWorkTitle(payload.title, payload.markdown).trim();
+  const body = payload.markdown.trim();
   if (!title) return body;
   if (!body) return `# ${title}`;
   return [`# ${title}`, body].join("\n\n");
 }
 
-function buildPrdChecks(draft: Draft): ArtifactCheck[] {
-  const body = draft.body.trim();
+function buildPrdChecks(payload: PrdPayload): ArtifactCheck[] {
+  const body = payload.markdown.trim();
   const checks: ArtifactCheck[] = [
-    { text: draft.title.trim() ? "文档标题已生成" : "缺少文档标题", tone: draft.title.trim() ? "ok" : "warn" },
+    { text: payload.title.trim() ? "文档标题已生成" : "缺少文档标题", tone: payload.title.trim() ? "ok" : "warn" },
     { text: body ? `正文约 ${Array.from(body).length} 字` : "缺少正文", tone: body ? "neutral" : "warn" }
   ];
 
@@ -210,4 +208,13 @@ function hasMarkdownSection(body: string, section: string) {
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function resolveWorkTitle(title: string | undefined, body: string | undefined) {
+  const trimmedTitle = title?.trim();
+  if (trimmedTitle && trimmedTitle !== "种子念头") return trimmedTitle;
+  const normalized = (body ?? "").replace(/\s+/g, " ").trim();
+  const [firstSegment = normalized] = normalized.split(/[。！？!?，,；;：:\n]/);
+  const fallback = firstSegment.trim() || normalized;
+  return Array.from(fallback).slice(0, 24).join("") || "未命名内容";
 }

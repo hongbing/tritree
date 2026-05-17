@@ -56,7 +56,7 @@ export function StyleProfileSetup({
   const selectedPersonalStyle = personalStyleSkills.find((skill) => selectedSkillIds.includes(skill.id)) ?? null;
   const collapsedPersonalStyle = selectedPersonalStyle ?? personalStyleSkills[0] ?? null;
   const sampleFieldIdPrefix = useId();
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(() => !hasPersonalStyles);
   const [step, setStep] = useState<SetupStep>("choose");
   const [sampleTexts, setSampleTexts] = useState<string[]>(initialSampleTexts);
   const [generationMode, setGenerationMode] = useState<GenerationMode>("samples");

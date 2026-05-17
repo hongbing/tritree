@@ -255,7 +255,7 @@ describe("Treeable repository", () => {
     expect(state.artifacts).toHaveLength(1);
     expect(state.currentNode?.kind).toBe("artifact");
     expect(state.currentNode?.producedArtifactId).toBe(state.currentArtifact?.id);
-    expect(state).not.toHaveProperty("currentDraft");
+    expect(state).not.toHaveProperty("currentArtifactLegacy");
   });
 
   it("creates a no-artifact seed session when the plugin has no seed payload", async () => {
@@ -282,7 +282,7 @@ describe("Treeable repository", () => {
     const { repo, user } = await createRepositoryHarness();
     const root = repo.saveRootMemory(user.id, {
       artifactTypeId: "prd",
-      seed: "移动端草稿管理",
+      seed: "移动端作品管理",
       domains: ["Work"],
       tones: ["calm"],
       styles: ["document"],
@@ -441,8 +441,8 @@ describe("Treeable repository", () => {
     const [summary] = repo.listSessionSummaries(user.id);
 
     expect(summary.currentNodeId).toBe(child.currentNode!.id);
-    expect(summary.bodyExcerpt).toBe("种子念头");
-    expect(summary.bodyExcerpt).not.toBe("写出版本");
+    expect(summary.artifactExcerpt).toBe("种子念头");
+    expect(summary.artifactExcerpt).not.toBe("写出版本");
   });
 
   it("summaries ignore stale current-node artifact rows after completeNode clears the link", async () => {
@@ -472,8 +472,8 @@ describe("Treeable repository", () => {
     const [summary] = repo.listSessionSummaries(user.id);
 
     expect(summary.currentNodeId).toBe(child.currentNode!.id);
-    expect(summary.bodyExcerpt).toBe("种子念头");
-    expect(summary.bodyExcerpt).not.toBe("先写一个版本");
+    expect(summary.artifactExcerpt).toBe("种子念头");
+    expect(summary.artifactExcerpt).not.toBe("先写一个版本");
   });
 
   it("completeNode can finish a workflow node while storing an artifact", async () => {
@@ -561,8 +561,8 @@ describe("Treeable repository", () => {
       expect.objectContaining({
         id: older.session.id,
         title: "Renamed artifact",
-        bodyExcerpt: "种子念头",
-        bodyLength: 4,
+        artifactExcerpt: "种子念头",
+        artifactSummaryLength: 4,
         currentRoundIndex: 1,
         isArchived: false
       })
@@ -845,7 +845,6 @@ describe("Treeable repository", () => {
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
-      CREATE TABLE draft_versions (id TEXT PRIMARY KEY);
     `);
     sqlite.close();
 
@@ -860,7 +859,6 @@ describe("Treeable repository", () => {
     expect(sessionColumns.map((column) => column.name)).toContain("artifact_type_id");
     expect(rootColumns.map((column) => column.name)).toContain("user_id");
     expect(tables.map((table) => table.name)).toContain("artifacts");
-    expect(tables.map((table) => table.name)).not.toContain("draft_versions");
   });
 
   it("rejects sessions for missing root memory", async () => {

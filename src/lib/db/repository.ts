@@ -27,7 +27,6 @@ import {
   type CreationRequestOption,
   type CreationRequestOptionUpsert,
   type DirectorOptionsOutput,
-  type DraftSummary,
   type OptionGenerationMode,
   type RootMemory,
   type RootPreferences,
@@ -35,11 +34,11 @@ import {
   type SkillUpsert,
   type SessionState,
   type TreeNode,
+  type WorkSummary,
   AgentMessageSchema,
   BranchOptionSchema,
   CreationRequestOptionSchema,
   CreationRequestOptionUpsertSchema,
-  DraftSummarySchema,
   DEFAULT_ARTIFACT_TYPE_ID,
   LEGACY_SYSTEM_SKILL_IDS,
   MERGED_SYSTEM_SKILL_IDS,
@@ -49,6 +48,7 @@ import {
   SkillSchema,
   SkillUpsertSchema,
   TreeNodeSchema,
+  WorkSummarySchema,
   requireThreeOptions
 } from "@/lib/domain";
 import {
@@ -109,7 +109,7 @@ type SessionRow = {
   updated_at: string;
 };
 
-type DraftSummaryRow = SessionRow & {
+type WorkSummaryRow = SessionRow & {
   current_round_index: number | null;
   latest_artifact_id: string | null;
 };
@@ -1775,19 +1775,19 @@ export function createTreeableRepository(
       | undefined;
   }
 
-  function toDraftSummary(row: DraftSummaryRow): DraftSummary {
+  function toWorkSummary(row: WorkSummaryRow): WorkSummary {
     const artifactRow = row.latest_artifact_id
       ? (db.prepare("SELECT * FROM artifacts WHERE id = ?").get(row.latest_artifact_id) as ArtifactRow | undefined)
       : undefined;
-    const body = artifactExcerpt(artifactRow);
-    return DraftSummarySchema.parse({
+    const excerpt = artifactExcerpt(artifactRow);
+    return WorkSummarySchema.parse({
       id: row.id,
       title: row.title,
       status: SessionStatusSchema.parse(row.status),
       currentNodeId: row.current_node_id,
       currentRoundIndex: row.current_round_index,
-      bodyExcerpt: Array.from(body).slice(0, 120).join(""),
-      bodyLength: Array.from(body).length,
+      artifactExcerpt: Array.from(excerpt).slice(0, 120).join(""),
+      artifactSummaryLength: Array.from(excerpt).length,
       isArchived: Boolean(row.is_archived),
       createdAt: row.created_at,
       updatedAt: row.updated_at
@@ -1822,9 +1822,9 @@ export function createTreeableRepository(
             AND sessions.user_id = ?
         `
       )
-      .get(sessionId, userId) as DraftSummaryRow | undefined;
+      .get(sessionId, userId) as WorkSummaryRow | undefined;
 
-    return row ? toDraftSummary(row) : null;
+    return row ? toWorkSummary(row) : null;
   }
 
   function listSessionSummaries(userId: string, { archived = false }: { archived?: boolean } = {}) {
@@ -1856,9 +1856,9 @@ export function createTreeableRepository(
           ORDER BY sessions.updated_at DESC, sessions.created_at DESC, sessions.rowid DESC
         `
       )
-      .all(userId, archived ? 1 : 0) as DraftSummaryRow[];
+      .all(userId, archived ? 1 : 0) as WorkSummaryRow[];
 
-    return rows.map(toDraftSummary);
+    return rows.map(toWorkSummary);
   }
 
   function renameSession(userId: string, sessionId: string, title: string) {

@@ -1,12 +1,9 @@
-import { socialPostPlugin } from "./server";
 import { SocialPostRenderer } from "./SocialPostRenderer";
+import { socialPostManifest } from "./manifest";
 
 export const socialPostClientPlugin = {
   manifest: {
-    capabilities: socialPostPlugin.capabilities,
-    description: socialPostPlugin.description,
-    id: socialPostPlugin.id,
-    label: socialPostPlugin.label,
+    ...socialPostManifest,
     rendererKey: "social-post/default"
   },
   renderers: {

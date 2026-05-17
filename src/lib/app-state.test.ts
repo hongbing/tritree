@@ -27,7 +27,7 @@ describe("summarizeSessionForDirector", () => {
 
     expect(summary.currentArtifact).toContain("PRD Markdown");
     expect(summary.currentArtifact).toContain("登录慢");
-    expect(summary).not.toHaveProperty("currentDraft");
+    expect(summary).not.toHaveProperty("currentArtifactLegacy");
   });
 
   it("focuses a node that produced no artifact without inventing content", () => {
@@ -40,7 +40,7 @@ describe("summarizeSessionForDirector", () => {
   });
 
   it("summarizes path, folded branches, and artifact for AI context", () => {
-    const artifact = socialPostArtifact("artifact-1", "node", { title: "Draft", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" });
+    const artifact = socialPostArtifact("artifact-1", "node", { title: "Work", body: "Body", hashtags: ["#AI"], imagePrompt: "Tree" });
     const summary = summarizeSessionForDirector({
       rootMemory: {
         id: "default",
@@ -78,14 +78,14 @@ describe("summarizeSessionForDirector", () => {
     });
 
     expect(summary.rootSummary).toBe("Seed：我想写 AI 产品经理的真实困境");
-    expect(summary.currentArtifact).toContain("Draft");
+    expect(summary.currentArtifact).toContain("Work");
     expect(summary.learnedSummary).toContain("practical");
   });
 
-  it("includes artifact type instructions in draft and option contexts", () => {
+  it("includes artifact type instructions in work and option contexts", () => {
     const artifact = prdArtifact("artifact-prd", "node", {
-      title: "移动端草稿管理 PRD",
-      markdown: "## 背景\n用户需要移动端继续草稿。"
+      title: "移动端作品管理 PRD",
+      markdown: "## 背景\n用户需要移动端继续作品。"
     });
     const state = {
       ...createStateWithPath([]),
@@ -94,9 +94,9 @@ describe("summarizeSessionForDirector", () => {
         preferences: {
           ...createStateWithPath([]).rootMemory.preferences,
           artifactTypeId: "prd" as const,
-          seed: "移动端草稿管理"
+          seed: "移动端作品管理"
         },
-        summary: "Seed：移动端草稿管理"
+        summary: "Seed：移动端作品管理"
       },
       session: {
         ...createStateWithPath([]).session,
@@ -107,16 +107,16 @@ describe("summarizeSessionForDirector", () => {
       nodeArtifacts: [{ nodeId: "node", artifact }]
     };
 
-    const draftSummary = summarizeSessionForDirector(state, option("a", "补完整需求"));
+    const workSummary = summarizeSessionForDirector(state, option("a", "补完整需求"));
     const optionSummary = summarizeCurrentArtifactOptionsForDirector(state);
-    const draftMessages = (draftSummary as any).messages as Array<{ role: string; content: string }>;
+    const workMessages = (workSummary as any).messages as Array<{ role: string; content: string }>;
     const optionMessages = (optionSummary as any).messages as Array<{ role: string; content: string }>;
 
-    expect(draftSummary.artifactContext).toContain("作品类型：PRD 文档");
-    expect(draftSummary.artifactContext).toContain("artifact.type=\"prd\"");
-    expect(draftSummary.artifactContext).toContain("artifact.payload.markdown");
+    expect(workSummary.artifactContext).toContain("作品类型：PRD 文档");
+    expect(workSummary.artifactContext).toContain("artifact.type=\"prd\"");
+    expect(workSummary.artifactContext).toContain("artifact.payload.markdown");
     expect(optionSummary.artifactContext).toContain("澄清问题和三个答案应该围绕 PRD 决策");
-    expect(draftMessages.at(-1)?.content).toContain("作品类型：PRD 文档");
+    expect(workMessages.at(-1)?.content).toContain("作品类型：PRD 文档");
     expect(optionMessages.at(-1)?.content ?? optionMessages[0].content).toContain("作品类型：PRD 文档");
   });
 
@@ -176,13 +176,13 @@ describe("summarizeSessionForDirector", () => {
     expect(summary.selectedOptionLabel).not.toContain("不主动改换主题、读者、前提或基本结构");
     expect(summary.selectedOptionLabel).not.toContain("三个答案");
     expect(summary.selectedOptionLabel).not.toContain("近距离推进");
-    expect(summary.selectedOptionLabel).not.toContain("草稿改动幅度由所选方向决定");
+    expect(summary.selectedOptionLabel).not.toContain("作品改动幅度由所选方向决定");
     expect(summary.selectedOptionLabel).not.toContain("本轮写作倾向");
     expect(summary.selectedOptionLabel).not.toContain("收窄和深化");
     expect(summary.selectedOptionLabel).not.toContain("细节深化");
   });
 
-  it("summarizes current-draft option generation with a direction range", () => {
+  it("summarizes current-work option generation with a direction range", () => {
     const state = createStateWithPath([
       createNode({
         id: "root",
@@ -205,7 +205,7 @@ describe("summarizeSessionForDirector", () => {
     expect(summary.selectedOptionLabel).not.toContain("硬约束");
     expect(summary.selectedOptionLabel).toContain("更大胆的切入、结构、表达形式或读者场景");
     expect(summary.selectedOptionLabel).not.toContain("不要只是常规编辑动作");
-    expect(summary.selectedOptionLabel).not.toContain("草稿改动幅度由所选方向决定");
+    expect(summary.selectedOptionLabel).not.toContain("作品改动幅度由所选方向决定");
     expect(summary.selectedOptionLabel).not.toContain("明显不同的创作维度");
     expect(summary.selectedOptionLabel).not.toContain("语义距离");
     expect(summary.selectedOptionLabel).not.toContain("大改");
@@ -222,18 +222,18 @@ describe("summarizeSessionForDirector", () => {
       })
     ]);
 
-    const draftSummary = summarizeSessionForDirector(state, option("a", "补一个细节"));
+    const workSummary = summarizeSessionForDirector(state, option("a", "补一个细节"));
     const optionSummary = summarizeCurrentArtifactOptionsForDirector(state);
-    const draftMessages = (draftSummary as any).messages as Array<{ role: string; content: string }>;
+    const workMessages = (workSummary as any).messages as Array<{ role: string; content: string }>;
     const optionMessages = (optionSummary as any).messages as Array<{ role: string; content: string }>;
 
-    expect(draftMessages.at(-1)?.content ?? "").not.toContain("方向范围：平衡");
+    expect(workMessages.at(-1)?.content ?? "").not.toContain("方向范围：平衡");
     expect(optionMessages.at(-1)?.content ?? "").not.toContain("方向范围：平衡");
-    expect(draftSummary.selectedOptionLabel).not.toContain("方向范围：平衡");
+    expect(workSummary.selectedOptionLabel).not.toContain("方向范围：平衡");
     expect(optionSummary.selectedOptionLabel).not.toContain("方向范围：平衡");
   });
 
-  it("includes saved agent message history in later draft and option prompts", () => {
+  it("includes saved agent message history in later work and option prompts", () => {
     const state = createStateWithPath([
       createNode({
         id: "node-1",
@@ -267,13 +267,13 @@ describe("summarizeSessionForDirector", () => {
       })
     ]);
 
-    const draftSummary = summarizeSessionForDirector(state, option("a", "避开游客打卡视角"));
+    const workSummary = summarizeSessionForDirector(state, option("a", "避开游客打卡视角"));
     const optionSummary = summarizeCurrentArtifactOptionsForDirector(state);
-    const draftMessages = (draftSummary as any).messages as Array<{ role: string; content: unknown }>;
+    const workMessages = (workSummary as any).messages as Array<{ role: string; content: unknown }>;
     const optionMessages = (optionSummary as any).messages as Array<{ role: string; content: unknown }>;
 
-    expect(draftMessages).toContainEqual(expect.objectContaining({ role: "tool", content: expect.any(Array) }));
-    expect(JSON.stringify(draftMessages)).toContain("青岛三天两晚攻略");
+    expect(workMessages).toContainEqual(expect.objectContaining({ role: "tool", content: expect.any(Array) }));
+    expect(JSON.stringify(workMessages)).toContain("青岛三天两晚攻略");
     expect(optionMessages).toContainEqual(expect.objectContaining({ role: "tool", content: expect.any(Array) }));
     expect(JSON.stringify(optionMessages)).toContain("青岛三天两晚攻略");
   });
@@ -311,12 +311,12 @@ describe("summarizeSessionForDirector", () => {
         id: "root",
         roundIndex: 1,
         options: [
-          option("a", "扩写成完整草稿"),
+          option("a", "扩写成完整作品"),
           option("b", "锁定写给谁看"),
           option("c", "重组为问题-解决结构")
         ],
         selectedOptionId: "b",
-        foldedOptions: [option("a", "扩写成完整草稿"), option("c", "重组为问题-解决结构")]
+        foldedOptions: [option("a", "扩写成完整作品"), option("c", "重组为问题-解决结构")]
       }),
       createNode({
         id: "current",
@@ -418,7 +418,7 @@ describe("summarizeSessionForDirector", () => {
     expectNoProcessTerms(messages[4].content);
   });
 
-  it("asks draft generation to apply the selected direction to the draft", () => {
+  it("asks work generation to apply the selected direction to the work", () => {
     const state = createStateWithPath([
       createNode({
         id: "root",
@@ -505,7 +505,7 @@ describe("summarizeSessionForDirector", () => {
         selectedOptionId: null
       })
     ]);
-    const selectedText = "我这边更像：先把整个模块拆成几块，同时开几个窗口并行出草稿。";
+    const selectedText = "我这边更像：先把整个模块拆成几块，同时开几个窗口并行出作品。";
     const selectedOption: BranchOption = {
       id: "custom-reference-test",
       label: "同时做几个不相关需求",
@@ -527,7 +527,7 @@ describe("summarizeSessionForDirector", () => {
     expect(finalUserRequest).not.toContain("中规中矩的稳妥改法");
   });
 
-  it("includes current node option labels when regenerating options for an existing draft", () => {
+  it("includes current node option labels when regenerating options for an existing work", () => {
     const state = createStateWithPath([
       createNode({
         id: "current",
@@ -725,7 +725,7 @@ describe("summarizeSessionForDirector", () => {
     );
 
     expect(summary.enabledSkills.map((item) => item.title)).toEqual(["自然短句", "标题不要夸张"]);
-    expect(summary).not.toHaveProperty("currentDraft");
+    expect(summary).not.toHaveProperty("currentArtifactLegacy");
     expect(summary.currentArtifact).toContain("标题");
     expect(summary.currentArtifact).toContain("第一句。第二句。");
   });
@@ -733,10 +733,10 @@ describe("summarizeSessionForDirector", () => {
 
 function expectNoProcessTerms(text: string) {
   const forbiddenTerms = [
-    "当前草稿已经展示",
+    "当前作品已经展示",
     "展示给用户",
     "用户手动编辑",
-    "保存了当前草稿",
+    "保存了当前作品",
     "用户刚刚",
     "用户选择",
     "三选一",
@@ -825,14 +825,14 @@ function createStateWithPath(selectedPath: TreeNode[]): SessionState {
   }));
   const artifacts = pathWithArtifacts.map((node) =>
     socialPostArtifact(node.producedArtifactId, node.id, {
-      title: "Draft",
+      title: "Work",
       body: "Body",
       hashtags: [],
       imagePrompt: ""
     })
   );
   const currentArtifact = artifacts.at(-1) ?? socialPostArtifact("artifact-current", "seed", {
-    title: "Draft",
+    title: "Work",
     body: "Body",
     hashtags: [],
     imagePrompt: ""
@@ -920,7 +920,7 @@ function createArtifactState(
     id: "artifact-1",
     type: "social-post",
     version: 1,
-    payload: { title: "Draft", body: "Body", hashtags: [], imagePrompt: "" },
+    payload: { title: "Work", body: "Body", hashtags: [], imagePrompt: "" },
     sourceArtifactIds: [],
     createdByNodeId: "node-1",
     createdAt: "2026-05-18T00:00:00.000Z",

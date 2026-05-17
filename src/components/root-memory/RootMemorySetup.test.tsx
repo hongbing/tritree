@@ -202,10 +202,10 @@ describe("RootMemorySetup", () => {
     expect(compactButtonRule).toContain("border-radius: 999px");
   });
 
-  it("links to draft management from the seed screen", () => {
+  it("links to work management from the seed screen", () => {
     renderRootMemorySetup();
 
-    expect(screen.getByRole("link", { name: "我的草稿" })).toHaveAttribute("href", "/drafts");
+    expect(screen.getByRole("link", { name: "我的作品" })).toHaveAttribute("href", "/works");
   });
 
   it("keeps the inspiration list hidden when no inspirations are configured", () => {
@@ -303,7 +303,7 @@ describe("RootMemorySetup", () => {
     renderRootMemorySetup({ onSubmit });
 
     await userEvent.click(screen.getByRole("button", { name: "PRD 文档" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "创作 seed" }), "移动端草稿管理");
+    await userEvent.type(screen.getByRole("textbox", { name: "创作 seed" }), "移动端作品管理");
     await userEvent.click(screen.getByRole("button", { name: "用这个念头开始" }));
 
     expect(screen.getByRole("group", { name: "作品类型" })).toBeInTheDocument();
@@ -312,7 +312,7 @@ describe("RootMemorySetup", () => {
     expect(onSubmit).toHaveBeenCalledWith({
       preferences: expect.objectContaining({
         artifactTypeId: "prd",
-        seed: "移动端草稿管理"
+        seed: "移动端作品管理"
       }),
       enabledSkillIds: ["system-analysis"]
     });
@@ -327,13 +327,13 @@ describe("RootMemorySetup", () => {
 
     expect(screen.queryByRole("group", { name: "作品类型" })).not.toBeInTheDocument();
 
-    await userEvent.type(screen.getByRole("textbox", { name: "创作 seed" }), "移动端草稿管理");
+    await userEvent.type(screen.getByRole("textbox", { name: "创作 seed" }), "移动端作品管理");
     await userEvent.click(screen.getByRole("button", { name: "用这个念头开始" }));
 
     expect(onSubmit).toHaveBeenCalledWith({
       preferences: expect.objectContaining({
         artifactTypeId: "prd",
-        seed: "移动端草稿管理"
+        seed: "移动端作品管理"
       }),
       enabledSkillIds: ["system-analysis"]
     });

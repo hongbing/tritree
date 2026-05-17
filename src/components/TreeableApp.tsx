@@ -35,7 +35,7 @@ import { createNdjsonParser } from "@/lib/stream/ndjson";
 import { apiPath, appPath } from "@/lib/web-base-path";
 
 type LoadState = "loading" | "root" | "ready" | "error";
-type MobilePanel = "tree" | "draft";
+type MobilePanel = "tree" | "artifact";
 type NodeGenerationStage = { nodeId: string; stage: "artifact" | "options" };
 type RootSetupDefaults = {
   artifactTypeId: ArtifactTypeId;
@@ -53,7 +53,7 @@ type CurrentUserView = {
 type TreeableAppProps = {
   currentUser?: CurrentUserView;
   initialSessionId?: string;
-  startNewDraft?: boolean;
+  startNewWork?: boolean;
 };
 
 type StreamingArtifactEntry = { artifact: Artifact; nodeId: string };
@@ -71,6 +71,8 @@ type OptionsStreamEvent =
   | { type: "thinking"; nodeId?: string | null; text: string }
   | { type: "done"; state: SessionState }
   | { type: "error"; error: string };
+type ArtifactComparisonEntry = { artifact: Artifact; label: string; nodeId: string };
+type ArtifactComparisonSelection = { fromNodeId: string | null; toNodeId: string | null };
 
 const MOBILE_LAYOUT_QUERY = "(max-width: 980px)";
 
@@ -324,6 +326,93 @@ async function allowArtifactRender() {
   await new Promise((resolve) => window.setTimeout(resolve, 0));
 }
 
+function nodesForArtifactState(state: SessionState) {
+  const nodeById = new Map<string, TreeNode>();
+  [...(state.treeNodes ?? []), ...state.selectedPath, ...(state.currentNode ? [state.currentNode] : [])].forEach((node) => {
+    nodeById.set(node.id, node);
+  });
+
+  return Array.from(nodeById.values()).sort((first, second) => {
+    if (first.roundIndex !== second.roundIndex) return first.roundIndex - second.roundIndex;
+    return first.createdAt.localeCompare(second.createdAt);
+  });
+}
+
+function buildArtifactComparisonEntries(state: SessionState | null): ArtifactComparisonEntry[] {
+  if (!state) return [];
+
+  const nodes = nodesForArtifactState(state);
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const entries = nodes
+    .map((node) => {
+      const artifact = artifactForNode(state, node.id);
+      return artifact ? { artifact, label: formatComparisonNodeLabel(node, nodesById), nodeId: node.id } : null;
+    })
+    .filter((entry): entry is ArtifactComparisonEntry => Boolean(entry));
+  const seenNodeIds = new Set(entries.map((entry) => entry.nodeId));
+
+  return [
+    ...entries,
+    ...(state.nodeArtifacts ?? [])
+      .filter((item) => !seenNodeIds.has(item.nodeId))
+      .map((item) => ({
+        artifact: item.artifact,
+        label: `节点 ${item.nodeId.slice(0, 6)}`,
+        nodeId: item.nodeId
+      }))
+  ];
+}
+
+function artifactHasChanges(artifact: Artifact, previousArtifact: Artifact) {
+  return artifact.type !== previousArtifact.type || artifactPayloadSignature(artifact.payload) !== artifactPayloadSignature(previousArtifact.payload);
+}
+
+function artifactPayloadSignature(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(artifactPayloadSignature).join(",")}]`;
+  if (isRecord(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${artifactPayloadSignature(value[key])}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value);
+}
+
+function changedArtifactNodeIdsForState(state: SessionState | null) {
+  if (!state) return [];
+
+  return nodesForArtifactState(state)
+    .filter((node) => {
+      if (!node.producedArtifactId) return false;
+      const artifact = artifactForNode(state, node.id);
+      const sourceArtifact =
+        node.sourceArtifactIds.map((artifactId) => state.artifacts.find((candidate) => candidate.id === artifactId) ?? null).find(Boolean) ??
+        artifactForNode(state, node.parentId);
+
+      return Boolean(artifact && sourceArtifact && artifactHasChanges(artifact, sourceArtifact));
+    })
+    .map((node) => node.id);
+}
+
+function previousComparisonNodeId(entries: ArtifactComparisonEntry[], toNodeId: string) {
+  const toIndex = entries.findIndex((entry) => entry.nodeId === toNodeId);
+  return toIndex > 0 ? entries[toIndex - 1].nodeId : null;
+}
+
+function formatComparisonNodeLabel(node: TreeNode, nodesById: Map<string, TreeNode>) {
+  const incomingLabel = incomingOptionLabelForNode(node, nodesById) ?? node.roundIntent;
+  return `第 ${node.roundIndex} 轮 · ${incomingLabel}`;
+}
+
+function incomingOptionLabelForNode(node: TreeNode, nodesById: Map<string, TreeNode>) {
+  if (node.parentId && node.parentOptionId) {
+    return nodesById.get(node.parentId)?.options.find((option) => option.id === node.parentOptionId)?.label ?? null;
+  }
+
+  return null;
+}
+
 const emptyRootSetupDefaults: RootSetupDefaults = {
   artifactTypeId: DEFAULT_ARTIFACT_TYPE_ID,
   creationRequest: "",
@@ -331,7 +420,7 @@ const emptyRootSetupDefaults: RootSetupDefaults = {
   seed: ""
 };
 
-export function TreeableApp({ currentUser, initialSessionId, startNewDraft = false }: TreeableAppProps = {}) {
+export function TreeableApp({ currentUser, initialSessionId, startNewWork = false }: TreeableAppProps = {}) {
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [rootMemory, setRootMemory] = useState<RootMemory | null>(null);
   const [sessionState, setSessionState] = useState<SessionState | null>(null);
@@ -355,14 +444,15 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   const [streamingOptions, setStreamingOptions] = useState<StreamingOptionsEntry | null>(null);
   const [streamingThinking, setStreamingThinking] = useState<StreamingThinkingEntry | null>(null);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
+  const [artifactComparison, setArtifactComparison] = useState<ArtifactComparisonSelection | null>(null);
   const [isMobileTreeExpanded, setIsMobileTreeExpanded] = useState(false);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const loadRequestIdRef = useRef(0);
-  const mobileDraftRegionRef = useRef<HTMLDivElement>(null);
-  const wasMobileDraftGenerationActiveRef = useRef(false);
+  const mobileArtifactRegionRef = useRef<HTMLDivElement>(null);
+  const wasMobileArtifactGenerationActiveRef = useRef(false);
   const canImportSkills = currentUser?.isAdmin === true;
-  const isMobileDraftGenerationActive = Boolean(
+  const isMobileArtifactGenerationActive = Boolean(
     isMobileLayout && generationStage?.nodeId && generationStage.stage === "artifact"
   );
 
@@ -370,7 +460,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     const requestId = loadRequestIdRef.current + 1;
     loadRequestIdRef.current = requestId;
     void loadRoot(requestId);
-  }, [initialSessionId, startNewDraft]);
+  }, [initialSessionId, startNewWork]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -411,6 +501,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     if (sessionState?.currentNode?.id) {
       setViewNodeId(sessionState.currentNode.id);
       setCustomOption(null);
+      setArtifactComparison(null);
     }
   }, [sessionState?.currentNode?.id]);
 
@@ -419,19 +510,19 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   }, [sessionState]);
 
   useEffect(() => {
-    if (!isMobileDraftGenerationActive) {
-      wasMobileDraftGenerationActiveRef.current = false;
+    if (!isMobileArtifactGenerationActive) {
+      wasMobileArtifactGenerationActiveRef.current = false;
       return;
     }
 
-    if (wasMobileDraftGenerationActiveRef.current) return;
+    if (wasMobileArtifactGenerationActiveRef.current) return;
 
-    wasMobileDraftGenerationActiveRef.current = true;
-    const draftRegion = mobileDraftRegionRef.current;
-    if (typeof draftRegion?.scrollIntoView === "function") {
-      draftRegion.scrollIntoView({ behavior: "smooth", block: "start" });
+    wasMobileArtifactGenerationActiveRef.current = true;
+    const artifactRegion = mobileArtifactRegionRef.current;
+    if (typeof artifactRegion?.scrollIntoView === "function") {
+      artifactRegion.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  }, [isMobileDraftGenerationActive]);
+  }, [isMobileArtifactGenerationActive]);
 
   function mobilePanelClassName(panel: MobilePanel, extraClassName?: string) {
     return `mobile-panel mobile-panel--${panel}${extraClassName ? ` ${extraClassName}` : ""}`;
@@ -469,7 +560,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       const data = (await response.json()) as { rootMemory: RootMemory | null };
       if (!isCurrentLoadRequest(requestId)) return;
       setRootMemory(data.rootMemory);
-      if (startNewDraft) {
+      if (startNewWork) {
         const nextRootSetupDefaults = resolveRootSetupDefaults(emptyRootSetupDefaults, nextArtifactTypes);
         const nextInspirations = await loadInspirationsForSetup(requestId, nextRootSetupDefaults.artifactTypeId);
         if (!isCurrentLoadRequest(requestId) || !nextInspirations) return;
@@ -485,7 +576,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           const sessionResponse = await fetch(apiPath(`/api/sessions/${encodeURIComponent(initialSessionId)}`));
           const sessionData = (await sessionResponse.json()) as { state?: SessionState | null; error?: string };
           if (!isCurrentLoadRequest(requestId)) return;
-          if (!sessionResponse.ok || !sessionData.state) throw new Error(sessionData.error ?? "草稿不存在或已归档。");
+          if (!sessionResponse.ok || !sessionData.state) throw new Error(sessionData.error ?? "作品不存在或已归档。");
           const requestedState = SessionStateSchema.parse(sessionData.state);
 
           setRootMemory(requestedState.rootMemory);
@@ -500,7 +591,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           setSessionState(null);
           setRootSetupDefaults(nextRootSetupDefaults);
           setInspirations(nextInspirations);
-          setMessage("草稿不存在或已归档。");
+          setMessage("作品不存在或已归档。");
           setLoadState("root");
           return;
         }
@@ -956,6 +1047,11 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
 
       if (value.type === "done") {
         doneState = value.state;
+        const completedArtifact = artifactForNode(value.state, nodeId);
+        if (completedArtifact) {
+          setStreamingArtifact({ nodeId, artifact: completedArtifact });
+          setSelectedArtifactId(completedArtifact.id);
+        }
         receivedDone = true;
         setStreamingThinking(null);
         return;
@@ -1414,18 +1510,18 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   const streamedActiveViewNode = activeViewNode ? withStreamingOptions(activeViewNode, streamingOptions) : null;
   const currentNodeForCanvas = streamedActiveViewNode ? withCustomOption(streamedActiveViewNode, customOption) : null;
   const treeGenerationStage = generationStage
-    ? { nodeId: generationStage.nodeId, stage: generationStage.stage === "artifact" ? "draft" as const : "options" as const }
+    ? { nodeId: generationStage.nodeId, stage: generationStage.stage === "artifact" ? "artifact" as const : "options" as const }
     : null;
   const activeThinking =
     streamingThinking && (!streamingThinking.nodeId || streamingThinking.nodeId === activeViewNodeId) ? streamingThinking : null;
   const artifactGenerationStage =
     generationStage && (!generationStage.nodeId || generationStage.nodeId === activeViewNodeId) ? generationStage.stage : null;
-  const isDraftModuleGenerating = Boolean(artifactGenerationStage === "artifact");
+  const isArtifactModuleGenerating = Boolean(artifactGenerationStage === "artifact");
   const isOptionsModuleGenerating = Boolean(artifactGenerationStage === "options");
-  const isMobileDraftModuleGenerating = isMobileLayout && isDraftModuleGenerating;
+  const isMobileArtifactModuleGenerating = isMobileLayout && isArtifactModuleGenerating;
   const isMobileOptionsModuleGenerating = isMobileLayout && isOptionsModuleGenerating;
-  const mobileDraftRegionClassName = `mobile-draft-region${
-    isMobileDraftModuleGenerating ? " mobile-module--generating mobile-draft-region--generating" : ""
+  const mobileArtifactRegionClassName = `mobile-artifact-region${
+    isMobileArtifactModuleGenerating ? " mobile-module--generating mobile-artifact-region--generating" : ""
   }`;
   const mobileOptionsRegionClassName = `mobile-options-region${
     isMobileOptionsModuleGenerating ? " mobile-module--generating mobile-options-region--generating" : ""
@@ -1437,6 +1533,16 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     defaultEnabled: skill.defaultEnabled ?? false,
     isArchived: skill.isArchived ?? false
   }));
+  const comparisonEntries = buildArtifactComparisonEntries(displaySessionState);
+  const comparisonEntryByNodeId = new Map(comparisonEntries.map((entry) => [entry.nodeId, entry]));
+  const comparisonFrom = artifactComparison?.fromNodeId ? comparisonEntryByNodeId.get(artifactComparison.fromNodeId) : null;
+  const comparisonTo = artifactComparison?.toNodeId ? comparisonEntryByNodeId.get(artifactComparison.toNodeId) : null;
+  const comparisonSelectionCount = Number(Boolean(artifactComparison?.fromNodeId)) + Number(Boolean(artifactComparison?.toNodeId));
+  const comparisonArtifacts =
+    comparisonFrom && comparisonTo ? { from: comparisonFrom.artifact, to: comparisonTo.artifact } : null;
+  const comparisonLabels =
+    comparisonFrom && comparisonTo ? { from: comparisonFrom.label, to: comparisonTo.label } : null;
+  const changedArtifactNodeIds = changedArtifactNodeIdsForState(displaySessionState);
   const toastRetryAction = canRetryArtifactGeneration
     ? {
         label: "重试生成",
@@ -1473,22 +1579,64 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     }
   }
 
+  function startArtifactComparison() {
+    if (comparisonEntries.length < 2) return;
+    const defaultToNodeId =
+      activeViewNodeId && comparisonEntryByNodeId.has(activeViewNodeId) ? activeViewNodeId : null;
+    if (!defaultToNodeId) return;
+    const defaultFromNodeId =
+      activeViewNode?.parentId && comparisonEntryByNodeId.has(activeViewNode.parentId)
+        ? activeViewNode.parentId
+        : previousComparisonNodeId(comparisonEntries, defaultToNodeId);
+
+    setArtifactComparison({
+      fromNodeId: defaultFromNodeId,
+      toNodeId: defaultToNodeId
+    });
+  }
+
+  function cancelArtifactComparison() {
+    setArtifactComparison(null);
+  }
+
+  function selectArtifactComparisonNode(nodeId: string) {
+    if (!comparisonEntryByNodeId.has(nodeId)) return;
+
+    setArtifactComparison((current) => {
+      if (!current) {
+        return { fromNodeId: nodeId, toNodeId: null };
+      }
+
+      if (current.toNodeId) {
+        if (nodeId === current.toNodeId) return current;
+        return { ...current, fromNodeId: nodeId };
+      }
+
+      if (!current.fromNodeId) {
+        return { ...current, fromNodeId: nodeId };
+      }
+
+      return { fromNodeId: current.fromNodeId, toNodeId: nodeId };
+    });
+  }
+
   function renderTreeCanvas(display: "full" | "options" | "tree") {
     return (
       <TreeCanvas
-        changedDraftNodeIds={[]}
-        comparisonNodeIds={null}
+        changedArtifactNodeIds={changedArtifactNodeIds}
+        comparisonNodeIds={artifactComparison}
         currentNode={currentNodeForCanvas}
         display={display}
         focusedNodeId={activeViewNodeId}
         generationStage={treeGenerationStage}
-        isComparisonMode={false}
+        isComparisonMode={Boolean(artifactComparison)}
         isBusy={treeChoicesDisabled}
         isMobileLayout={isMobileLayout}
         onActivateBranch={activateHistoricalBranch}
         onAddCustomOption={activeViewNodeId ? addAndChooseCustomOption : undefined}
         onChoose={chooseFromViewedNode}
         onRegenerateOptions={canRefreshOptions ? regenerateOptionsForCurrentNode : undefined}
+        onSelectComparisonNode={selectArtifactComparisonNode}
         onViewNode={(nodeId) => void viewNode(nodeId)}
         pendingBranch={pendingBranch}
         pendingChoice={pendingChoice}
@@ -1556,9 +1704,9 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           ) : null}
           <div className="workspace-actions" role="group" aria-label="作品操作">
             {currentUser ? (
-              <Link className="secondary-button" href="/drafts">
+              <Link className="secondary-button" href="/works">
                 <FileText aria-hidden="true" size={16} strokeWidth={2.25} />
-                <span>我的草稿</span>
+                <span>我的作品</span>
               </Link>
             ) : null}
             <button className="start-button" disabled={isBusy} onClick={startNewSeed} type="button">
@@ -1616,20 +1764,71 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           <section className={`canvas-region${!isMobileLayout && isOptionsModuleGenerating ? " module--generating" : ""}`}>{renderTreeCanvas(isMobileLayout ? "tree" : "full")}</section>
         </div>
       ) : null}
-      <div className={mobilePanelClassName("draft", isMobileLayout ? "mobile-panel--unified" : undefined)}>
+      <div className={mobilePanelClassName("artifact", isMobileLayout ? "mobile-panel--unified" : undefined)}>
         <div
-          aria-busy={isMobileDraftModuleGenerating}
-          className={mobileDraftRegionClassName}
-          ref={mobileDraftRegionRef}
+          aria-busy={isMobileArtifactModuleGenerating}
+          className={mobileArtifactRegionClassName}
+          ref={mobileArtifactRegionRef}
         >
           <ArtifactWorkspace
             artifacts={displayArtifacts}
+            canCompareArtifacts={comparisonEntries.length >= 2}
+            comparisonArtifacts={comparisonArtifacts}
+            comparisonLabels={comparisonLabels}
+            comparisonSelectionCount={comparisonSelectionCount}
             currentNode={currentNodeForCanvas}
+            generationStage={artifactGenerationStage}
+            headerActions={
+              <button
+                aria-expanded={isSkillPanelOpen}
+                className="secondary-button"
+                disabled={isBusy || !sessionState}
+                onClick={() => {
+                  setIsSkillLibraryOpen(false);
+                  setIsSkillPanelOpen((open) => !open);
+                }}
+                type="button"
+              >
+                {enabledSkillIds.length} 个技能
+              </button>
+            }
+            headerPanel={
+              isSkillPanelOpen && sessionState ? (
+                <aside aria-label="本作品技能" className="work-skill-panel">
+                  <header className="work-skill-panel__header">
+                    <div>
+                      <p className="eyebrow">本作品技能</p>
+                      <p className="work-skill-panel__summary">已启用 {enabledSkillIds.length} 个</p>
+                    </div>
+                    <button
+                      className="secondary-button"
+                      disabled={isBusy}
+                      onClick={() => {
+                        setIsSkillPanelOpen(false);
+                        setIsSkillLibraryOpen(true);
+                      }}
+                      type="button"
+                    >
+                      管理技能库
+                    </button>
+                  </header>
+                  <SkillPicker
+                    disabled={isBusy}
+                    onChange={(ids) => void saveSessionSkills(ids)}
+                    selectedSkillIds={enabledSkillIds}
+                    skills={skills}
+                  />
+                </aside>
+              ) : null
+            }
             isBusy={isBusy}
-            isGenerating={Boolean(generationStage)}
+            isComparisonMode={Boolean(artifactComparison)}
+            isGenerating={isArtifactModuleGenerating}
             onAction={handleArtifactAction}
+            onCancelComparison={cancelArtifactComparison}
             onSave={saveArtifact}
             onSelectArtifact={setSelectedArtifactId}
+            onStartComparison={startArtifactComparison}
             selectedArtifactId={effectiveSelectedArtifactId}
             thinkingText={activeThinking?.text}
           />

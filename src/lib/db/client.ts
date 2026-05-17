@@ -5,8 +5,6 @@ import { DatabaseSync } from "node:sqlite";
 const CURRENT_SCHEMA_VERSION = 12;
 const CONTENT_RESET_SCHEMA_VERSION = 12;
 const TREEABLE_CONTENT_TABLES = [
-  "publish_packages",
-  "draft_versions",
   "artifacts",
   "branch_history",
   "tree_nodes",

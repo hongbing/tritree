@@ -138,7 +138,7 @@ describe("RootPreferencesSchema", () => {
 
     const prd = RootPreferencesSchema.parse({
       artifactTypeId: "prd",
-      seed: "移动端草稿管理",
+      seed: "移动端作品管理",
       domains: ["Work"],
       tones: ["calm"],
       styles: ["document"],
@@ -162,11 +162,11 @@ describe("DirectorOptionsOutputSchema", () => {
     });
 
     expect(parsed.options.map((option) => option.id)).toEqual(["a", "b", "c"]);
-    expect(parsed).not.toHaveProperty("draft");
+    expect(parsed).not.toHaveProperty("work");
     expect(parsed).not.toHaveProperty("memoryObservation");
   });
 
-  it("rejects draft-shaped extras in an options-only response", () => {
+  it("rejects work-shaped extras in an options-only response", () => {
     expect(
       DirectorOptionsOutputSchema.safeParse({
         roundIntent: "生成下一步",
@@ -175,7 +175,7 @@ describe("DirectorOptionsOutputSchema", () => {
           { id: "b", label: "深挖原因", description: "说清背后的原因。", impact: "让观点更可信。", kind: "deepen" },
           { id: "c", label: "换角度", description: "从反面重看问题。", impact: "让表达更有张力。", kind: "reframe" }
         ],
-        draft: { title: "T", body: "B", hashtags: [], imagePrompt: "" }
+        work: { title: "T", body: "B", hashtags: [], imagePrompt: "" }
       }).success
     ).toBe(false);
   });
@@ -200,7 +200,7 @@ describe("DirectorNextStepOutputSchema", () => {
     expect(parsed).not.toHaveProperty("memoryObservation");
   });
 
-  it("accepts a decision to complete the current path without more options or a draft", () => {
+  it("accepts a decision to complete the current path without more options or a work", () => {
     const parsed = DirectorNextStepOutputSchema.parse({
       action: "complete",
       roundIntent: "当前版本已经可以交付",
@@ -218,7 +218,7 @@ describe("DirectorNextStepOutputSchema", () => {
       action: "options",
       roundIntent: "需要先澄清样式修改范围",
       options: [
-        { id: "a", label: "说明页面范围", description: "先确认哪些页面需要改。", impact: "避免草稿假设范围。", kind: "deepen" },
+        { id: "a", label: "说明页面范围", description: "先确认哪些页面需要改。", impact: "避免作品假设范围。", kind: "deepen" },
         { id: "b", label: "说明目标风格", description: "先确认要改成什么感觉。", impact: "让后续 PRD 更准确。", kind: "reframe" },
         { id: "c", label: "说明验收标准", description: "先确认怎么判断改好了。", impact: "让需求可执行。", kind: "finish" }
       ]
@@ -235,7 +235,7 @@ describe("DirectorNextStepOutputSchema", () => {
     const parsed = DirectorNextStepOutputSchema.parse({
       roundIntent: "需要先澄清样式修改范围",
       options: [
-        { id: "a", label: "说明页面范围", description: "先确认哪些页面需要改。", impact: "避免草稿假设范围。", kind: "deepen" },
+        { id: "a", label: "说明页面范围", description: "先确认哪些页面需要改。", impact: "避免作品假设范围。", kind: "deepen" },
         { id: "b", label: "说明目标风格", description: "先确认要改成什么感觉。", impact: "让后续 PRD 更准确。", kind: "reframe" },
         { id: "c", label: "说明验收标准", description: "先确认怎么判断改好了。", impact: "让需求可执行。", kind: "finish" }
       ]
@@ -285,8 +285,8 @@ describe("DirectorOutputSchema", () => {
     const option = {
       id: "a",
       label: "Turn it into a sharper opinion",
-      description: "Make the draft more memorable by adding contrast.",
-      impact: "The next draft will emphasize tension.",
+      description: "Make the work more memorable by adding contrast.",
+      impact: "The next work will emphasize tension.",
       kind: "reframe"
     };
 
@@ -332,7 +332,7 @@ describe("DirectorOutputSchema", () => {
     expect(parsed.artifact).toBeNull();
   });
 
-  it("rejects draft-shaped director output", () => {
+  it("rejects work-shaped director output", () => {
     const option = {
       id: "a",
       label: "先补背景",
@@ -343,13 +343,13 @@ describe("DirectorOutputSchema", () => {
 
     expect(
       DirectorOutputSchema.safeParse({
-        roundIntent: "不要接受 draft 核心输出",
+        roundIntent: "不要接受 work 核心输出",
         options: [
           option,
           { ...option, id: "b", kind: "deepen" },
           { ...option, id: "c", kind: "finish" }
         ],
-        draft: { title: "T", body: "B", hashtags: [], imagePrompt: "" }
+        work: { title: "T", body: "B", hashtags: [], imagePrompt: "" }
       }).success
     ).toBe(false);
   });
@@ -381,7 +381,7 @@ describe("DirectorOutputSchema", () => {
     ).toBe(false);
   });
 
-  it("accepts no-artifact output without draft fallback", () => {
+  it("accepts no-artifact output without work fallback", () => {
     const parsed = DirectorArtifactOutputSchema.parse({
       roundIntent: "这一步只判断",
       artifact: null
@@ -390,8 +390,8 @@ describe("DirectorOutputSchema", () => {
     expect(parsed.artifact).toBeNull();
     expect(
       DirectorArtifactOutputSchema.safeParse({
-        roundIntent: "不要接受 draft 核心输出",
-        draft: { title: "T", body: "B", hashtags: [], imagePrompt: "" }
+        roundIntent: "不要接受 work 核心输出",
+        work: { title: "T", body: "B", hashtags: [], imagePrompt: "" }
       }).success
     ).toBe(false);
   });
@@ -409,8 +409,8 @@ describe("DirectorOutputSchema", () => {
     const option = {
       id: "a",
       label: "Turn it into a sharper opinion",
-      description: "Make the draft more memorable by adding contrast.",
-      impact: "The next draft will emphasize tension.",
+      description: "Make the work more memorable by adding contrast.",
+      impact: "The next work will emphasize tension.",
       kind: "reframe"
     };
 
@@ -451,8 +451,8 @@ describe("DirectorOutputSchema", () => {
     const option = {
       id: "a",
       label: "Turn it into a sharper opinion",
-      description: "Make the draft more memorable by adding contrast.",
-      impact: "The next draft will emphasize tension.",
+      description: "Make the work more memorable by adding contrast.",
+      impact: "The next work will emphasize tension.",
       kind: "reframe"
     };
 
@@ -475,8 +475,8 @@ describe("DirectorOutputSchema", () => {
     const option = {
       id: "a",
       label: "Turn it into a sharper opinion",
-      description: "Make the draft more memorable by adding contrast.",
-      impact: "The next draft will emphasize tension.",
+      description: "Make the work more memorable by adding contrast.",
+      impact: "The next work will emphasize tension.",
       kind: "reframe"
     };
 
@@ -498,8 +498,8 @@ describe("DirectorOutputSchema", () => {
     const option = {
       id: "a",
       label: "Turn it into a sharper opinion",
-      description: "Make the draft more memorable by adding contrast.",
-      impact: "The next draft will emphasize tension.",
+      description: "Make the work more memorable by adding contrast.",
+      impact: "The next work will emphasize tension.",
       kind: "reframe"
     };
 
@@ -616,7 +616,7 @@ describe("SkillSchema", () => {
       id: "writer",
       title: "自然短句",
       category: "风格",
-      description: "让草稿更自然。",
+      description: "让作品更自然。",
       prompt: "句子短一点。",
       appliesTo: "writer",
       isSystem: false,
@@ -668,7 +668,7 @@ describe("SessionStateSchema", () => {
       id: "a",
       label: "Explore",
       description: "Open a fresh direction.",
-      impact: "The next draft will add range.",
+      impact: "The next work will add range.",
       kind: "explore"
     });
 
@@ -827,7 +827,7 @@ describe("ArtifactSchema", () => {
     }
   });
 
-  it("rejects legacy draft fields in session state", () => {
+  it("rejects legacy work fields in session state", () => {
     const result = SessionStateSchema.safeParse({
       rootMemory: validRootMemory(),
       session: validSession(),
@@ -839,8 +839,8 @@ describe("ArtifactSchema", () => {
       enabledSkillIds: [],
       enabledSkills: [],
       foldedBranches: [],
-      currentDraft: { title: "legacy", body: "legacy", hashtags: [], imagePrompt: "" },
-      publishPackage: null
+      currentArtifactLegacy: { title: "legacy", body: "legacy", hashtags: [], imagePrompt: "" },
+      deliveryBundle: null
     });
 
     expect(result.success).toBe(false);

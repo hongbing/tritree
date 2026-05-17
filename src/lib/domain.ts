@@ -347,14 +347,14 @@ export const SessionStateSchema = z.object({
   foldedBranches: z.array(FoldedBranchSchema)
 }).strict();
 
-export const DraftSummarySchema = z.object({
+export const WorkSummarySchema = z.object({
   id: z.string(),
   title: z.string(),
   status: SessionStatusSchema,
   currentNodeId: z.string().nullable(),
   currentRoundIndex: z.number().int().nonnegative().nullable(),
-  bodyExcerpt: z.string(),
-  bodyLength: z.number().int().nonnegative(),
+  artifactExcerpt: z.string(),
+  artifactSummaryLength: z.number().int().nonnegative(),
   isArchived: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string()
@@ -386,7 +386,7 @@ export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 export type TreeNode = z.infer<typeof TreeNodeSchema>;
 export type FoldedBranch = z.infer<typeof FoldedBranchSchema>;
 export type SessionState = z.infer<typeof SessionStateSchema>;
-export type DraftSummary = z.infer<typeof DraftSummarySchema>;
+export type WorkSummary = z.infer<typeof WorkSummarySchema>;
 
 export function skillAppliesToTarget(skill: Pick<Skill, "appliesTo">, target: SkillTarget) {
   return skill.appliesTo === "both" || skill.appliesTo === target;

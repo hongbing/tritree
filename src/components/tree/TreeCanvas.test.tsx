@@ -17,6 +17,10 @@ const currentNode: TreeNode = {
   id: "node-1",
   sessionId: "session-1",
   parentId: null,
+  parentOptionId: null,
+  kind: "analysis",
+  producedArtifactId: null,
+  sourceArtifactIds: [],
   roundIndex: 0,
   roundIntent: "Choose a direction",
   options: [
@@ -178,7 +182,7 @@ describe("TreeCanvas", () => {
       ...currentNode,
       isTerminal: true,
       options: [],
-      roundIntent: "当前草稿已经覆盖用户目标，可以停止继续澄清。"
+      roundIntent: "当前作品已经覆盖用户目标，可以停止继续澄清。"
     };
 
     render(
@@ -188,7 +192,7 @@ describe("TreeCanvas", () => {
     const completePanel = screen.getByRole("status", { name: "当前路径已完成" });
 
     expect(completePanel).toHaveTextContent("已完成");
-    expect(completePanel).toHaveTextContent("当前草稿已经覆盖用户目标，可以停止继续澄清。");
+    expect(completePanel).toHaveTextContent("当前作品已经覆盖用户目标，可以停止继续澄清。");
     expect(screen.queryByRole("group", { name: "回答当前问题" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "三个主选项" })).not.toBeInTheDocument();
     expect(screen.queryByText("等待中")).not.toBeInTheDocument();
@@ -210,7 +214,7 @@ describe("TreeCanvas", () => {
     expect(hint).not.toHaveTextContent("生成下一版");
     expect(hint).not.toHaveTextContent("灰色分支");
     expect(hint).not.toHaveTextContent("没选过的其他思路");
-    expect(hint).not.toHaveTextContent("点击节点查看草稿");
+    expect(hint).not.toHaveTextContent("点击节点查看作品");
     expect(hint).not.toHaveTextContent("拖动/左右键浏览");
     expect(screen.getByRole("button", { name: "收起树图说明" })).toBeInTheDocument();
   });
@@ -438,7 +442,7 @@ describe("TreeCanvas", () => {
           {
             ...currentNode.options[0],
             description:
-              "把这一轮内容改成一个完整的长方向：先交代为什么读者会在这里卡住，再给出具体的表达切口，最后说明这个切口会如何影响下一版草稿的结构、语气、信息密度和结尾判断。"
+              "把这一轮内容改成一个完整的长方向：先交代为什么读者会在这里卡住，再给出具体的表达切口，最后说明这个切口会如何影响下一版作品的结构、语气、信息密度和结尾判断。"
           },
           ...currentNode.options.slice(1)
         ]}
@@ -863,7 +867,7 @@ describe("TreeCanvas", () => {
     ]);
   });
 
-  it("renders the first draft node itself while its options are generating", () => {
+  it("renders the first artifact node itself while its options are generating", () => {
     const seedNode: TreeNode = {
       ...currentNode,
       id: "node-seed",
@@ -893,7 +897,7 @@ describe("TreeCanvas", () => {
     });
   });
 
-  it("keeps the seed draft label after its first option is selected", () => {
+  it("keeps the seed artifact label after its first option is selected", () => {
     const seedNode: TreeNode = {
       ...currentNode,
       id: "node-seed",
@@ -930,7 +934,7 @@ describe("TreeCanvas", () => {
     expect(graph.nodes.find((node) => node.id === "history-node-child")?.label).toBe("具体场景");
   });
 
-  it("renders the seed draft node with its black root class", () => {
+  it("renders the seed artifact node with its black root class", () => {
     const seedNode: TreeNode = {
       ...currentNode,
       id: "node-seed",
@@ -1378,7 +1382,7 @@ describe("TreeCanvas", () => {
     expect(folded.every((node) => Math.abs(node.targetY - (selected?.targetY ?? 0)) >= 56)).toBe(true);
   });
 
-  it("marks the focused historical draft node without marking folded option nodes", () => {
+  it("marks the focused historical artifact node without marking folded option nodes", () => {
     const graph = createForceTreeGraph({
       currentNode,
       focusedNodeId: "node-selected",
@@ -1389,12 +1393,12 @@ describe("TreeCanvas", () => {
     const focusedHistory = graph.nodes.find((node) => node.id === "history-node-selected");
     const foldedNodes = graph.nodes.filter((node) => node.kind === "folded");
 
-    expect(focusedHistory?.isDraftFocused).toBe(true);
+    expect(focusedHistory?.isArtifactFocused).toBe(true);
     expect(foldedNodes).toHaveLength(2);
-    expect(foldedNodes.every((node) => node.isDraftFocused !== true)).toBe(true);
+    expect(foldedNodes.every((node) => node.isArtifactFocused !== true)).toBe(true);
   });
 
-  it("renders the focused draft node with a breathing halo and draft badge", () => {
+  it("renders the focused artifact node with a breathing halo and artifact badge", () => {
     const { container } = render(
       <TreeCanvas
         currentNode={currentNode}
@@ -1406,11 +1410,11 @@ describe("TreeCanvas", () => {
       />
     );
 
-    const focusedNode = container.querySelector(".tree-node--draft-focused");
+    const focusedNode = container.querySelector(".tree-node--artifact-focused");
 
     expect(focusedNode).toBeInTheDocument();
-    expect(focusedNode?.querySelector(".tree-node__draft-halo")).toBeInTheDocument();
-    expect(focusedNode?.querySelector(".tree-node__draft-badge")).toHaveTextContent("草稿");
+    expect(focusedNode?.querySelector(".tree-node__artifact-halo")).toBeInTheDocument();
+    expect(focusedNode?.querySelector(".tree-node__artifact-badge")).toHaveTextContent("作品");
   });
 
   it("views a historical node without activating its branch", () => {
@@ -1609,10 +1613,10 @@ describe("TreeCanvas", () => {
     expect(container.querySelector(".tree-node--comparison-selectable")).not.toBeInTheDocument();
   });
 
-  it("marks history nodes whose drafts changed from their parent draft", () => {
+  it("marks history nodes whose artifacts changed from their parent artifact", () => {
     const { container } = render(
       <TreeCanvas
-        changedDraftNodeIds={["node-selected"]}
+        changedArtifactNodeIds={["node-selected"]}
         currentNode={currentNode}
         isBusy={false}
         onChoose={vi.fn()}
@@ -1621,16 +1625,16 @@ describe("TreeCanvas", () => {
       />
     );
 
-    const changedNode = container.querySelector(".tree-node--draft-changed");
+    const changedNode = container.querySelector(".tree-node--artifact-changed");
 
     expect(changedNode).toBeInTheDocument();
     expect(changedNode?.querySelector(".tree-node__changed-badge")).toHaveTextContent("已编辑");
   });
 
-  it("stacks focused draft status badges while options are generating", () => {
+  it("stacks focused artifact status badges while options are generating", () => {
     const { container } = render(
       <TreeCanvas
-        changedDraftNodeIds={["node-selected"]}
+        changedArtifactNodeIds={["node-selected"]}
         currentNode={selectedNodeWithFolded}
         focusedNodeId="node-selected"
         generationStage={{ nodeId: "node-selected", stage: "options" }}
@@ -1641,8 +1645,8 @@ describe("TreeCanvas", () => {
       />
     );
 
-    const focusedNode = container.querySelector(".tree-node--draft-focused.tree-node--draft-changed");
-    const badgeDys = [".tree-node__draft-badge", ".tree-node__generation-badge", ".tree-node__changed-badge"].map((selector) =>
+    const focusedNode = container.querySelector(".tree-node--artifact-focused.tree-node--artifact-changed");
+    const badgeDys = [".tree-node__artifact-badge", ".tree-node__generation-badge", ".tree-node__changed-badge"].map((selector) =>
       focusedNode?.querySelector(selector)?.getAttribute("dy")
     );
 
@@ -1807,17 +1811,17 @@ describe("TreeCanvas", () => {
     expect(container.querySelector(".tree-node__spinner")).toBe(spinner);
   });
 
-  it("shows the first streamed option when generation switches from draft to options", async () => {
-    const draftlessNode = { ...currentNode, options: [] };
+  it("shows the first streamed option when generation switches from artifact to options", async () => {
+    const artifactlessNode = { ...currentNode, options: [] };
     const firstStreamedOptionNode = { ...currentNode, options: [currentNode.options[0]] };
     const { rerender } = render(
       <TreeCanvas
-        currentNode={draftlessNode}
-        generationStage={{ nodeId: currentNode.id, stage: "draft" }}
+        currentNode={artifactlessNode}
+        generationStage={{ nodeId: currentNode.id, stage: "artifact" }}
         isBusy
         onChoose={vi.fn()}
         pendingChoice={null}
-        selectedPath={[draftlessNode]}
+        selectedPath={[artifactlessNode]}
       />
     );
 

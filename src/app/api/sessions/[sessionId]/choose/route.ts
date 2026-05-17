@@ -57,7 +57,8 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
   }
 
   try {
-    const nextState = repository.createDraftChild({
+    const nextState = repository.createArtifactChild({
+      artifact: null,
       userId: user.id,
       customOption: body.customOption,
       optionMode: body.optionMode,
@@ -68,9 +69,6 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
     return NextResponse.json({ state: nextState });
   } catch (error) {
     console.error("[treeable:choose-branch]", error);
-    return NextResponse.json(
-      { error: publicServerErrorMessage(error, "无法生成下一版草稿。") },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: publicServerErrorMessage(error, "无法继续这个分支。") }, { status: 500 });
   }
 }

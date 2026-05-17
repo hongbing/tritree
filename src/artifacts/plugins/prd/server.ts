@@ -1,20 +1,11 @@
 import type { ArtifactPluginServer } from "@/artifacts/types";
+import { prdManifest } from "./manifest";
 import { PrdPayloadSchema, type PrdPayload } from "./schema";
 
 export const prdPlugin: ArtifactPluginServer<PrdPayload> = {
-  id: "prd",
-  label: "PRD 文档",
-  description: "产品需求文档，用 Markdown 沉淀背景、目标、需求和风险。",
+  ...prdManifest,
   payloadSchema: PrdPayloadSchema,
   aiOutputSchema: PrdPayloadSchema,
-  capabilities: {
-    actions: [],
-    deliver: true,
-    diff: true,
-    edit: true,
-    generate: true,
-    streamFields: ["title", "markdown"]
-  },
   createSeedPayload(input) {
     const seed = input.seed.trim();
     return seed ? { title: "种子 PRD", markdown: seed } : null;

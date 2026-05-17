@@ -92,7 +92,7 @@ describe("SocialPostRenderer", () => {
     await userEvent.type(screen.getByLabelText("话题"), "#新 #AI");
     await userEvent.clear(screen.getByLabelText("配图提示"));
     await userEvent.type(screen.getByLabelText("配图提示"), "新图");
-    await userEvent.click(screen.getByRole("button", { name: "保存草稿" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存作品" }));
 
     expect(onSave).toHaveBeenCalledWith({
       title: "新标题",

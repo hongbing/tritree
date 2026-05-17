@@ -156,7 +156,7 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
         <div className="social-post-panel__actions">
           <button
             aria-expanded={isPublishPanelOpen}
-            className="draft-publish-button"
+            className="work-publish-button"
             disabled={isBusy}
             onClick={() => {
               setPublishCopyError("");
@@ -169,7 +169,7 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
             <span>发布</span>
           </button>
           {onSave ? (
-            <button className="draft-edit-button" disabled={isBusy} onClick={() => setIsEditing(true)} type="button">
+            <button className="work-edit-button" disabled={isBusy} onClick={() => setIsEditing(true)} type="button">
               编辑
             </button>
           ) : null}
@@ -177,22 +177,22 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
       </div>
 
       {isPublishPanelOpen ? (
-        <aside aria-label="发布助手" className="draft-publish-panel" role="dialog">
-          <div className="draft-publish-panel__header">
+        <aside aria-label="发布助手" className="work-publish-panel" role="dialog">
+          <div className="work-publish-panel__header">
             <div>
-              <p className="draft-publish-panel__title">发布助手</p>
-              <p className="draft-publish-panel__copy">生成适合平台的复制版本</p>
+              <p className="work-publish-panel__title">发布助手</p>
+              <p className="work-publish-panel__copy">生成适合平台的复制版本</p>
             </div>
             <button
               aria-label="关闭发布助手"
-              className="draft-publish-panel__close"
+              className="work-publish-panel__close"
               onClick={() => setIsPublishPanelOpen(false)}
               type="button"
             >
               <X aria-hidden="true" size={14} />
             </button>
           </div>
-          <div aria-label="发布平台" className="draft-publish-tabs" role="group">
+          <div aria-label="发布平台" className="work-publish-tabs" role="group">
             {(["weibo", "xiaohongshu", "moments"] as const).map((platform) => (
               <button
                 aria-pressed={activePublishPlatform === platform}
@@ -207,8 +207,8 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
               </button>
             ))}
           </div>
-          <section className="draft-publish-preview" aria-label={`${publishPlatformLabel(activePublishPlatform)}版预览`}>
-            <div className="draft-publish-preview__meta">
+          <section className="work-publish-preview" aria-label={`${publishPlatformLabel(activePublishPlatform)}版预览`}>
+            <div className="work-publish-preview__meta">
               <span>{publishPlatformLabel(activePublishPlatform)}版预览</span>
               <span>约 {formatPublishText(payload, activePublishPlatform).length} 字</span>
             </div>
@@ -219,8 +219,8 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
               value={formatPublishText(payload, activePublishPlatform)}
             />
           </section>
-          <section className="draft-publish-image-prompt">
-            <div className="draft-publish-image-prompt__meta">
+          <section className="work-publish-image-prompt">
+            <div className="work-publish-image-prompt__meta">
               <span>配图提示</span>
               {payload.imagePrompt.trim() ? (
                 <button onClick={() => void copyPublishText("imagePrompt")} type="button">
@@ -231,9 +231,9 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
             </div>
             <textarea aria-label="配图提示" readOnly rows={3} value={payload.imagePrompt || "还没有配图提示。"} />
           </section>
-          <div className="draft-publish-actions">
+          <div className="work-publish-actions">
             <button
-              className="draft-publish-actions__primary"
+              className="work-publish-actions__primary"
               onClick={() => void copyPublishText(activePublishPlatform)}
               type="button"
             >
@@ -246,7 +246,7 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
             </button>
           </div>
           {publishCopyError ? (
-            <p className="draft-publish-error" role="status">
+            <p className="work-publish-error" role="status">
               {publishCopyError}
             </p>
           ) : null}
@@ -255,7 +255,7 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
 
       <div className="social-post-panel__scroll">
         {isEditing ? (
-          <div className="draft-editor">
+          <div className="work-editor">
             <label>
               <span>标题</span>
               <input onChange={(event) => setTitle(event.target.value)} value={title} />
@@ -272,19 +272,19 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
               <span>配图提示</span>
               <textarea onChange={(event) => setImagePrompt(event.target.value)} rows={4} value={imagePrompt} />
             </label>
-            <div className="draft-editor__actions">
+            <div className="work-editor__actions">
               <button className="secondary-button" disabled={isBusy} onClick={cancelEditing} type="button">
-                退出草稿
+                退出编辑
               </button>
               <button className="start-button" disabled={isBusy} onClick={() => void saveEditedPayload()} type="button">
-                保存草稿
+                保存作品
               </button>
             </div>
           </div>
         ) : (
-          <div className="draft-content">
+          <div className="work-content">
             <h2>{displayTitle}</h2>
-            <div className="draft-body" onMouseDown={preserveDisplayBodySelection} onMouseUp={captureDisplayBodySelection}>
+            <div className="work-body" onMouseDown={preserveDisplayBodySelection} onMouseUp={captureDisplayBodySelection}>
               {bodyParagraphs.map((paragraph) => (
                 <p data-body-end={paragraph.end} data-body-start={paragraph.start} key={`${paragraph.start}-${paragraph.text}`}>
                   {paragraph.text}
@@ -310,7 +310,7 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
 
       {selectionEdit ? (
         selectionMode === "actions" ? (
-          <div aria-label="选中文本操作" className="draft-selection-actions" role="toolbar">
+          <div aria-label="选中文本操作" className="work-selection-actions" role="toolbar">
             <button onClick={() => setSelectionMode("edit")} type="button">
               引用
             </button>
@@ -319,8 +319,8 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
             </button>
           </div>
         ) : (
-          <div aria-label="引用选中文本修改" className="draft-selection-edit" role="dialog">
-            <p className="draft-selection-edit__preview">{previewSelectionText(selectionEdit.selectedText)}</p>
+          <div aria-label="引用选中文本修改" className="work-selection-edit" role="dialog">
+            <p className="work-selection-edit__preview">{previewSelectionText(selectionEdit.selectedText)}</p>
             <label>
               <span>修改要求</span>
               <textarea
@@ -330,7 +330,7 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
                 value={selectionInstruction}
               />
             </label>
-            <div className="draft-selection-edit__actions">
+            <div className="work-selection-edit__actions">
               <button className="secondary-button" onClick={closeSelectionEdit} type="button">
                 关闭
               </button>

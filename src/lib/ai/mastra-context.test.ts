@@ -99,7 +99,7 @@ describe("agent instructions", () => {
     expect(artifactInstructions).toContain("用户明确确认过的表达");
     expect(artifactInstructions).not.toContain("当前内容是唯一写作基线");
     expect(artifactInstructions).not.toContain("不可改动的用户原文");
-    expect(artifactInstructions).not.toContain("用户本轮意图和补充要求优先于上一版草稿");
+    expect(artifactInstructions).not.toContain("用户本轮意图和补充要求优先于上一版作品");
     expect(artifactInstructions).toContain("必须遵守已启用 Skills");
     expect(artifactInstructions).toContain("# 本任务执行规则");
     expect(artifactInstructions).toContain("# 输出要求");
@@ -127,8 +127,8 @@ describe("agent instructions", () => {
     expect(artifactInstructions).not.toContain("one-of-three");
     expect(artifactInstructions).not.toContain("AI 调用");
     expect(artifactInstructions).not.toContain("返回内容需要包含");
-    expect(artifactInstructions).not.toContain("draft.");
-    expect(artifactInstructions).not.toContain("submit_tree_draft");
+    expect(artifactInstructions).not.toContain("work.");
+    expect(artifactInstructions).not.toContain("submit_tree_artifact");
     expect(artifactInstructions).not.toContain("Seed：写一段天气文字");
     expect(artifactInstructions).not.toContain("用户喜欢具体、自然的表达。");
 

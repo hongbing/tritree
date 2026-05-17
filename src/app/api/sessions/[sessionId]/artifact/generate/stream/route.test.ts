@@ -100,7 +100,7 @@ const state = {
   session: {
     artifactTypeId: "social-post",
     id: "session-1",
-    title: "Draft",
+    title: "Work",
     status: "active",
     currentNodeId: "node-2",
     createdAt: "2026-04-27T00:00:00.000Z",

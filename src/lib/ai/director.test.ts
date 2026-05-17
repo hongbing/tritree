@@ -47,7 +47,7 @@ describe("parseDirectorOutput", () => {
       id: "a",
       label: "Explore",
       description: "Open a fresh direction.",
-      impact: "The next draft will add range.",
+      impact: "The next work will add range.",
       kind: "explore"
     };
 
@@ -78,7 +78,7 @@ describe("parseDirectorOptionsOutput", () => {
     });
 
     expect(parsed.roundIntent).toBe("生成下一步");
-    expect(parsed).not.toHaveProperty("draft");
+    expect(parsed).not.toHaveProperty("work");
   });
 
   it("rejects duplicated option IDs in an options-only response", () => {
@@ -132,19 +132,19 @@ describe("buildDirectorInput", () => {
       })
     ].join("\n");
 
-    expect(promptText).not.toContain("social media draft");
-    expect(promptText).not.toContain("current draft");
-    expect(promptText).not.toContain("draft result");
-    expect(promptText).not.toContain("社媒内容。按默认社交媒体草稿结构输出");
-    expect(promptText).not.toContain("草稿生成");
+    expect(promptText).not.toContain("social media work");
+    expect(promptText).not.toContain("current work");
+    expect(promptText).not.toContain("work result");
+    expect(promptText).not.toContain("社媒内容。按默认社交媒体作品结构输出");
+    expect(promptText).not.toContain("作品生成");
     expect(promptText).toContain("当前产物");
   });
 
-  it("includes root memory, selected option, and draft without tree path context", () => {
+  it("includes root memory, selected option, and work without tree path context", () => {
     const input = buildTestDirectorInput({
       rootSummary: "Seed：我想写 AI 产品经理的真实困境",
       learnedSummary: "Prefers practical choices.",
-      currentArtifact: "Draft body",
+      currentArtifact: "Work body",
       pathSummary: "Round 1: selected A",
       foldedSummary: "Round 1: folded B, C",
       selectedOptionLabel: "Make it sharper",
@@ -154,7 +154,7 @@ describe("buildDirectorInput", () => {
     expect(input).toContain("创作 seed");
     expect(input).toContain("我想写 AI 产品经理的真实困境");
     expect(input).toContain("Make it sharper");
-    expect(input).toContain("Draft body");
+    expect(input).toContain("Work body");
     expect(input).not.toContain("Round 1: selected A");
     expect(input).not.toContain("Round 1: folded B, C");
     expect(input).not.toContain("已选路径");
@@ -312,7 +312,7 @@ describe("buildDirectorInput", () => {
       rootSummary: "Seed：写值班带来的变化",
       learnedSummary: "",
       currentArtifact: "标题：值班改变了我\n正文：先写了一个值班现场。",
-      pathSummary: "第 1 轮：先完成草稿；选择 b\n第 2 轮：补充值班现场；选择 a",
+      pathSummary: "第 1 轮：先完成作品；选择 b\n第 2 轮：补充值班现场；选择 a",
       foldedSummary: "补充个人经验\n回应常见质疑",
       selectedOptionLabel: "写值班现场细节: 继续补现场画面",
       enabledSkills: []
@@ -390,6 +390,6 @@ describe("parseDirectorArtifactText", () => {
 
     expect(parsed.artifact?.payload).toMatchObject({ body: "新正文" });
     expect(parsed).not.toHaveProperty("finishAvailable");
-    expect(parsed).not.toHaveProperty("publishPackage");
+    expect(parsed).not.toHaveProperty("deliveryBundle");
   });
 });

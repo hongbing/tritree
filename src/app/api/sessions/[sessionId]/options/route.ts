@@ -61,8 +61,8 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
     return new Response(encodeNdjson({ type: "done", state }), { headers: ndjsonHeaders });
   }
 
-  if (!focusedState.currentDraft) {
-    return NextResponse.json({ error: "请先生成这个节点的草稿。" }, { status: 409 });
+  if (focusedNode.kind === "artifact" && !focusedNode.producedArtifactId) {
+    return NextResponse.json({ error: "请先生成这个节点的作品。" }, { status: 409 });
   }
 
   const stream = new ReadableStream({

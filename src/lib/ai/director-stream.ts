@@ -12,7 +12,7 @@ import {
 import type { DirectorInputParts } from "./prompts";
 
 export type DirectorNextStepStreamResult = DirectorNextStepOutput & DirectorAgentTrace;
-export type DirectorArtifactStreamResult = DirectorArtifactOutput;
+export type DirectorArtifactStreamResult = DirectorArtifactOutput & DirectorAgentTrace;
 export type DirectorOptionsStreamResult = DirectorOptionsOutput & DirectorAgentTrace;
 
 type DirectorArtifactStreamOptions = {
@@ -162,12 +162,13 @@ export async function streamDirectorArtifact(
     onReasoningText: options.onReasoningText
   });
   const output = DirectorArtifactOutputSchema.parse(withoutAgentTrace(outputWithTrace));
+  const tracedOutput = withAgentTrace(output, outputWithTrace);
   logTritreeAiDebug("director-stream", "artifact-output", {
     artifactType: output.artifact?.type ?? "",
     hasArtifact: Boolean(output.artifact)
   });
-  emit(withoutAgentTrace(output));
-  return output;
+  emit(withoutAgentTrace(tracedOutput));
+  return tracedOutput;
 }
 
 export async function streamDirectorOptions(
@@ -221,6 +222,11 @@ export async function streamDirectorOptions(
 function withoutAgentTrace<T extends object>(value: T): T {
   const { agentMessages: _agentMessages, ...rest } = value as T & DirectorAgentTrace;
   return rest as T;
+}
+
+function withAgentTrace<T extends object>(value: T, trace: DirectorAgentTrace): T & DirectorAgentTrace {
+  if (trace.agentMessages === undefined) return value;
+  return { ...value, agentMessages: trace.agentMessages };
 }
 
 export function extractPartialDirectorArtifact(text: string) {
@@ -291,38 +297,142 @@ function extractPartialJsonObject(text: string) {
   if (!artifactMatch) return {};
 
   const artifactText = text.slice(artifactMatch.index + artifactMatch[0].length - 1);
-  const payload: Record<string, unknown> = {};
-  const payloadMatch = /"payload"\s*:\s*\{/.exec(artifactText);
-  if (payloadMatch) {
-    const payloadStart = payloadMatch.index + payloadMatch[0].length - 1;
-    const payloadEnd = findMatchingJsonObjectEnd(artifactText, payloadStart);
-    const payloadText =
-      payloadEnd === -1
-        ? artifactText.slice(payloadMatch.index + payloadMatch[0].length)
-        : artifactText.slice(payloadMatch.index + payloadMatch[0].length, payloadEnd);
-    const fieldPattern = /"([^"]+)"\s*:\s*"/g;
-    let fieldMatch = fieldPattern.exec(payloadText);
-    while (fieldMatch) {
-      const valueStart = fieldMatch.index + fieldMatch[0].length;
-      const { rawValue } = readVisibleJsonString(payloadText, valueStart);
-      payload[fieldMatch[1]] = parseJsonString(rawValue.endsWith("\\") ? rawValue.slice(0, -1) : rawValue);
-      fieldMatch = fieldPattern.exec(payloadText);
-    }
-
-    const arrayFieldPattern = /"([^"]+)"\s*:\s*\[/g;
-    let arrayFieldMatch = arrayFieldPattern.exec(payloadText);
-    while (arrayFieldMatch) {
-      payload[arrayFieldMatch[1]] = extractStringArrayField(payloadText, arrayFieldMatch[1]);
-      arrayFieldMatch = arrayFieldPattern.exec(payloadText);
-    }
-  }
-
   return {
     artifact: {
       type: extractStringField(artifactText, "type"),
-      payload
+      payload: extractVisibleJsonObjectField(artifactText, "payload")
     }
   };
+}
+
+function extractVisibleJsonObjectField(text: string, fieldName: string) {
+  const match = new RegExp(`"${escapeRegExp(fieldName)}"\\s*:\\s*\\{`).exec(text);
+  if (!match) return {};
+
+  const objectStart = match.index + match[0].lastIndexOf("{");
+  const objectEnd = findMatchingJsonObjectEnd(text, objectStart);
+  const objectText = objectEnd === -1 ? text.slice(objectStart) : text.slice(objectStart, objectEnd + 1);
+  return extractVisibleJsonObjectFields(objectText);
+}
+
+function extractVisibleJsonObjectFields(text: string): Record<string, unknown> {
+  const objectStart = text.indexOf("{");
+  if (objectStart === -1) return {};
+
+  const objectEnd = findMatchingJsonObjectEnd(text, objectStart);
+  if (objectEnd !== -1) {
+    const parsed = parseMaybeJson(text.slice(objectStart, objectEnd + 1));
+    return isRecord(parsed) ? parsed : {};
+  }
+
+  const fields: Record<string, unknown> = {};
+  let index = objectStart + 1;
+
+  while (index < text.length) {
+    const char = text[index];
+    if (char === "}") break;
+    if (char === "," || /\s/.test(char)) {
+      index += 1;
+      continue;
+    }
+
+    if (char !== '"') {
+      index += 1;
+      continue;
+    }
+
+    const key = readVisibleJsonString(text, index + 1);
+    const fieldName = parseJsonString(key.rawValue);
+    index = skipJsonWhitespace(text, key.nextIndex);
+    if (!fieldName || text[index] !== ":") {
+      index += 1;
+      continue;
+    }
+
+    const value = readVisibleJsonValue(text, skipJsonWhitespace(text, index + 1));
+    if (value.found) {
+      fields[fieldName] = value.value;
+    }
+    index = value.nextIndex > index ? value.nextIndex : index + 1;
+  }
+
+  return fields;
+}
+
+function readVisibleJsonValue(
+  text: string,
+  startIndex: number
+): { found: true; nextIndex: number; value: unknown } | { found: false; nextIndex: number } {
+  const index = skipJsonWhitespace(text, startIndex);
+  const char = text[index];
+  if (!char) return { found: false, nextIndex: index };
+
+  if (char === '"') {
+    const parsed = readVisibleJsonString(text, index + 1);
+    return { found: true, nextIndex: parsed.nextIndex, value: parseJsonString(parsed.rawValue) };
+  }
+
+  if (char === "{") {
+    const objectEnd = findMatchingJsonObjectEnd(text, index);
+    if (objectEnd !== -1) {
+      return { found: true, nextIndex: objectEnd + 1, value: parseMaybeJson(text.slice(index, objectEnd + 1)) };
+    }
+    return { found: true, nextIndex: text.length, value: extractVisibleJsonObjectFields(text.slice(index)) };
+  }
+
+  if (char === "[") {
+    const arrayEnd = findMatchingJsonArrayEnd(text, index);
+    if (arrayEnd !== -1) {
+      return { found: true, nextIndex: arrayEnd + 1, value: parseMaybeJson(text.slice(index, arrayEnd + 1)) };
+    }
+    return { found: true, nextIndex: text.length, value: extractVisibleJsonArrayItems(text, index) };
+  }
+
+  const primitive = readVisibleJsonPrimitive(text, index);
+  return primitive.found ? primitive : { found: false, nextIndex: primitive.nextIndex };
+}
+
+function extractVisibleJsonArrayItems(text: string, startIndex: number) {
+  const values: unknown[] = [];
+  let index = startIndex + 1;
+
+  while (index < text.length) {
+    const char = text[index];
+    if (char === "]") break;
+    if (char === "," || /\s/.test(char)) {
+      index += 1;
+      continue;
+    }
+
+    const value = readVisibleJsonValue(text, index);
+    if (value.found) values.push(value.value);
+    index = value.nextIndex > index ? value.nextIndex : index + 1;
+  }
+
+  return values;
+}
+
+function readVisibleJsonPrimitive(
+  text: string,
+  startIndex: number
+): { found: true; nextIndex: number; value: unknown } | { found: false; nextIndex: number } {
+  let index = startIndex;
+  while (index < text.length && !/[,\]}\s]/.test(text[index])) {
+    index += 1;
+  }
+
+  const rawValue = text.slice(startIndex, index).trim();
+  if (!rawValue) return { found: false, nextIndex: index };
+  const parsed = parseMaybeJson(rawValue);
+  return parsed !== rawValue ? { found: true, nextIndex: index, value: parsed } : { found: false, nextIndex: index };
+}
+
+function skipJsonWhitespace(text: string, startIndex: number) {
+  let index = startIndex;
+  while (index < text.length && /\s/.test(text[index])) {
+    index += 1;
+  }
+  return index;
 }
 
 function extractStringField(text: string, fieldName: string) {
@@ -424,26 +534,6 @@ function findMatchingJsonObjectEnd(text: string, startIndex: number) {
   return -1;
 }
 
-function extractStringArrayField(text: string, fieldName: string) {
-  const match = new RegExp(`"${escapeRegExp(fieldName)}"\\s*:\\s*\\[`).exec(text);
-  if (!match) {
-    return [];
-  }
-
-  const arrayStart = match.index + match[0].lastIndexOf("[");
-  const arrayEnd = findMatchingJsonArrayEnd(text, arrayStart);
-  if (arrayEnd === -1) {
-    return extractVisibleStringArrayItems(text, arrayStart);
-  }
-
-  try {
-    const value = JSON.parse(text.slice(arrayStart, arrayEnd + 1)) as unknown;
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
 function findMatchingJsonArrayEnd(text: string, startIndex: number) {
   let depth = 0;
   let inString = false;
@@ -476,30 +566,6 @@ function findMatchingJsonArrayEnd(text: string, startIndex: number) {
   }
 
   return -1;
-}
-
-function extractVisibleStringArrayItems(text: string, arrayStart: number) {
-  const values: string[] = [];
-  let index = arrayStart + 1;
-
-  while (index < text.length) {
-    const char = text[index];
-    if (char === "," || /\s/.test(char)) {
-      index += 1;
-      continue;
-    }
-
-    if (char !== '"') {
-      index += 1;
-      continue;
-    }
-
-    const parsed = readVisibleJsonString(text, index + 1);
-    values.push(parseJsonString(parsed.rawValue));
-    index = parsed.nextIndex;
-  }
-
-  return values;
 }
 
 function readVisibleJsonString(text: string, startIndex: number) {
@@ -535,10 +601,26 @@ function readVisibleJsonString(text: string, startIndex: number) {
 }
 
 function parseJsonString(rawValue: string) {
+  for (let end = rawValue.length; end >= 0; end -= 1) {
+    try {
+      return JSON.parse(`"${rawValue.slice(0, end)}"`) as string;
+    } catch {
+      // Keep trimming until the visible JSON string prefix ends before an incomplete escape.
+    }
+  }
+
+  return "";
+}
+
+function parseMaybeJson(value: unknown) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
   try {
-    return JSON.parse(`"${rawValue}"`) as string;
+    return JSON.parse(value) as unknown;
   } catch {
-    return rawValue;
+    return value;
   }
 }
 

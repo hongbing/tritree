@@ -165,6 +165,20 @@ describe("DirectorOptionsOutputSchema", () => {
     expect(parsed).not.toHaveProperty("draft");
     expect(parsed).not.toHaveProperty("memoryObservation");
   });
+
+  it("rejects draft-shaped extras in an options-only response", () => {
+    expect(
+      DirectorOptionsOutputSchema.safeParse({
+        roundIntent: "生成下一步",
+        options: [
+          { id: "a", label: "补场景", description: "补一个真实场景。", impact: "让内容更具体。", kind: "explore" },
+          { id: "b", label: "深挖原因", description: "说清背后的原因。", impact: "让观点更可信。", kind: "deepen" },
+          { id: "c", label: "换角度", description: "从反面重看问题。", impact: "让表达更有张力。", kind: "reframe" }
+        ],
+        draft: { title: "T", body: "B", hashtags: [], imagePrompt: "" }
+      }).success
+    ).toBe(false);
+  });
 });
 
 describe("DirectorNextStepOutputSchema", () => {
@@ -354,6 +368,17 @@ describe("DirectorOutputSchema", () => {
       payload: { title: "T", body: "B", hashtags: [], imagePrompt: "" },
       sourceArtifactIds: []
     });
+  });
+
+  it("requires generated artifact payloads", () => {
+    expect(
+      DirectorArtifactOutputSchema.safeParse({
+        roundIntent: "生成一版 PRD",
+        artifact: {
+          type: "prd"
+        }
+      }).success
+    ).toBe(false);
   });
 
   it("accepts no-artifact output without draft fallback", () => {
@@ -721,6 +746,20 @@ describe("ArtifactSchema", () => {
 
     expect(artifact.type).toBe("social-post");
     expect(NodeArtifactSchema.parse({ nodeId: "node-1", artifact }).artifact.id).toBe("artifact-1");
+  });
+
+  it("requires persisted artifact payloads", () => {
+    expect(
+      ArtifactSchema.safeParse({
+        id: "artifact-1",
+        type: "prd",
+        version: 1,
+        sourceArtifactIds: [],
+        createdByNodeId: "node-1",
+        createdAt: "2026-05-18T00:00:00.000Z",
+        updatedAt: "2026-05-18T00:00:00.000Z"
+      }).success
+    ).toBe(false);
   });
 
   it("parses workflow nodes without produced artifacts", () => {

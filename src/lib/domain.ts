@@ -145,6 +145,16 @@ function includesDirectorOptionIdsOnce(options: Array<{ id: string }>) {
 
 export const WorkflowNodeKindSchema = z.enum(["decision", "artifact", "analysis", "action"]);
 
+function requireArtifactPayload(value: { payload?: unknown }, context: z.RefinementCtx) {
+  if (!Object.prototype.hasOwnProperty.call(value, "payload") || value.payload === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["payload"],
+      message: "Artifact payload is required."
+    });
+  }
+}
+
 export const ArtifactSchema = z.object({
   id: z.string().min(1),
   type: z.string().min(1),
@@ -154,13 +164,13 @@ export const ArtifactSchema = z.object({
   createdByNodeId: z.string().min(1),
   createdAt: z.string(),
   updatedAt: z.string()
-});
+}).superRefine(requireArtifactPayload);
 
 export const GeneratedArtifactSchema = z.object({
   type: z.string().min(1),
   payload: z.unknown(),
   sourceArtifactIds: z.array(z.string().min(1)).default([])
-}).strict();
+}).strict().superRefine(requireArtifactPayload);
 
 export const NodeArtifactSchema = z.object({
   nodeId: z.string().min(1),
@@ -199,7 +209,7 @@ export const DirectorOutputSchema = z.object({
 export const DirectorOptionsOutputSchema = z.object({
   roundIntent: z.string().min(1),
   options: z.array(BranchOptionSchema).length(3, "AI suggestions must include exactly three items.")
-}).superRefine((output, context) => {
+}).strict().superRefine((output, context) => {
   if (!includesDirectorOptionIdsOnce(output.options)) {
     context.addIssue({
       code: "custom",

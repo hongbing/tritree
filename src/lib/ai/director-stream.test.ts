@@ -89,6 +89,35 @@ describe("extractPartialDirectorArtifact", () => {
       }
     });
   });
+
+  it("extracts generic nested and primitive payload fields", () => {
+    expect(
+      extractPartialDirectorArtifact(
+        JSON.stringify({
+          roundIntent: "写 PRD",
+          artifact: {
+            type: "prd",
+            payload: {
+              title: "登录 PRD",
+              metadata: { owner: "AX", priority: 2 },
+              ready: true,
+              blockers: null,
+              sections: [{ title: "背景" }]
+            }
+          }
+        })
+      )
+    ).toEqual({
+      type: "prd",
+      payload: {
+        title: "登录 PRD",
+        metadata: { owner: "AX", priority: 2 },
+        ready: true,
+        blockers: null,
+        sections: [{ title: "背景" }]
+      }
+    });
+  });
 });
 
 describe("extractPartialDirectorOptions", () => {
@@ -330,7 +359,8 @@ describe("streamDirectorArtifact", () => {
         type: "social-post",
         payload: { title: "新标题", body: "新正文", hashtags: [], imagePrompt: "" },
         sourceArtifactIds: []
-      }
+      },
+      agentMessages: [{ role: "assistant", content: "trace" }]
     });
   });
 });

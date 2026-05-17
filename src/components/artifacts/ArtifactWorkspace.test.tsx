@@ -4,6 +4,50 @@ import { describe, expect, it, vi } from "vitest";
 import type { Artifact, TreeNode } from "@/lib/domain";
 import { ArtifactWorkspace } from "./ArtifactWorkspace";
 
+const callbackRendererMock = vi.hoisted(() =>
+  vi.fn(({ onAction, onSave }: import("@/artifacts/types").ArtifactRendererProps) => (
+    <article data-testid="callback-renderer">
+      <button onClick={() => onAction?.("test-action", { value: 1 })} type="button">
+        run artifact action
+      </button>
+      <button onClick={() => onSave?.({ title: "Saved payload" })} type="button">
+        save artifact payload
+      </button>
+    </article>
+  ))
+);
+
+vi.mock("@/artifacts/client-registry", async () => {
+  const actual = await vi.importActual<typeof import("@/artifacts/client-registry")>("@/artifacts/client-registry");
+  return {
+    ...actual,
+    getArtifactClientManifest(type: string) {
+      if (type === "callback-test") {
+        return {
+          capabilities: {
+            actions: ["test-action"],
+            deliver: false,
+            diff: false,
+            edit: true,
+            generate: false,
+            streamFields: []
+          },
+          description: "Callback test artifact",
+          id: "callback-test",
+          label: "Callback test",
+          rendererKey: "callback-test/default"
+        };
+      }
+
+      return actual.getArtifactClientManifest(type);
+    },
+    getArtifactRenderer(rendererKey: string) {
+      if (rendererKey === "callback-test/default") return callbackRendererMock;
+      return actual.getArtifactRenderer(rendererKey);
+    }
+  };
+});
+
 function socialPostArtifact(overrides: Partial<Artifact> = {}): Artifact {
   return {
     id: "artifact-social-1",
@@ -51,6 +95,22 @@ function unknownArtifact(overrides: Partial<Artifact> = {}): Artifact {
     },
     sourceArtifactIds: [],
     createdByNodeId: "node-artifact-unknown",
+    createdAt: "2026-05-18T00:00:00.000Z",
+    updatedAt: "2026-05-18T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+function callbackArtifact(overrides: Partial<Artifact> = {}): Artifact {
+  return {
+    id: "artifact-callback-1",
+    type: "callback-test",
+    version: 1,
+    payload: {
+      title: "Callback artifact"
+    },
+    sourceArtifactIds: [],
+    createdByNodeId: "node-artifact-callback",
     createdAt: "2026-05-18T00:00:00.000Z",
     updatedAt: "2026-05-18T00:00:00.000Z",
     ...overrides
@@ -172,5 +232,29 @@ describe("ArtifactWorkspace", () => {
     expect(screen.getByRole("heading", { name: "无法预览 mind-map" })).toBeInTheDocument();
     expect(screen.getByText(/"nodes"/)).toBeInTheDocument();
     expect(screen.getByText(/"Root"/)).toBeInTheDocument();
+  });
+
+  it("adapts renderer action and save callbacks to the selected artifact", async () => {
+    const user = userEvent.setup();
+    const artifact = callbackArtifact();
+    const onAction = vi.fn();
+    const onSave = vi.fn();
+
+    renderWorkspace({
+      artifacts: [artifact],
+      currentNode: artifactNode(artifact.id),
+      onAction,
+      onSave,
+      selectedArtifactId: artifact.id
+    });
+
+    await user.click(screen.getByRole("button", { name: "run artifact action" }));
+    await user.click(screen.getByRole("button", { name: "save artifact payload" }));
+
+    expect(onAction).toHaveBeenCalledWith("test-action", artifact, { value: 1 });
+    expect(onSave).toHaveBeenCalledWith({
+      ...artifact,
+      payload: { title: "Saved payload" }
+    });
   });
 });

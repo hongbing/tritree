@@ -13,8 +13,16 @@ const manifests = new Map<string, ArtifactPluginClientManifest>();
 const renderers = new Map<string, ArtifactRenderer>();
 
 for (const plugin of bundledClientPlugins) {
+  if (manifests.has(plugin.manifest.id)) {
+    throw new Error(`Duplicate artifact client plugin id: ${plugin.manifest.id}`);
+  }
+
   manifests.set(plugin.manifest.id, plugin.manifest);
   for (const [key, renderer] of Object.entries(plugin.renderers)) {
+    if (renderers.has(key)) {
+      throw new Error(`Duplicate artifact renderer key: ${key}`);
+    }
+
     renderers.set(key, renderer);
   }
 }

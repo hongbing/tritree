@@ -504,6 +504,100 @@ describe("TreeableApp", () => {
     );
   });
 
+  it("runs artifact actions from the selected artifact node", async () => {
+    const analysisNode = {
+      ...artifactState().currentNode!,
+      id: "node-analysis",
+      kind: "analysis" as const,
+      producedArtifactId: null,
+      sourceArtifactIds: ["artifact-1"],
+      roundIndex: 2,
+      roundIntent: "Analyze",
+      options: []
+    };
+    const state = artifactState({
+      session: { ...artifactState().session, currentNodeId: "node-analysis" },
+      currentNode: analysisNode,
+      currentArtifact: null,
+      artifacts: [socialPostArtifact],
+      nodeArtifacts: [{ nodeId: "node-1", artifact: socialPostArtifact }],
+      selectedPath: [artifactState().currentNode!, analysisNode]
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: artifactState() }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    expect(await screen.findByTestId("artifact-workspace")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "artifact action" }));
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        4,
+        "/api/sessions/session-1/artifact/actions/rewrite-selection",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+    expect(JSON.parse((fetchMock.mock.calls[3][1] as RequestInit).body as string)).toEqual({
+      nodeId: "node-1",
+      artifactId: "artifact-1"
+    });
+  });
+
+  it("saves artifact edits from the selected artifact node", async () => {
+    const analysisNode = {
+      ...artifactState().currentNode!,
+      id: "node-analysis",
+      kind: "analysis" as const,
+      producedArtifactId: null,
+      sourceArtifactIds: ["artifact-1"],
+      roundIndex: 2,
+      roundIntent: "Analyze",
+      options: []
+    };
+    const state = artifactState({
+      session: { ...artifactState().session, currentNodeId: "node-analysis" },
+      currentNode: analysisNode,
+      currentArtifact: null,
+      artifacts: [socialPostArtifact],
+      nodeArtifacts: [{ nodeId: "node-1", artifact: socialPostArtifact }],
+      selectedPath: [artifactState().currentNode!, analysisNode]
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: artifactState() }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    expect(await screen.findByTestId("artifact-workspace")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "save artifact" }));
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        4,
+        "/api/sessions/session-1/artifact",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+    expect(JSON.parse((fetchMock.mock.calls[3][1] as RequestInit).body as string)).toEqual({
+      nodeId: "node-1",
+      artifact: {
+        type: "social-post",
+        payload: socialPostArtifact.payload,
+        sourceArtifactIds: socialPostArtifact.sourceArtifactIds
+      }
+    });
+  });
+
   it("keeps the selected artifact when the selected node produced no artifact", async () => {
     const analysisNode = {
       ...artifactState().currentNode!,

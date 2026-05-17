@@ -1266,7 +1266,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   async function saveArtifact(artifact: Artifact) {
     if (isBusy) return;
     if (!sessionState?.currentNode) return;
-    const artifactParentNodeId = viewNodeId ?? sessionState.currentNode.id;
+    const artifactParentNodeId = artifact.createdByNodeId;
     setIsBusy(true);
     setMessage("");
     try {
@@ -1286,7 +1286,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   async function handleArtifactAction(actionId: string, artifact: Artifact, input?: unknown) {
     if (isBusy) return;
     if (!sessionState?.currentNode) return;
-    const nodeId = viewNodeId ?? sessionState.currentNode.id;
+    const nodeId = artifact.createdByNodeId;
     setIsBusy(true);
     setMessage("");
     try {

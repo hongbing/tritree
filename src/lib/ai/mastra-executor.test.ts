@@ -211,6 +211,10 @@ describe("tree director compatibility generators", () => {
       "[treeable:mastra-prompt:draft]",
       expect.not.stringContaining("逻辑链审查")
     );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[treeable:mastra-prompt:draft]",
+      expect.not.stringContaining("# 内容工作流阶段")
+    );
   });
 
   it("passes editor and shared skills to the options agent", async () => {
@@ -246,6 +250,14 @@ describe("tree director compatibility generators", () => {
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:options]",
       expect.not.stringContaining("自然短句")
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[treeable:mastra-prompt:options]",
+      expect.stringContaining("# 内容工作流阶段")
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[treeable:mastra-prompt:options]",
+      expect.stringContaining("如果草稿已经连贯且接近可发布，优先收口发布")
     );
   });
 

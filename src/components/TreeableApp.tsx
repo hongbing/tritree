@@ -279,6 +279,15 @@ function defaultSelectedArtifactId(state: SessionState, currentSelectedId: strin
   return artifacts.at(-1)?.id ?? null;
 }
 
+function selectedArtifactIdForDisplay(state: SessionState, currentSelectedId: string | null) {
+  const artifacts = state.artifacts ?? [];
+  if (currentSelectedId && artifacts.some((artifact) => artifact.id === currentSelectedId)) {
+    return currentSelectedId;
+  }
+
+  return defaultSelectedArtifactId(state, null);
+}
+
 function withCustomOption(node: TreeNode, customOption: BranchOption | null) {
   if (!customOption) return node;
 
@@ -1371,7 +1380,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       }
     : null;
   const effectiveSelectedArtifactId = displaySessionState
-    ? defaultSelectedArtifactId(displaySessionState, selectedArtifactId)
+    ? selectedArtifactIdForDisplay(displaySessionState, selectedArtifactId)
     : null;
   const isArtifactGenerationForView = Boolean(
     activeViewNodeId && generationStage?.nodeId === activeViewNodeId && generationStage.stage === "artifact"

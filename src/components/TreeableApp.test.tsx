@@ -137,39 +137,26 @@ vi.mock("@/components/artifacts/ArtifactWorkspace", () => ({
       <div data-testid="artifact-workspace">
         <div data-testid="artifact-workspace-selected">{props.selectedArtifactId ?? "none"}</div>
         <div data-testid="artifact-workspace-artifacts">{props.artifacts.map((artifact) => artifact.id).join("|")}</div>
-        <div data-testid="live-draft">
-        <div data-testid="live-draft-generation-status">
+        <div data-testid="artifact-generation-status">
           {props.isGenerating ? `artifact:streaming:${props.thinkingText ?? ""}` : "idle"}
         </div>
-        <div className="draft-panel__actions" data-testid="mock-draft-actions">
-        </div>
-        <div className="draft-empty-state" data-testid="mock-draft-empty-actions">
-        </div>
-        <button type="button">
-          start comparison
-        </button>
-        <button type="button">
-          dismiss generated diff
-        </button>
+        {props.artifacts.map((artifact) => (
+          <button key={artifact.id} onClick={() => props.onSelectArtifact?.(artifact.id)} type="button">
+            select {artifact.id}
+          </button>
+        ))}
         <button
           onClick={() => selectedArtifact && props.onAction?.("rewrite-selection", selectedArtifact)}
           type="button"
         >
-          rewrite selection
-        </button>
-        <button
-          onClick={() => selectedArtifact && props.onAction?.("rewrite-selection", selectedArtifact)}
-          type="button"
-        >
-          rewrite stale selection
+          artifact action
         </button>
         <button
           onClick={() => selectedArtifact && props.onSave?.({ ...selectedArtifact, version: selectedArtifact.version + 1 })}
           type="button"
         >
-          save draft
+          save artifact
         </button>
-        </div>
       </div>
     );
   }
@@ -486,6 +473,33 @@ describe("TreeableApp", () => {
       expect.objectContaining({
         artifacts: state.artifacts,
         selectedArtifactId: "artifact-1"
+      })
+    );
+  });
+
+  it("lets the user select a different artifact in the workspace", async () => {
+    const state = artifactState({
+      artifacts: [socialPostArtifact, prdArtifact],
+      nodeArtifacts: [
+        { nodeId: "node-1", artifact: socialPostArtifact },
+        { nodeId: "node-prd", artifact: prdArtifact }
+      ]
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    expect(await screen.findByTestId("artifact-workspace")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "select artifact-prd" }));
+
+    expect(artifactWorkspaceMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        selectedArtifactId: "artifact-prd"
       })
     );
   });

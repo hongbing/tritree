@@ -208,7 +208,7 @@ describe("defaults config loader", () => {
 
     const systemSkillsById = new Map(defaults.systemSkills.map((skill) => [skill.id, skill]));
 
-    expect(defaults.systemSkills.map((skill) => skill.id).sort()).toEqual(defaultSystemSkillIds.toSorted());
+    expect(defaults.systemSkills.map((skill) => skill.id).sort()).toEqual([...defaultSystemSkillIds].sort());
     expect(defaults.systemSkills).toHaveLength(defaultSystemSkillIds.length);
     expect(systemSkillsById.get("system-planner")?.title).toBe("策划");
     expect(systemSkillsById.get("system-researcher")?.title).toBe("资料员");

@@ -3534,7 +3534,7 @@ button:disabled {
 }
 
 .history-minimap,
-.draft-panel {
+.social-post-panel {
   background: rgba(255, 255, 255, 0.88);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -3616,7 +3616,7 @@ button:disabled {
   line-height: 1.45;
 }
 
-.draft-panel {
+.social-post-panel {
   flex: 1 1 auto;
   position: relative;
   min-height: 300px;
@@ -3757,7 +3757,7 @@ button:disabled {
   border-radius: 8px;
 }
 
-.draft-panel__popover {
+.social-post-panel__popover {
   position: absolute;
   top: 48px;
   left: 18px;
@@ -3999,7 +3999,7 @@ button:disabled {
   color: #64748b;
 }
 
-.draft-panel__scroll {
+.social-post-panel__scroll {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -4019,7 +4019,7 @@ button:disabled {
   text-transform: uppercase;
 }
 
-.draft-panel__actions {
+.social-post-panel__actions {
   margin-left: auto;
   display: flex;
   align-items: center;
@@ -4691,7 +4691,7 @@ button:disabled {
   }
 
   .mobile-panel > .canvas-region,
-  .mobile-panel > .draft-panel,
+  .mobile-panel > .social-post-panel,
   .mobile-draft-region,
   .mobile-options-region {
     min-height: 0;
@@ -4806,7 +4806,7 @@ button:disabled {
     border-radius: 8px;
   }
 
-  .draft-panel {
+  .social-post-panel {
     min-height: 320px;
     height: auto;
     max-height: none;
@@ -4815,7 +4815,7 @@ button:disabled {
     padding: 14px;
   }
 
-  .draft-panel__scroll {
+  .social-post-panel__scroll {
     overflow-x: visible;
     overflow-y: visible;
     overscroll-behavior: auto;

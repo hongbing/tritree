@@ -3628,6 +3628,135 @@ button:disabled {
   overflow: hidden;
 }
 
+.artifact-workspace {
+  flex: 1 1 auto;
+  min-height: 300px;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 16px 45px rgba(16, 32, 51, 0.08);
+  backdrop-filter: blur(16px);
+}
+
+.artifact-workspace__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.artifact-workspace__header h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.96rem;
+  font-weight: 850;
+}
+
+.artifact-workspace__tabs {
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.artifact-workspace__tab {
+  max-width: 180px;
+  min-height: 34px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  padding: 7px 10px;
+  color: #475569;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.artifact-workspace__tab[aria-selected="true"] {
+  color: #0f172a;
+  background: #e0f2fe;
+  border-color: rgba(14, 165, 233, 0.45);
+}
+
+.artifact-workspace__body {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.artifact-workspace__status,
+.artifact-workspace__thinking,
+.artifact-workspace__empty,
+.artifact-fallback {
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.82);
+}
+
+.artifact-workspace__status,
+.artifact-workspace__thinking,
+.artifact-workspace__empty {
+  color: #475569;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.artifact-workspace__empty p {
+  margin: 0;
+}
+
+.artifact-renderer {
+  display: grid;
+  gap: 10px;
+  color: var(--ink);
+}
+
+.artifact-renderer h3,
+.artifact-fallback h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.artifact-renderer p,
+.artifact-fallback p {
+  margin: 0;
+  color: #334155;
+  font-size: 0.94rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.artifact-renderer pre,
+.artifact-fallback pre {
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  color: #0f172a;
+  font: 0.86rem/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+}
+
 .draft-panel__popover {
   position: absolute;
   top: 48px;

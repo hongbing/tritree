@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ReactNode } from "react";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TreeableApp } from "./TreeableApp";
 import { listArtifactTypes } from "@/lib/artifacts";
-import type { Skill } from "@/lib/domain";
+import type { Artifact, SessionState, Skill } from "@/lib/domain";
 
-const liveDraftMock = vi.hoisted(() => vi.fn());
+const artifactWorkspaceMock = vi.hoisted(() => vi.fn());
+const liveDraftMock = artifactWorkspaceMock;
 const treeCanvasMock = vi.hoisted(() => vi.fn());
 const signOutMock = vi.hoisted(() => vi.fn());
 
@@ -119,107 +119,57 @@ vi.mock("@/components/tree/TreeCanvas", () => ({
     )
 }));
 
-vi.mock("@/components/draft/LiveDraft", () => ({
-  LiveDraft: (props: {
-    comparisonDrafts?: { from: { body: string }; to: { body: string } } | null;
-    comparisonLabels?: { from: string; to: string } | null;
-    comparisonSelectionCount?: number;
-    draft?: { title?: string; body: string; hashtags?: string[]; imagePrompt?: string } | null;
-    emptyStateActions?: ReactNode;
-    generationPhase?: "preparing" | "thinking" | "streaming";
-    generationStage?: "draft" | "options" | null;
-    headerActions?: ReactNode;
-    headerPanel?: ReactNode;
-    isLiveDiff?: boolean;
-    isLiveDiffStreaming?: boolean;
-    liveDiffStreamingField?: "body" | "imagePrompt" | null;
-    isComparisonMode?: boolean;
-    onDismissLiveDiff?: () => void;
-    onRewriteSelection?: (request: {
-      draft: { title?: string; body: string; hashtags?: string[]; imagePrompt?: string };
-      field: "body";
-      instruction: string;
-      selectedText: string;
-      selectionEnd: number;
-      selectionStart: number;
-    }) => void | Promise<void>;
-    onSave?: (draft: { title?: string; body: string; hashtags?: string[]; imagePrompt?: string }) => void;
-    onStartComparison?: () => void;
-    previousDraft?: { title?: string; body: string; hashtags?: string[]; imagePrompt?: string } | null;
+vi.mock("@/components/artifacts/ArtifactWorkspace", () => ({
+  ArtifactWorkspace: (props: {
+    artifacts: Artifact[];
+    currentNode: { id: string } | null;
+    isBusy: boolean;
+    isGenerating: boolean;
+    onAction?: (actionId: string, artifact: Artifact) => void | Promise<void>;
+    onSave?: (artifact: Artifact) => void | Promise<void>;
+    onSelectArtifact?: (artifactId: string) => void;
+    selectedArtifactId: string | null;
     thinkingText?: string;
   }) => {
-    liveDraftMock(props);
+    artifactWorkspaceMock(props);
+    const selectedArtifact = props.artifacts.find((artifact) => artifact.id === props.selectedArtifactId) ?? null;
     return (
-      <div data-testid="live-draft">
+      <div data-testid="artifact-workspace">
+        <div data-testid="artifact-workspace-selected">{props.selectedArtifactId ?? "none"}</div>
+        <div data-testid="artifact-workspace-artifacts">{props.artifacts.map((artifact) => artifact.id).join("|")}</div>
+        <div data-testid="live-draft">
         <div data-testid="live-draft-generation-status">
-          {props.generationStage ? `${props.generationStage}:${props.generationPhase}:${props.thinkingText ?? ""}` : "idle"}
+          {props.isGenerating ? `artifact:streaming:${props.thinkingText ?? ""}` : "idle"}
         </div>
         <div className="draft-panel__actions" data-testid="mock-draft-actions">
-          {props.headerActions}
         </div>
         <div className="draft-empty-state" data-testid="mock-draft-empty-actions">
-          {props.emptyStateActions}
         </div>
-        {props.headerPanel}
-        <button onClick={props.onStartComparison} type="button">
+        <button type="button">
           start comparison
         </button>
-        <button onClick={props.onDismissLiveDiff} type="button">
+        <button type="button">
           dismiss generated diff
         </button>
         <button
-          onClick={() =>
-            props.onRewriteSelection?.({
-              draft: {
-                title: props.draft?.title ?? "Draft",
-                body: "重复句。目标句。重复句。",
-                hashtags: props.draft?.hashtags ?? [],
-                imagePrompt: props.draft?.imagePrompt ?? ""
-              },
-              field: "body",
-              selectedText: "目标句。",
-              selectionStart: 4,
-              selectionEnd: 8,
-              instruction: "补一个细节"
-            })
-          }
+          onClick={() => selectedArtifact && props.onAction?.("rewrite-selection", selectedArtifact)}
           type="button"
         >
           rewrite selection
         </button>
         <button
-          onClick={() =>
-            props.onRewriteSelection?.({
-              draft: {
-                title: props.draft?.title ?? "Draft",
-                body: "重复句。目标句已经变了。重复句。",
-                hashtags: props.draft?.hashtags ?? [],
-                imagePrompt: props.draft?.imagePrompt ?? ""
-              },
-              field: "body",
-              selectedText: "目标句。",
-              selectionStart: 4,
-              selectionEnd: 8,
-              instruction: "补一个细节"
-            })
-          }
+          onClick={() => selectedArtifact && props.onAction?.("rewrite-selection", selectedArtifact)}
           type="button"
         >
           rewrite stale selection
         </button>
         <button
-          onClick={() =>
-            props.onSave?.({
-              title: props.draft?.title ?? "Edited",
-              body: "Edited from mock",
-              hashtags: props.draft?.hashtags ?? [],
-              imagePrompt: props.draft?.imagePrompt ?? ""
-            })
-          }
+          onClick={() => selectedArtifact && props.onSave?.({ ...selectedArtifact, version: selectedArtifact.version + 1 })}
           type="button"
         >
           save draft
         </button>
+        </div>
       </div>
     );
   }
@@ -228,6 +178,8 @@ vi.mock("@/components/draft/LiveDraft", () => ({
 const rootMemory = {
   id: "default",
   preferences: {
+    artifactTypeId: "social-post" as const,
+    creationRequest: "",
     seed: "我想写 AI 产品经理的真实困境",
     domains: ["AI"],
     tones: ["Calm"],
@@ -309,6 +261,81 @@ const activeState = {
   enabledSkills: [skills[0]],
   publishPackage: null
 };
+
+const socialPostArtifact: Artifact = {
+  id: "artifact-1",
+  type: "social-post",
+  version: 1,
+  payload: { title: "Finished", body: "Ready", hashtags: ["#AI"], imagePrompt: "Tree" },
+  sourceArtifactIds: [],
+  createdByNodeId: "node-1",
+  createdAt: "2026-04-24T00:00:00.000Z",
+  updatedAt: "2026-04-24T00:00:00.000Z"
+};
+
+const prdArtifact: Artifact = {
+  id: "artifact-prd",
+  type: "prd",
+  version: 1,
+  payload: { markdown: "# PRD\n\nReady" },
+  sourceArtifactIds: [],
+  createdByNodeId: "node-prd",
+  createdAt: "2026-04-24T00:00:00.000Z",
+  updatedAt: "2026-04-24T00:00:00.000Z"
+};
+
+const generatedArtifact: Artifact = {
+  id: "artifact-2",
+  type: "social-post",
+  version: 1,
+  payload: { title: "Generated", body: "Generated body", hashtags: ["#AI"], imagePrompt: "Tree" },
+  sourceArtifactIds: ["artifact-1"],
+  createdByNodeId: "node-2",
+  createdAt: "2026-04-24T00:01:00.000Z",
+  updatedAt: "2026-04-24T00:01:00.000Z"
+};
+
+function artifactState(overrides: Partial<SessionState> = {}): SessionState {
+  return {
+    rootMemory,
+    session: {
+      id: "session-1",
+      title: "Artifact session",
+      status: "active",
+      artifactTypeId: "social-post",
+      currentNodeId: "node-1",
+      createdAt: "2026-04-24T00:00:00.000Z",
+      updatedAt: "2026-04-24T00:00:00.000Z"
+    },
+    currentNode: {
+      id: "node-1",
+      sessionId: "session-1",
+      parentId: null,
+      kind: "artifact",
+      producedArtifactId: "artifact-1",
+      sourceArtifactIds: [],
+      roundIndex: 1,
+      roundIntent: "Finish",
+      options: [
+        { id: "a", label: "A", description: "A", impact: "A", kind: "finish" },
+        { id: "b", label: "B", description: "B", impact: "B", kind: "finish" },
+        { id: "c", label: "C", description: "C", impact: "C", kind: "finish" }
+      ],
+      selectedOptionId: null,
+      foldedOptions: [],
+      agentMessages: [],
+      createdAt: "2026-04-24T00:00:00.000Z"
+    },
+    currentArtifact: socialPostArtifact,
+    artifacts: [socialPostArtifact],
+    nodeArtifacts: [{ nodeId: "node-1", artifact: socialPostArtifact }],
+    selectedPath: [],
+    foldedBranches: [],
+    enabledSkillIds: ["system-analysis"],
+    enabledSkills: [skills[0]],
+    ...overrides
+  };
+}
 
 function ndjsonResponse(chunks: string[]) {
   const encoder = new TextEncoder();
@@ -435,6 +462,149 @@ describe("TreeableApp", () => {
     expect(await screen.findByTestId("tree-canvas")).toHaveTextContent("choices enabled");
     expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/sessions");
     expect(screen.queryByLabelText("历史路径地图")).not.toBeInTheDocument();
+  });
+
+  it("passes all session artifacts into the artifact workspace", async () => {
+    const state = artifactState({
+      artifacts: [socialPostArtifact, prdArtifact],
+      nodeArtifacts: [
+        { nodeId: "node-1", artifact: socialPostArtifact },
+        { nodeId: "node-prd", artifact: prdArtifact }
+      ]
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    expect(await screen.findByTestId("artifact-workspace")).toBeInTheDocument();
+    expect(artifactWorkspaceMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        artifacts: state.artifacts,
+        selectedArtifactId: "artifact-1"
+      })
+    );
+  });
+
+  it("keeps the selected artifact when the selected node produced no artifact", async () => {
+    const analysisNode = {
+      ...artifactState().currentNode!,
+      id: "node-analysis",
+      kind: "analysis" as const,
+      producedArtifactId: null,
+      sourceArtifactIds: ["artifact-1"],
+      roundIndex: 2,
+      roundIntent: "Analyze",
+      options: []
+    };
+    const state = artifactState({
+      session: { ...artifactState().session, currentNodeId: "node-analysis" },
+      currentNode: analysisNode,
+      currentArtifact: null,
+      artifacts: [socialPostArtifact],
+      nodeArtifacts: [{ nodeId: "node-1", artifact: socialPostArtifact }],
+      selectedPath: [artifactState().currentNode!, analysisNode]
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    expect(await screen.findByTestId("artifact-workspace")).toBeInTheDocument();
+    expect(artifactWorkspaceMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        artifacts: [socialPostArtifact],
+        selectedArtifactId: "artifact-1"
+      })
+    );
+  });
+
+  it("reads artifact.replace stream events and selects the streamed artifact", async () => {
+    const artifactStream = controlledNdjsonResponse();
+    const childNode = {
+      ...artifactState().currentNode!,
+      id: "node-2",
+      parentId: "node-1",
+      parentOptionId: "a" as const,
+      kind: "analysis" as const,
+      producedArtifactId: null,
+      sourceArtifactIds: ["artifact-1"],
+      roundIndex: 2,
+      roundIntent: "A",
+      options: []
+    };
+    const chosenState = artifactState({
+      session: { ...artifactState().session, currentNodeId: "node-2" },
+      currentNode: childNode,
+      currentArtifact: null,
+      artifacts: [socialPostArtifact],
+      nodeArtifacts: [{ nodeId: "node-1", artifact: socialPostArtifact }],
+      selectedPath: [artifactState().currentNode!, childNode]
+    });
+    const finalState = artifactState({
+      session: { ...artifactState().session, currentNodeId: "node-2" },
+      currentNode: {
+        ...childNode,
+        kind: "artifact",
+        producedArtifactId: "artifact-2",
+        options: artifactState().currentNode!.options
+      },
+      currentArtifact: generatedArtifact,
+      artifacts: [socialPostArtifact, generatedArtifact],
+      nodeArtifacts: [
+        { nodeId: "node-1", artifact: socialPostArtifact },
+        { nodeId: "node-2", artifact: generatedArtifact }
+      ],
+      selectedPath: [
+        artifactState().currentNode!,
+        { ...childNode, kind: "artifact", producedArtifactId: "artifact-2", options: artifactState().currentNode!.options }
+      ]
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: artifactState() }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: chosenState }) })
+      .mockResolvedValueOnce(artifactStream.response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "choose displayed option" }));
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        5,
+        "/api/sessions/session-1/artifact/generate/stream",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ nodeId: "node-2" })
+        })
+      );
+    });
+
+    act(() => {
+      artifactStream.push({ type: "artifact.replace", artifact: finalState.currentArtifact });
+      artifactStream.push({ type: "done", state: finalState });
+      artifactStream.close();
+    });
+
+    await vi.waitFor(() => {
+      expect(artifactWorkspaceMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [socialPostArtifact, generatedArtifact],
+          selectedArtifactId: "artifact-2"
+        })
+      );
+    });
   });
 
   it("opens the requested draft when an initial session id is provided", async () => {

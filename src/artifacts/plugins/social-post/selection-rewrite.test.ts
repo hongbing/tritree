@@ -1,18 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  buildSelectionRewritePrompt,
-  extractPartialSelectionRewriteText,
-  parseSelectionRewriteText,
-  rewriteSelectedDraftText,
-  streamSelectedDraftText,
-  type SelectionRewriteInput
+  buildSocialPostSelectionRewritePrompt,
+  extractPartialSocialPostSelectionRewriteText,
+  parseSocialPostSelectionRewriteText,
+  rewriteSelectedSocialPostText,
+  streamSelectedSocialPostText,
+  type SocialPostSelectionRewriteInput
 } from "./selection-rewrite";
 
 const input = {
   rootSummary: "Seed：写一个产品故事",
   learnedSummary: "用户喜欢具体工作场景。",
   pathSummary: "第 1 轮：起稿；已选择：A 补真实场景",
-  currentDraft: {
+  currentPayload: {
     title: "产品故事",
     body: "第一句。第二句要更具体。第三句。",
     hashtags: ["#产品"],
@@ -29,7 +29,7 @@ const input = {
   field: "body" as const,
   selectedText: "第二句要更具体。",
   instruction: "补一个真实工作细节"
-} satisfies SelectionRewriteInput;
+} satisfies SocialPostSelectionRewriteInput;
 
 const consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
 
@@ -38,13 +38,12 @@ beforeEach(() => {
   consoleInfoSpy.mockClear();
 });
 
-describe("buildSelectionRewritePrompt", () => {
-  it("includes draft context, selected text, instruction, and enabled skills without path context", () => {
-    const prompt = buildSelectionRewritePrompt(input);
+describe("buildSocialPostSelectionRewritePrompt", () => {
+  it("includes social-post context, selected text, instruction, and writer skills", () => {
+    const prompt = buildSocialPostSelectionRewritePrompt(input);
 
+    expect(prompt).toContain("social-post artifact");
     expect(prompt).toContain("Seed：写一个产品故事");
-    expect(prompt).not.toContain("第 1 轮：起稿");
-    expect(prompt).not.toContain("已选路径");
     expect(prompt).toContain("正文：第一句。第二句要更具体。第三句。");
     expect(prompt).toContain("选中的原文：\n第二句要更具体。");
     expect(prompt).toContain("修改要求：\n补一个真实工作细节");
@@ -53,7 +52,7 @@ describe("buildSelectionRewritePrompt", () => {
   });
 
   it("uses only writer and shared skills in the rewrite prompt", () => {
-    const prompt = buildSelectionRewritePrompt({
+    const prompt = buildSocialPostSelectionRewritePrompt({
       ...input,
       enabledSkills: [
         {
@@ -86,39 +85,39 @@ describe("buildSelectionRewritePrompt", () => {
   });
 });
 
-describe("parseSelectionRewriteText", () => {
+describe("parseSocialPostSelectionRewriteText", () => {
   it("parses replacement JSON even when wrapped in text fences", () => {
-    expect(parseSelectionRewriteText('```json\n{"replacementText":"第二句加入了排期会上被追问的细节。"}\n```')).toEqual({
+    expect(parseSocialPostSelectionRewriteText('```json\n{"replacementText":"第二句加入了排期会上被追问的细节。"}\n```')).toEqual({
       replacementText: "第二句加入了排期会上被追问的细节。"
     });
   });
 
   it("rejects empty replacement text", () => {
-    expect(() => parseSelectionRewriteText('{"replacementText":"   "}')).toThrow(
+    expect(() => parseSocialPostSelectionRewriteText('{"replacementText":"   "}')).toThrow(
       "AI rewrite returned empty replacement text."
     );
   });
 
   it("preserves leading and trailing whitespace in replacement text", () => {
-    expect(parseSelectionRewriteText('{"replacementText":"  第二句加入排期会细节。\\n"}')).toEqual({
+    expect(parseSocialPostSelectionRewriteText('{"replacementText":"  第二句加入排期会细节。\\n"}')).toEqual({
       replacementText: "  第二句加入排期会细节。\n"
     });
   });
 
   it("repairs raw newlines inside replacement JSON strings", () => {
-    expect(parseSelectionRewriteText('{"replacementText":"第一行\n第二行"}')).toEqual({
+    expect(parseSocialPostSelectionRewriteText('{"replacementText":"第一行\n第二行"}')).toEqual({
       replacementText: "第一行\n第二行"
     });
   });
 });
 
-describe("extractPartialSelectionRewriteText", () => {
+describe("extractPartialSocialPostSelectionRewriteText", () => {
   it("extracts visible replacement text from incomplete JSON", () => {
-    expect(extractPartialSelectionRewriteText('{"replacementText":"第二句正在生成')).toBe("第二句正在生成");
+    expect(extractPartialSocialPostSelectionRewriteText('{"replacementText":"第二句正在生成')).toBe("第二句正在生成");
   });
 });
 
-describe("rewriteSelectedDraftText", () => {
+describe("rewriteSelectedSocialPostText", () => {
   it("returns the parsed replacement from the Mastra structured agent", async () => {
     const signal = new AbortController().signal;
     const memory = { resource: "root", thread: "session-1" };
@@ -129,7 +128,7 @@ describe("rewriteSelectedDraftText", () => {
     };
 
     await expect(
-      rewriteSelectedDraftText(input, {
+      rewriteSelectedSocialPostText(input, {
         memory,
         selectionRewriteAgent: fakeAgent,
         signal
@@ -153,18 +152,18 @@ describe("rewriteSelectedDraftText", () => {
       }))
     };
 
-    await rewriteSelectedDraftText(input, {
+    await rewriteSelectedSocialPostText(input, {
       selectionRewriteAgent: fakeAgent
     });
 
-    const responseLogs = consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-response:selection-rewrite]");
+    const responseLogs = consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-response:social-post-selection-rewrite]");
     expect(responseLogs).toHaveLength(1);
     expect(responseLogs[0]?.[1]).toContain('"mode": "generate"');
     expect(responseLogs[0]?.[1]).toContain("这行也要完整进日志。");
   });
 });
 
-describe("streamSelectedDraftText", () => {
+describe("streamSelectedSocialPostText", () => {
   it("streams partial replacement text before returning the final replacement", async () => {
     const finalObject = { replacementText: "第二句加入排期会细节。" };
     const fakeAgent = {
@@ -180,7 +179,7 @@ describe("streamSelectedDraftText", () => {
     const onText = vi.fn();
 
     await expect(
-      streamSelectedDraftText(input, {
+      streamSelectedSocialPostText(input, {
         selectionRewriteAgent: fakeAgent,
         onText
       })
@@ -189,7 +188,7 @@ describe("streamSelectedDraftText", () => {
     expect(fakeAgent.stream).toHaveBeenCalledWith(
       [{ role: "user", content: expect.stringContaining("补一个真实工作细节") }],
       expect.objectContaining({
-        memory: expect.objectContaining({ resource: "treeable-selection-rewrite" }),
+        memory: expect.objectContaining({ resource: "treeable-social-post-selection-rewrite" }),
         structuredOutput: expect.objectContaining({ schema: expect.anything() })
       })
     );
@@ -219,19 +218,19 @@ describe("streamSelectedDraftText", () => {
       generate: vi.fn()
     };
 
-    await streamSelectedDraftText(input, {
+    await streamSelectedSocialPostText(input, {
       selectionRewriteAgent: fakeAgent
     });
 
-    expect(consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-stream:selection-rewrite-partial]")).toHaveLength(0);
+    expect(consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-stream:social-post-selection-rewrite-partial]")).toHaveLength(0);
 
     consoleInfoSpy.mockClear();
     vi.stubEnv("TRITREE_DEBUG_STREAM", "1");
-    await streamSelectedDraftText(input, {
+    await streamSelectedSocialPostText(input, {
       selectionRewriteAgent: fakeAgent
     });
 
-    const streamLogs = consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-stream:selection-rewrite-partial]");
+    const streamLogs = consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-stream:social-post-selection-rewrite-partial]");
     expect(streamLogs).toHaveLength(2);
     expect(streamLogs[0]?.[1]).toContain("第二句");
     expect(streamLogs[1]?.[1]).toContain("第二句加入排期会细节。");

@@ -1,6 +1,7 @@
 import type { ArtifactPluginServer } from "@/artifacts/types";
 import { replaceSocialPostSelection, SocialPostRewriteSelectionInputSchema } from "./actions";
 import { SocialPostPayloadSchema, type SocialPostPayload } from "./schema";
+import { rewriteSelectedSocialPostText } from "./selection-rewrite";
 
 export const socialPostPlugin: ArtifactPluginServer<SocialPostPayload> = {
   id: "social-post",
@@ -30,12 +31,22 @@ export const socialPostPlugin: ArtifactPluginServer<SocialPostPayload> = {
   normalizeAiOutput(output) {
     return SocialPostPayloadSchema.parse(output);
   },
-  async handleAction({ artifact, input }) {
+  async handleAction({ artifact, input, sessionState }) {
     const payload = SocialPostPayloadSchema.parse(artifact.payload);
     const rewriteInput = SocialPostRewriteSelectionInputSchema.parse(input);
+    const { replacementText } = await rewriteSelectedSocialPostText({
+      currentPayload: payload,
+      enabledSkills: sessionState.enabledSkills ?? [],
+      field: rewriteInput.field,
+      instruction: rewriteInput.instruction,
+      learnedSummary: sessionState.rootMemory.learnedSummary,
+      pathSummary: "",
+      rootSummary: sessionState.rootMemory.summary,
+      selectedText: rewriteInput.selectedText
+    });
 
     return {
-      payload: replaceSocialPostSelection(payload, rewriteInput),
+      payload: replaceSocialPostSelection(payload, { ...rewriteInput, replacementText }),
       sourceArtifactIds: [artifact.id]
     };
   },

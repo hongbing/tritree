@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { socialPostPlugin } from "@/artifacts/plugins/social-post/server";
+
+const rewriteSelectedSocialPostTextMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/artifacts/plugins/social-post/selection-rewrite", () => ({
+  rewriteSelectedSocialPostText: rewriteSelectedSocialPostTextMock
+}));
+
+beforeEach(() => {
+  rewriteSelectedSocialPostTextMock.mockReset();
+});
 
 describe("socialPostPlugin", () => {
   it("owns the current social post payload shape", () => {
@@ -15,6 +25,8 @@ describe("socialPostPlugin", () => {
   });
 
   it("rewrites a selected body passage into a new social post payload", async () => {
+    rewriteSelectedSocialPostTextMock.mockResolvedValue({ replacementText: "第二句已经更清楚。" });
+
     const result = await socialPostPlugin.handleAction?.({
       artifact: {
         id: "artifact-1",
@@ -33,12 +45,29 @@ describe("socialPostPlugin", () => {
       },
       input: {
         field: "body",
+        instruction: "改得更清楚",
         selectedText: "第二句要改。",
-        replacementText: "第二句已经更清楚。"
+        selectionEnd: 10,
+        selectionStart: 4
       },
-      sessionState: {} as never
+      sessionState: {
+        rootMemory: { summary: "Seed：写产品故事", learnedSummary: "喜欢具体。" },
+        enabledSkills: []
+      } as never
     });
 
+    expect(rewriteSelectedSocialPostTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentPayload: {
+          title: "标题",
+          body: "第一句。第二句要改。",
+          hashtags: ["#AI"],
+          imagePrompt: "白板"
+        },
+        instruction: "改得更清楚",
+        selectedText: "第二句要改。"
+      })
+    );
     expect(result).toEqual({
       payload: {
         title: "标题",

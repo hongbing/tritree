@@ -1,42 +1,31 @@
 import { z } from "zod";
 import { SocialPostPayloadSchema, type SocialPostPayload } from "./schema";
 
-export const SocialPostRewriteSelectionInputSchema = z
+const SocialPostRewriteSelectionInputBaseSchema = z
   .object({
     field: z.literal("body"),
-    replacementText: z.string().max(6000).refine((value) => value.trim().length > 0),
+    instruction: z.string().trim().min(1).max(1200),
     selectedText: z.string().max(6000).refine((value) => value.trim().length > 0),
-    selectionEnd: z.number().int().nonnegative().optional(),
-    selectionStart: z.number().int().nonnegative().optional()
+    selectionEnd: z.number().int().nonnegative(),
+    selectionStart: z.number().int().nonnegative()
   })
-  .strict()
-  .superRefine((input, context) => {
-    const hasStart = input.selectionStart !== undefined;
-    const hasEnd = input.selectionEnd !== undefined;
-    if (hasStart !== hasEnd) {
-      context.addIssue({
-        code: "custom",
-        message: "selectionStart and selectionEnd must be provided together."
-      });
-      return;
-    }
+  .strict();
 
-    if (input.selectionStart !== undefined && input.selectionEnd !== undefined && input.selectionEnd < input.selectionStart) {
-      context.addIssue({
-        code: "custom",
-        message: "selectionEnd must be greater than or equal to selectionStart."
-      });
-    }
-  });
+export const SocialPostRewriteSelectionInputSchema =
+  SocialPostRewriteSelectionInputBaseSchema.superRefine(validateSelectionRange);
 
 export type SocialPostRewriteSelectionInput = z.infer<typeof SocialPostRewriteSelectionInputSchema>;
 
+const SocialPostRewriteSelectionResultInputSchema = SocialPostRewriteSelectionInputBaseSchema.extend({
+  replacementText: z.string().max(6000).refine((value) => value.trim().length > 0)
+}).strict().superRefine(validateSelectionRange);
+
 export function replaceSocialPostSelection(
   payload: SocialPostPayload,
-  input: SocialPostRewriteSelectionInput
+  input: SocialPostRewriteSelectionInput & { replacementText: string }
 ): SocialPostPayload {
   const parsedPayload = SocialPostPayloadSchema.parse(payload);
-  const parsedInput = SocialPostRewriteSelectionInputSchema.parse(input);
+  const parsedInput = SocialPostRewriteSelectionResultInputSchema.parse(input);
 
   return {
     ...parsedPayload,
@@ -44,20 +33,23 @@ export function replaceSocialPostSelection(
   };
 }
 
-function replaceSelectedText(body: string, input: SocialPostRewriteSelectionInput) {
-  if (input.selectionStart !== undefined && input.selectionEnd !== undefined) {
-    const selectedText = body.slice(input.selectionStart, input.selectionEnd);
-    if (selectedText !== input.selectedText) {
-      throw new Error("Selected text no longer matches the artifact body.");
-    }
-
-    return `${body.slice(0, input.selectionStart)}${input.replacementText}${body.slice(input.selectionEnd)}`;
+function replaceSelectedText(body: string, input: SocialPostRewriteSelectionInput & { replacementText: string }) {
+  const selectedText = body.slice(input.selectionStart, input.selectionEnd);
+  if (selectedText !== input.selectedText) {
+    throw new Error("Selected text no longer matches the artifact body.");
   }
 
-  const selectionIndex = body.indexOf(input.selectedText);
-  if (selectionIndex === -1) {
-    throw new Error("Selected text was not found in the artifact body.");
-  }
+  return `${body.slice(0, input.selectionStart)}${input.replacementText}${body.slice(input.selectionEnd)}`;
+}
 
-  return `${body.slice(0, selectionIndex)}${input.replacementText}${body.slice(selectionIndex + input.selectedText.length)}`;
+function validateSelectionRange(
+  input: { selectionEnd: number; selectionStart: number },
+  context: z.RefinementCtx
+) {
+  if (input.selectionEnd < input.selectionStart) {
+    context.addIssue({
+      code: "custom",
+      message: "selectionEnd must be greater than or equal to selectionStart."
+    });
+  }
 }

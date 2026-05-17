@@ -1,7 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { replaceSocialPostSelection } from "./actions";
+import { replaceSocialPostSelection, SocialPostRewriteSelectionInputSchema } from "./actions";
 
 describe("replaceSocialPostSelection", () => {
+  it("accepts renderer rewrite requests before the AI replacement is produced", () => {
+    expect(
+      SocialPostRewriteSelectionInputSchema.parse({
+        field: "body",
+        instruction: "补一个真实工作细节",
+        selectedText: "第二句",
+        selectionEnd: 7,
+        selectionStart: 4
+      })
+    ).toEqual({
+      field: "body",
+      instruction: "补一个真实工作细节",
+      selectedText: "第二句",
+      selectionEnd: 7,
+      selectionStart: 4
+    });
+  });
+
   it("replaces the selected body range with the replacement text", () => {
     const payload = {
       title: "T",
@@ -13,6 +31,7 @@ describe("replaceSocialPostSelection", () => {
     expect(
       replaceSocialPostSelection(payload, {
         field: "body",
+        instruction: "改得更清楚",
         replacementText: "改写句",
         selectedText: "第二句",
         selectionEnd: 7,
@@ -37,6 +56,7 @@ describe("replaceSocialPostSelection", () => {
     expect(() =>
       replaceSocialPostSelection(payload, {
         field: "body",
+        instruction: "改得更清楚",
         replacementText: "改写句",
         selectedText: "第二句",
         selectionEnd: 3,

@@ -3,6 +3,7 @@ import { POST } from "./route";
 
 const getRepositoryMock = vi.hoisted(() => vi.fn());
 const requireCurrentUserMock = vi.hoisted(() => vi.fn());
+const rewriteSelectedSocialPostTextMock = vi.hoisted(() => vi.fn());
 
 const currentUser = {
   id: "user-1",
@@ -110,14 +111,20 @@ vi.mock("@/lib/db/repository", () => ({
   getRepository: getRepositoryMock
 }));
 
+vi.mock("@/artifacts/plugins/social-post/selection-rewrite", () => ({
+  rewriteSelectedSocialPostText: rewriteSelectedSocialPostTextMock
+}));
+
 beforeEach(() => {
   getRepositoryMock.mockReset();
   requireCurrentUserMock.mockReset();
+  rewriteSelectedSocialPostTextMock.mockReset();
   requireCurrentUserMock.mockResolvedValue(currentUser);
 });
 
 describe("POST /api/sessions/:sessionId/artifact/actions/:actionId", () => {
   it("dispatches a supported action through the bundled artifact plugin", async () => {
+    rewriteSelectedSocialPostTextMock.mockResolvedValue({ replacementText: "Rewritten body" });
     const expectedPayload = { title: "Original", body: "Rewritten body", hashtags: [], imagePrompt: "" };
     const nextState = {
       ...state,
@@ -135,13 +142,26 @@ describe("POST /api/sessions/:sessionId/artifact/actions/:actionId", () => {
         body: JSON.stringify({
           nodeId: "node-1",
           artifactId: "artifact-1",
-          input: { field: "body", selectedText: "Original body", replacementText: "Rewritten body" }
+          input: {
+            field: "body",
+            instruction: "Rewrite this",
+            selectedText: "Original body",
+            selectionEnd: 13,
+            selectionStart: 0
+          }
         })
       }),
       { params: Promise.resolve({ sessionId: "session-1", actionId: "rewrite-selection" }) }
     );
 
     expect(response.status).toBe(200);
+    expect(rewriteSelectedSocialPostTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentPayload: artifact.payload,
+        instruction: "Rewrite this",
+        selectedText: "Original body"
+      })
+    );
     expect(createArtifactChild).toHaveBeenCalledWith({
       userId: "user-1",
       sessionId: "session-1",

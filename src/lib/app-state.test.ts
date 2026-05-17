@@ -171,7 +171,7 @@ describe("summarizeSessionForDirector", () => {
     expect(summary.selectedOptionLabel).toContain("职场黑话");
     expect(summary.selectedOptionLabel).toContain("用户补充要求：请保留一点讽刺感。");
     expect(summary.selectedOptionLabel).toContain("方向范围：专注");
-    expect(summary.selectedOptionLabel).toContain("沿当前稿已经成立的思路继续推进");
+    expect(summary.selectedOptionLabel).toContain("沿当前产物已经成立的思路继续推进");
     expect(summary.selectedOptionLabel).not.toContain("硬约束");
     expect(summary.selectedOptionLabel).not.toContain("不主动改换主题、读者、前提或基本结构");
     expect(summary.selectedOptionLabel).not.toContain("三个答案");
@@ -299,7 +299,7 @@ describe("summarizeSessionForDirector", () => {
 
     expect(finalMessage).toContain("本轮要求：");
     expect(finalMessage).toContain("方向范围：专注");
-    expect(finalMessage).toContain("沿当前稿已经成立的思路继续推进");
+    expect(finalMessage).toContain("沿当前产物已经成立的思路继续推进");
     expect(finalMessage).not.toContain("不要主动改换主题、读者、前提或基本结构");
     expect(finalMessage).not.toContain("近距离的三种处理办法");
     expect(finalMessage.indexOf("本轮要求：")).toBeLessThan(finalMessage.indexOf("当前内容："));

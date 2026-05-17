@@ -51,7 +51,7 @@ function formatOptionsDirectionRangeHint(optionMode: OptionGenerationMode) {
   }
 
   if (optionMode === "focused") {
-    return "方向范围：专注。沿当前稿已经成立的思路继续推进，优先补清楚、写顺、写实。";
+    return "方向范围：专注。沿当前产物已经成立的思路继续推进，优先补清楚、写顺、写实。";
   }
 
   return "";
@@ -63,7 +63,7 @@ function formatArtifactDirectionRangeHint(optionMode: OptionGenerationMode) {
   }
 
   if (optionMode === "focused") {
-    return "方向范围：专注。沿当前稿已经成立的思路继续推进，优先补清楚、写顺、写实。";
+    return "方向范围：专注。沿当前产物已经成立的思路继续推进，优先补清楚、写顺、写实。";
   }
 
   return "";

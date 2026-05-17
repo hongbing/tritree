@@ -72,9 +72,9 @@ describe("agent instructions", () => {
   it("asks the director to turn diagnosis into one question and three answers", () => {
     const instructions = buildTreeOptionsInstructions(input);
 
-    expect(instructions).toContain("先诊断当前内容最需要用户决定的一个问题");
+    expect(instructions).toContain("先诊断当前产物最需要用户决定的一个问题");
     expect(instructions).toContain("三个答案不是三个问题");
-    expect(instructions).toContain("按当前内容的问题程度和后续生成收益决定这个问题的优先级");
+    expect(instructions).toContain("按当前产物的问题程度和后续生成收益决定这个问题的优先级");
     expect(instructions).toContain("不要预设必须询问某一类问题");
     expect(instructions).toContain("文案表达、断句和分段整理是任何阶段都可以成为可选答案");
     expect(instructions).toContain("表达本身已经承载了主要信息，只是长段、口语散、层次不清或局部不顺");
@@ -136,7 +136,7 @@ describe("agent instructions", () => {
     expect(optionsInstructions).toContain("澄清问题设计者");
     expect(optionsInstructions).toContain("初始内容");
     expect(optionsInstructions).toContain("修改历程");
-    expect(optionsInstructions).toContain("当前内容");
+    expect(optionsInstructions).toContain("当前产物");
     expect(optionsInstructions).toContain("一个当前最值得让用户回答的问题");
     expect(optionsInstructions).not.toContain("已出现过的建议标题");
     expect(optionsInstructions).toContain("三个答案的标题和处理角度要有明显区别");

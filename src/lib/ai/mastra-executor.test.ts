@@ -183,7 +183,7 @@ describe("tree director compatibility generators", () => {
     ]
   };
 
-  it("passes writer and shared skills to the draft agent", async () => {
+  it("passes all enabled skills to the draft agent", async () => {
     const fakeAgent = {
       generate: vi.fn(async () => ({
         object: {
@@ -209,7 +209,7 @@ describe("tree director compatibility generators", () => {
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:draft]",
-      expect.not.stringContaining("逻辑链审查")
+      expect.stringContaining("逻辑链审查")
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:draft]",
@@ -217,7 +217,7 @@ describe("tree director compatibility generators", () => {
     );
   });
 
-  it("passes editor and shared skills to the options agent", async () => {
+  it("passes all enabled skills to the options agent", async () => {
     const finalObject = {
       roundIntent: "选择下一步",
       options: [
@@ -249,15 +249,11 @@ describe("tree director compatibility generators", () => {
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:options]",
-      expect.not.stringContaining("自然短句")
+      expect.stringContaining("自然短句")
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:options]",
-      expect.stringContaining("# 内容工作流阶段")
-    );
-    expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "[treeable:mastra-prompt:options]",
-      expect.stringContaining("如果草稿已经连贯且接近可发布，优先收口发布")
+      expect.not.stringContaining("# 内容工作流阶段")
     );
   });
 
@@ -295,7 +291,7 @@ describe("tree director compatibility generators", () => {
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:next-step]",
-      expect.stringContaining("决定下一步是继续澄清，还是授权生成草稿")
+      expect.stringContaining("决定下一步 action 是 options、draft 或 complete")
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:next-step]",
@@ -303,7 +299,35 @@ describe("tree director compatibility generators", () => {
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:next-step]",
-      expect.not.stringContaining("自然短句")
+      expect.stringContaining("自然短句")
+    );
+  });
+
+  it("carries subagent template summaries from context overrides", async () => {
+    const fakeAgent = {
+      generate: vi.fn(async () => ({
+        object: {
+          roundIntent: "继续完善",
+          draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+        }
+      }))
+    };
+
+    await generateTreeDraft({
+      parts: directorParts,
+      context: {
+        subagentTemplateSummaries: ["资料核查模板：核查一个事实，返回结论和来源。"]
+      },
+      treeDraftAgent: fakeAgent
+    });
+
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[treeable:mastra-prompt:draft]",
+      expect.stringContaining("# 可用 Subagent 模板")
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[treeable:mastra-prompt:draft]",
+      expect.stringContaining("资料核查模板：核查一个事实，返回结论和来源。")
     );
   });
 

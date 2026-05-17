@@ -1,5 +1,4 @@
 import type { Skill } from "@/lib/domain";
-import { buildContentWorkflowOptionInstructions } from "./content-workflow";
 
 export type SharedAgentContextInput = {
   rootSummary: string;
@@ -7,6 +6,7 @@ export type SharedAgentContextInput = {
   longTermMemory?: string;
   enabledSkills: Skill[];
   availableSkillSummaries?: string[];
+  subagentTemplateSummaries?: string[];
   toolSummaries?: string[];
 };
 
@@ -22,6 +22,9 @@ export function buildSharedAgentContext(input: SharedAgentContextInput) {
     input.availableSkillSummaries?.length
       ? ["# 可加载 Skill 摘要", input.availableSkillSummaries.join("\n")].join("\n")
       : "",
+    input.subagentTemplateSummaries?.length
+      ? ["# 可用 Subagent 模板", input.subagentTemplateSummaries.join("\n")].join("\n")
+      : "",
     input.toolSummaries?.length ? ["# 可用工具和 MCP 能力", input.toolSummaries.join("\n")].join("\n") : ""
   ]
     .filter(Boolean)
@@ -30,10 +33,10 @@ export function buildSharedAgentContext(input: SharedAgentContextInput) {
 
 export function buildTreeDraftInstructions(input: SharedAgentContextInput) {
   return [
-    "# 作者任务",
-    "你是一位写作者/内容生成器。",
-    "你的任务是基于初始内容、对话中已形成的草稿、历史写作意图和用户想要完成的写作意图，生成新的内容版本。",
+    "# 主 agent 任务",
+    "你负责协调 Skills、工具和 subagents，把初始内容、对话中已形成的草稿、历史写作意图和用户本轮目标转化为新的内容版本，并提交更新后的 draft。",
     buildSharedAgentContext(input),
+    actualWorkExecutionProtocol(),
     "# 本任务执行规则",
     "把用户想要完成的写作意图当作本轮写作目标，不需要解释它的来源。",
     "把历史当作一路写作版本的演进：理解每一轮为什么改、改成了什么，再决定本轮应该怎样写。",
@@ -59,14 +62,14 @@ export function buildTreeDraftInstructions(input: SharedAgentContextInput) {
 
 export function buildTreeOptionsInstructions(input: SharedAgentContextInput) {
   return [
-    "# 总导演任务",
-    "你是一位经验丰富的澄清问题设计者。",
-    "你的任务不是续写正文，而是阅读初始内容、修改历程和当前内容，提出一个当前最值得让用户回答的问题，并给出三个可选择答案。",
+    "# 主 agent 任务",
+    "你负责阅读初始内容、修改历程和当前内容，先做当前最有用的一步工作；完成能直接完成的判断、整理、核查或委托后，再决定是否确实需要用户做下一步选择。",
     buildSharedAgentContext(input),
-    buildContentWorkflowOptionInstructions(),
+    actualWorkExecutionProtocol(),
+    threeChoiceProtocol(),
     "# 本任务执行规则",
     "把历史当作一篇文章的编辑记录：初始内容是什么，经过了哪些修改，现在的内容走到了哪里。",
-    "先诊断当前内容最需要用户决定的一个问题，再把这个问题写进 roundIntent。",
+    "先处理当前已经能处理的表达、主线、信息、读者或结构问题；只有真实用户决策是下一步 blocker 时，才把这个问题写进 roundIntent 并给出三个答案。",
     "三个答案不是三个问题，而是对同一个问题的三个可选答案或解决口径。",
     "按当前内容的问题程度和后续生成收益决定这个问题的优先级，不要预设必须询问某一类问题。",
     "文案表达、断句和分段整理是任何阶段都可以成为可选答案；当表达本身已经承载了主要信息，只是长段、口语散、层次不清或局部不顺时，可以给保留原意的表达优化答案。",
@@ -104,10 +107,11 @@ export function buildTreeOptionsInstructions(input: SharedAgentContextInput) {
 
 export function buildTreeNextStepInstructions(input: SharedAgentContextInput) {
   return [
-    "# 总导演任务",
-    "你负责在用户选择一个答案之后，决定下一步是继续澄清，还是授权生成草稿。",
-    "你不写正文，也不生成草稿内容；你只做路由决策。",
+    "# 主 agent 任务",
+    "你负责在用户选择一个答案之后，决定下一步 action 是 options、draft 或 complete；可以使用 Skills、工具或 subagents 做必要判断，再提交路由结果。",
     buildSharedAgentContext(input),
+    actualWorkExecutionProtocol(),
+    threeChoiceProtocol(),
     "# 本任务执行规则",
     "阅读初始内容、当前内容、历史写作意图、用户刚刚选择的答案和用户补充说明。",
     "如果当前信息已经足够让写作者执行用户选择，返回 action=draft。",
@@ -129,6 +133,25 @@ export function buildTreeNextStepInstructions(input: SharedAgentContextInput) {
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function actualWorkExecutionProtocol() {
+  return [
+    "# actual-work 执行协议",
+    "先判断本轮最有价值的实际工作，并优先直接推进：可以自己处理、调用普通工具、调用 run_subagent_template、调用 run_temporary_subagent，或在结果足够时提交 draft/publish/complete 对应的最终结构化结果。",
+    "只有真实用户输入成为 blocker 时，才进入三选一；不要把 agent 自己能判断、能改写、能核查或能委托的事项交给用户决定。",
+    "enabled Skills 提供角色判断和委托指导：用它们判断哪些工作该由主 agent 完成，哪些工作适合交给 subagent 或工具。",
+    "调用 subagent 时给出短任务、最小上下文、期望输出和必要约束；不要把整段历史或不相关 Skill 细节塞给 subagent。"
+  ].join("\n");
+}
+
+function threeChoiceProtocol() {
+  return [
+    "# 三选一协议",
+    "三选一只用于真实用户决策：当下一步需要用户在三个可执行口径中选择时，先形成 decisionRationale，再把最需要用户决定的问题写成 roundIntent。",
+    "三个答案都回答同一个 roundIntent；它们应该是同一问题下的三种可选答案、取舍或处理方式，而不是三个彼此无关的新问题。",
+    "三个答案要足够具体，让用户能直接比较选择后的影响。"
+  ].join("\n");
 }
 
 function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "draft" | "next-step" | "options") {

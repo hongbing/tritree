@@ -8,8 +8,7 @@ import {
   type DirectorDraftOutput,
   type DirectorNextStepOutput,
   type DirectorOptionsOutput,
-  type Skill,
-  skillsForTarget
+  type Skill
 } from "@/lib/domain";
 import type { ToolsInput } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
@@ -99,7 +98,7 @@ type StreamSource<T> = AsyncIterable<T> | ReadableStream<T> | (() => AsyncIterab
 
 type AgentExecutionContextOverride = Pick<
   SharedAgentContextInput,
-  "availableSkillSummaries" | "longTermMemory" | "toolSummaries"
+  "availableSkillSummaries" | "longTermMemory" | "subagentTemplateSummaries" | "toolSummaries"
 >;
 
 export type TreeDirectorExecutionInput = {
@@ -209,7 +208,7 @@ export async function generateTreeDraft({
   treeDraftAgent?: TreeDraftAgentLike;
   suppressResponseLog?: boolean;
 }): Promise<DirectorDraftOutput> {
-  const executionContext = await executionContextForDirectorParts(parts, "writer", context, Boolean(treeDraftAgent));
+  const executionContext = await executionContextForDirectorParts(parts, context, Boolean(treeDraftAgent));
   const { agentContext, tools } = executionContext;
   try {
     const messages = directorMessagesForParts(parts, env);
@@ -249,7 +248,7 @@ export async function generateTreeNextStep({
   treeNextStepAgent?: TreeNextStepAgentLike;
   suppressResponseLog?: boolean;
 }): Promise<DirectorNextStepOutput> {
-  const executionContext = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeNextStepAgent));
+  const executionContext = await executionContextForDirectorParts(parts, context, Boolean(treeNextStepAgent));
   const { agentContext, tools } = executionContext;
   try {
     const messages = directorMessagesForParts(parts, env);
@@ -291,7 +290,7 @@ export async function streamTreeNextStep({
   onPartialObject?: (partial: TreeNextStepPartial) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorNextStepOutput & DirectorAgentTrace> {
-  const executionContext = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeNextStepAgent));
+  const executionContext = await executionContextForDirectorParts(parts, context, Boolean(treeNextStepAgent));
   const { agentContext, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
@@ -388,7 +387,7 @@ export async function streamTreeDraft({
   onPartialObject?: (partial: TreeDraftPartial) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorDraftOutput & DirectorAgentTrace> {
-  const executionContext = await executionContextForDirectorParts(parts, "writer", context, Boolean(treeDraftAgent));
+  const executionContext = await executionContextForDirectorParts(parts, context, Boolean(treeDraftAgent));
   const { agentContext, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
@@ -485,7 +484,7 @@ export async function streamTreeOptions({
   onPartialObject?: (partial: TreeOptionsPartial) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorOptionsOutput & DirectorAgentTrace> {
-  const executionContext = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeOptionsAgent));
+  const executionContext = await executionContextForDirectorParts(parts, context, Boolean(treeOptionsAgent));
   const { agentContext, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
@@ -558,15 +557,15 @@ export async function streamTreeOptions({
 
 function contextForDirectorParts(
   parts: DirectorInputParts,
-  target: "writer" | "editor",
   context: Partial<AgentExecutionContextOverride> = {}
 ): SharedAgentContextInput {
   return {
     rootSummary: parts.rootSummary,
     learnedSummary: parts.learnedSummary,
-    enabledSkills: skillsForTarget(parts.enabledSkills.map(normalizeSkill), target),
+    enabledSkills: parts.enabledSkills.map(normalizeSkill),
     longTermMemory: context.longTermMemory,
     availableSkillSummaries: context.availableSkillSummaries,
+    subagentTemplateSummaries: context.subagentTemplateSummaries,
     toolSummaries: context.toolSummaries
   };
 }
@@ -1387,11 +1386,10 @@ function nextStepOutputShapeSummary() {
 
 async function executionContextForDirectorParts(
   parts: DirectorInputParts,
-  target: "writer" | "editor",
   context: Partial<AgentExecutionContextOverride> = {},
   skipRuntimeTools = false
 ) {
-  const baseContext = contextForDirectorParts(parts, target, context);
+  const baseContext = contextForDirectorParts(parts, context);
   if (skipRuntimeTools) {
     return {
       agentContext: baseContext,
@@ -1406,6 +1404,9 @@ async function executionContextForDirectorParts(
   const runtimeAvailableSkillSummaries = Array.isArray(runtime.availableSkillSummaries)
     ? runtime.availableSkillSummaries
     : [];
+  const runtimeSubagentTemplateSummaries = hasStringArrayProperty(runtime, "subagentTemplateSummaries")
+    ? runtime.subagentTemplateSummaries
+    : [];
   const tools = {
     ...(runtime.tools ?? {}),
     ...(mcpRuntime.tools ?? {})
@@ -1416,6 +1417,10 @@ async function executionContextForDirectorParts(
       availableSkillSummaries: [
         ...(baseContext.availableSkillSummaries ?? []),
         ...runtimeAvailableSkillSummaries
+      ],
+      subagentTemplateSummaries: [
+        ...(baseContext.subagentTemplateSummaries ?? []),
+        ...runtimeSubagentTemplateSummaries
       ],
       enabledSkills: runtimeEnabledSkills,
       toolSummaries: [...(baseContext.toolSummaries ?? []), ...runtime.toolSummaries, ...mcpRuntime.toolSummaries]
@@ -1488,6 +1493,13 @@ function streamingStructuredOutput<TSchema>(schema: TSchema) {
 
 function hasRuntimeTools(tools: ToolsInput | undefined): tools is ToolsInput {
   return Boolean(tools && Object.keys(tools).length > 0);
+}
+
+function hasStringArrayProperty<TProperty extends string>(
+  value: unknown,
+  property: TProperty
+): value is Record<TProperty, string[]> {
+  return isObjectRecord(value) && Array.isArray(value[property]) && value[property].every((item) => typeof item === "string");
 }
 
 async function consumeStructuredFullStream<TPartial>(

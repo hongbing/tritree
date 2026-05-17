@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { nanoid } from "nanoid";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hashPassword } from "@/lib/auth/password";
 import { createDatabase } from "./client";
@@ -83,6 +84,33 @@ async function createTestUser(repo: Repository, username: string, role: "admin" 
     return repo.createInitialAdmin({ username, displayName: username, password: "password-123" });
   }
   return repo.createUser({ username, displayName: username, password: "password-123", role });
+}
+
+async function createRepositoryHarness() {
+  const dbPath = path.join(tmpdir(), `tritree-artifacts-${nanoid()}.sqlite`);
+  const repo = createTreeableRepository(dbPath, { skillInstallRoot: path.join(tmpdir(), `skills-${nanoid()}`) });
+  const user = await repo.createUser({
+    username: `user-${nanoid()}`,
+    displayName: "Test User",
+    password: "correct horse battery staple",
+    role: "member"
+  });
+  return { dbPath, repo, user };
+}
+
+async function createArtifactSessionHarness() {
+  const harness = await createRepositoryHarness();
+  const root = harness.repo.saveRootMemory(harness.user.id, {
+    artifactTypeId: "social-post",
+    seed: "写一条关于 AI 协作的微博",
+    creationRequest: "",
+    domains: ["Creation"],
+    tones: ["Sincere"],
+    styles: ["Opinion-driven"],
+    personas: ["Practitioner"]
+  });
+  const state = harness.repo.createSession({ userId: harness.user.id, rootMemoryId: root.id, enabledSkillIds: [] });
+  return { ...harness, root, state };
 }
 
 function readArchivedMutationSnapshot(dbPath: string, sessionId: string): ArchivedMutationSnapshot {
@@ -253,6 +281,42 @@ describe("Treeable repository", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it("creates a session with a plugin artifact when seed payload exists", async () => {
+    const { repo, user } = await createRepositoryHarness();
+    const root = repo.saveRootMemory(user.id, {
+      artifactTypeId: "social-post",
+      seed: "写一条关于 AI 协作的微博",
+      creationRequest: "",
+      domains: ["Creation"],
+      tones: ["Sincere"],
+      styles: ["Opinion-driven"],
+      personas: ["Practitioner"]
+    });
+
+    const state = repo.createSession({ userId: user.id, rootMemoryId: root.id, enabledSkillIds: [] });
+
+    expect(state.currentArtifact?.type).toBe("social-post");
+    expect(state.artifacts).toHaveLength(1);
+    expect(state.currentNode?.producedArtifactId).toBe(state.currentArtifact?.id);
+    expect(state).not.toHaveProperty("currentDraft");
+  });
+
+  it("allows a workflow node to complete without producing an artifact", async () => {
+    const { repo, user, state } = await createArtifactSessionHarness();
+    const child = repo.createArtifactChild({
+      userId: user.id,
+      sessionId: state.session.id,
+      nodeId: state.currentNode!.id,
+      selectedOptionId: "a",
+      roundIntent: "只判断下一步",
+      artifact: null
+    });
+
+    expect(child.currentNode?.producedArtifactId).toBeNull();
+    expect(child.currentArtifact).toBeNull();
+    expect(child.artifacts).toHaveLength(1);
   });
 
   it("creates the first local user as the initial administrator", async () => {

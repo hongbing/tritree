@@ -14,7 +14,8 @@ const mocks = vi.hoisted(() => ({
   agentConstructor: vi.fn(),
   createAnthropic: vi.fn(),
   createMcpRuntimeTools: vi.fn(),
-  createSkillRuntimeTools: vi.fn()
+  createSkillRuntimeTools: vi.fn(),
+  createSubagentRuntimeTools: vi.fn()
 }));
 
 vi.mock("@ai-sdk/anthropic", () => ({
@@ -31,6 +32,10 @@ vi.mock("@/lib/skills/skill-runtime", () => ({
 
 vi.mock("./mcp-runtime", () => ({
   createMcpRuntimeTools: mocks.createMcpRuntimeTools
+}));
+
+vi.mock("./subagent-runtime", () => ({
+  createSubagentRuntimeTools: mocks.createSubagentRuntimeTools
 }));
 
 const modelFactory = vi.fn((modelId: string) => ({ modelId }));
@@ -86,6 +91,17 @@ beforeEach(() => {
   modelFactory.mockClear();
   mocks.createAnthropic.mockReturnValue(modelFactory);
   mocks.createSkillRuntimeTools.mockResolvedValue({ toolSummaries: [], tools: {} });
+  mocks.createSubagentRuntimeTools.mockReturnValue({
+    subagentTemplateSummaries: ["material-search｜素材搜索：围绕给定主题快速寻找可用素材。"],
+    toolSummaries: [
+      "run_subagent_template：运行预创建子代理模板。",
+      "run_temporary_subagent：运行一次性临时子代理。"
+    ],
+    tools: {
+      run_subagent_template: { id: "run_subagent_template", description: "Run template", execute: vi.fn() },
+      run_temporary_subagent: { id: "run_temporary_subagent", description: "Run temporary", execute: vi.fn() }
+    }
+  });
   mocks.createMcpRuntimeTools.mockResolvedValue({ disconnect: vi.fn(), toolSummaries: [], tools: {} });
   mocks.agentConstructor.mockImplementation(function Agent(options) {
     return {
@@ -374,6 +390,14 @@ describe("tree director compatibility generators", () => {
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:options]",
+      expect.stringContaining("material-search")
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[treeable:mastra-prompt:options]",
+      expect.stringContaining("run_subagent_template")
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[treeable:mastra-prompt:options]",
       expect.not.stringContaining("标题和正文都要克制。")
     );
   });
@@ -382,6 +406,16 @@ describe("tree director compatibility generators", () => {
     const runSkillCommand = {
       id: "run_skill_command",
       description: "Run an installed skill command.",
+      execute: vi.fn()
+    };
+    const runSubagentTemplate = {
+      id: "run_subagent_template",
+      description: "Run a template subagent.",
+      execute: vi.fn()
+    };
+    const runTemporarySubagent = {
+      id: "run_temporary_subagent",
+      description: "Run a temporary subagent.",
       execute: vi.fn()
     };
     const readFile = {
@@ -404,6 +438,17 @@ describe("tree director compatibility generators", () => {
       toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
       tools: { run_skill_command: runSkillCommand }
     });
+    mocks.createSubagentRuntimeTools.mockReturnValueOnce({
+      subagentTemplateSummaries: ["material-search｜素材搜索：围绕给定主题快速寻找可用素材。"],
+      toolSummaries: [
+        "run_subagent_template：运行预创建子代理模板。",
+        "run_temporary_subagent：运行一次性临时子代理。"
+      ],
+      tools: {
+        run_subagent_template: runSubagentTemplate,
+        run_temporary_subagent: runTemporarySubagent
+      }
+    });
     mocks.createMcpRuntimeTools.mockResolvedValueOnce({
       disconnect: vi.fn(),
       toolSummaries: ["MCP filesystem：可用工具 filesystem_read_file。"],
@@ -424,18 +469,31 @@ describe("tree director compatibility generators", () => {
       env: { KIMI_API_KEY: "token" }
     });
 
+    expect(mocks.createSubagentRuntimeTools).toHaveBeenCalledWith({
+      env: { KIMI_API_KEY: "token" }
+    });
     expect(mocks.createMcpRuntimeTools).toHaveBeenCalledWith(
       expect.objectContaining({
-        existingTools: { run_skill_command: runSkillCommand }
+        existingTools: {
+          run_skill_command: runSkillCommand,
+          run_subagent_template: runSubagentTemplate,
+          run_temporary_subagent: runTemporarySubagent
+        }
       })
     );
     expect(mocks.agentConstructor).toHaveBeenCalledWith(
       expect.objectContaining({
         tools: expect.objectContaining({
           run_skill_command: runSkillCommand,
+          run_subagent_template: runSubagentTemplate,
+          run_temporary_subagent: runTemporarySubagent,
           filesystem_read_file: readFile
         })
       })
+    );
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "[treeable:mastra-prompt:options]",
+      expect.stringContaining("material-search")
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:options]",

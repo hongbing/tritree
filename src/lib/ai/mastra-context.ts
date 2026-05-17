@@ -138,7 +138,7 @@ export function buildTreeNextStepInstructions(input: SharedAgentContextInput) {
 function actualWorkExecutionProtocol() {
   return [
     "# actual-work 执行协议",
-    "先判断本轮最有价值的实际工作，并优先直接推进：可以自己处理、调用普通工具、调用 run_subagent_template、调用 run_temporary_subagent，或在结果足够时提交 draft/publish/complete 对应的最终结构化结果。",
+    "先判断本轮最有价值的实际工作，并优先直接推进：可以自己处理、调用普通工具、调用 run_subagent_template、调用 run_temporary_subagent，或在结果足够时提交 draft、options 或 complete 对应的最终结构化结果。",
     "只有真实用户输入成为 blocker 时，才进入三选一；不要把 agent 自己能判断、能改写、能核查或能委托的事项交给用户决定。",
     "enabled Skills 提供角色判断和委托指导：用它们判断哪些工作该由主 agent 完成，哪些工作适合交给 subagent 或工具。",
     "调用 subagent 时给出短任务、最小上下文、期望输出和必要约束；不要把整段历史或不相关 Skill 细节塞给 subagent。"
@@ -176,7 +176,8 @@ function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "draf
 function formatSkillUsageInstructions() {
   return [
     "以下 Skills 已加载为本轮任务指令。",
-    "每个 Skill 的「说明」用于理解适用目的；每个 Skill 的「要求」都必须遵守。",
+    "每个 Skill 的「说明」用于理解适用目的；每个 Skill 的「要求」都必须遵守，都是 active instructions。",
+    "根据 Skill 的作用范围和本轮任务相关性应用要求：内容更新范围优先影响 draft，方向判断范围优先影响 options/next-step，全程范围贯穿所有判断。",
     "如果 Skill 之间出现冲突，优先遵守用户本轮明确要求；仍冲突时，选择对当前任务更具体、更直接的要求。"
   ].join("\n");
 }
@@ -186,7 +187,11 @@ function formatEnabledSkills(skills: Skill[]) {
 
   return skills
     .map((skill) => {
-      const lines = [`## Skill: ${skill.title}`, `说明：${skill.description || "无补充说明。"}`];
+      const lines = [
+        `## Skill: ${skill.title}`,
+        `作用范围：${skillScopeLabel(skill.appliesTo)}`,
+        `说明：${skill.description || "无补充说明。"}`
+      ];
       const prompt = skill.prompt.trim();
       if (prompt) {
         lines.push(`要求：${prompt}`);
@@ -194,4 +199,10 @@ function formatEnabledSkills(skills: Skill[]) {
       return lines.join("\n");
     })
     .join("\n\n");
+}
+
+function skillScopeLabel(appliesTo: Skill["appliesTo"]) {
+  if (appliesTo === "writer") return "内容更新";
+  if (appliesTo === "editor") return "方向判断";
+  return "全程";
 }

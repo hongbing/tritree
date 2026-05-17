@@ -37,6 +37,19 @@ const input = {
       isArchived: false,
       createdAt: "2026-04-29T00:00:00.000Z",
       updatedAt: "2026-04-29T00:00:00.000Z"
+    },
+    {
+      id: "logic-reviewer",
+      title: "结构审读",
+      category: "检查",
+      description: "判断当前内容的主线和结构风险。",
+      prompt: "优先指出最影响下一步方向判断的结构问题。",
+      appliesTo: "editor",
+      isSystem: false,
+      defaultEnabled: false,
+      isArchived: false,
+      createdAt: "2026-04-29T00:00:00.000Z",
+      updatedAt: "2026-04-29T00:00:00.000Z"
     }
   ],
   availableSkillSummaries: ["小红书标题：生成适合小红书的标题。"],
@@ -51,13 +64,20 @@ describe("buildSharedAgentContext", () => {
     expect(context).toContain("# 已启用 Skills");
     expect(context).toContain("以下 Skills 已加载为本轮任务指令");
     expect(context).toContain("每个 Skill 的「要求」都必须遵守");
+    expect(context).toContain("根据 Skill 的作用范围和本轮任务相关性应用");
     expect(context).toContain("如果 Skill 之间出现冲突");
     expect(context).toContain("## Skill: 资料员");
+    expect(context).toContain("作用范围：全程");
     expect(context).toContain("说明：负责判断资料缺口，并建议是否委托检索或核查。");
     expect(context).toContain("要求：先识别当前内容中最影响可信度的事实缺口；必要时建议委托资料型 subagent 做最小范围核查。");
     expect(context).toContain("## Skill: 朋友圈语气");
+    expect(context).toContain("作用范围：内容更新");
     expect(context).toContain("说明：更像自然分享。");
     expect(context).toContain("要求：使用自然、轻松、不过度修饰的朋友圈语气。");
+    expect(context).toContain("## Skill: 结构审读");
+    expect(context).toContain("作用范围：方向判断");
+    expect(context).toContain("说明：判断当前内容的主线和结构风险。");
+    expect(context).toContain("要求：优先指出最影响下一步方向判断的结构问题。");
     expect(context).not.toContain("资料员（content-team）");
     expect(context).not.toContain("朋友圈语气（风格）");
     expect(context).toContain("小红书标题：生成适合小红书的标题。");
@@ -84,7 +104,9 @@ describe("agent instructions", () => {
     expect(instructions).toContain("# actual-work 执行协议");
     expect(instructions).toContain("run_subagent_template");
     expect(instructions).toContain("run_temporary_subagent");
-    expect(instructions).toContain("draft/publish/complete");
+    expect(instructions).toContain("draft、options 或 complete");
+    expect(instructions).not.toContain("draft/publish/complete");
+    expect(instructions).not.toContain("publish");
     expect(instructions).toContain("enabled Skills 提供角色判断和委托指导");
     expect(instructions).toContain("短任务、最小上下文、期望输出和必要约束");
     expect(instructions).toContain("# 三选一协议");

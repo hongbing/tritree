@@ -1,0 +1,43 @@
+import type { ArtifactPluginServer } from "@/artifacts/types";
+import { SocialPostPayloadSchema, type SocialPostPayload } from "./schema";
+
+export const socialPostPlugin: ArtifactPluginServer<SocialPostPayload> = {
+  id: "social-post",
+  label: "社媒内容",
+  description: "微博、小红书、朋友圈等社交媒体内容。",
+  payloadSchema: SocialPostPayloadSchema,
+  aiOutputSchema: SocialPostPayloadSchema,
+  capabilities: {
+    actions: ["rewrite-selection"],
+    deliver: true,
+    diff: true,
+    edit: true,
+    generate: true,
+    streamFields: ["title", "body", "hashtags", "imagePrompt"]
+  },
+  createSeedPayload(input) {
+    const body = input.seed.trim();
+    return body ? { title: "种子念头", body, hashtags: [], imagePrompt: "" } : null;
+  },
+  promptInstructions() {
+    return [
+      "作品类型：社媒内容。",
+      "输出 JSON payload，字段为 title、body、hashtags、imagePrompt。",
+      "hashtags 必须是字符串数组，imagePrompt 没有时返回空字符串。"
+    ].join("\n");
+  },
+  normalizeAiOutput(output) {
+    return SocialPostPayloadSchema.parse(output);
+  },
+  summarizeForDirector(payload) {
+    return [
+      `标题：${payload.title || "未命名"}`,
+      `正文：${payload.body}`,
+      `话题：${payload.hashtags.join("、") || "暂无"}`,
+      `配图提示：${payload.imagePrompt || "暂无"}`
+    ].join("\n");
+  },
+  summarizeForTree(payload) {
+    return payload.title.trim() || Array.from(payload.body.trim()).slice(0, 24).join("") || "社媒内容";
+  }
+};

@@ -1,16 +1,68 @@
 import { describe, expect, it } from "vitest";
 import {
+  ArtifactSchema,
   BranchOptionSchema,
   DirectorOptionsOutputSchema,
   DirectorNextStepOutputSchema,
   DirectorOutputSchema,
+  NodeArtifactSchema,
   RootPreferencesSchema,
   SessionStateSchema,
   SkillSchema,
   SkillUpsertSchema,
+  TreeNodeSchema,
   requireThreeOptions,
   skillsForTarget
 } from "./domain";
+
+function validRootMemory() {
+  return {
+    id: "root-1",
+    preferences: {
+      artifactTypeId: "social-post",
+      seed: "Seed",
+      creationRequest: "",
+      domains: ["Creation"],
+      tones: ["Sincere"],
+      styles: ["Opinion-driven"],
+      personas: ["Practitioner"]
+    },
+    summary: "Seed",
+    learnedSummary: "",
+    createdAt: "2026-05-18T00:00:00.000Z",
+    updatedAt: "2026-05-18T00:00:00.000Z"
+  };
+}
+
+function validSession() {
+  return {
+    artifactTypeId: "social-post",
+    id: "session-1",
+    title: "Session",
+    status: "active",
+    currentNodeId: null,
+    createdAt: "2026-05-18T00:00:00.000Z",
+    updatedAt: "2026-05-18T00:00:00.000Z"
+  };
+}
+
+function validArtifact() {
+  return {
+    id: "artifact-1",
+    type: "social-post",
+    version: 1,
+    payload: {
+      title: "A working title",
+      body: "A short body.",
+      hashtags: ["#AI"],
+      imagePrompt: "A luminous tree on a writing desk."
+    },
+    sourceArtifactIds: [],
+    createdByNodeId: "node-1",
+    createdAt: "2026-05-18T00:00:00.000Z",
+    updatedAt: "2026-05-18T00:00:00.000Z"
+  };
+}
 
 describe("RootPreferencesSchema", () => {
   it("accepts a seed-driven first-run shape", () => {
@@ -103,13 +155,13 @@ describe("DirectorOptionsOutputSchema", () => {
 });
 
 describe("DirectorNextStepOutputSchema", () => {
-  it("accepts a decision to generate a draft without options", () => {
+  it("accepts a decision to generate an artifact without options", () => {
     const parsed = DirectorNextStepOutputSchema.parse({
-      action: "draft",
+      action: "artifact",
       roundIntent: "信息足够，生成一版 PRD"
     });
 
-    expect(parsed.action).toBe("draft");
+    expect(parsed.action).toBe("artifact");
     expect(parsed).not.toHaveProperty("options");
     expect(parsed).not.toHaveProperty("memoryObservation");
   });
@@ -209,14 +261,8 @@ describe("DirectorOutputSchema", () => {
         { ...option, id: "b", kind: "deepen" },
         { ...option, id: "c", kind: "finish" }
       ],
-      draft: {
-        title: "A working title",
-        body: "A short body.",
-        hashtags: ["#AI"],
-        imagePrompt: "A luminous tree on a writing desk."
-      },
-      finishAvailable: true,
-      publishPackage: null
+      artifact: validArtifact(),
+      finishAvailable: true
     });
 
     expect(parsed.options).toHaveLength(3);
@@ -236,14 +282,8 @@ describe("DirectorOutputSchema", () => {
       DirectorOutputSchema.parse({
         roundIntent: "Add tension",
         options: [option],
-        draft: {
-          title: "",
-          body: "",
-          hashtags: [],
-          imagePrompt: ""
-        },
-        finishAvailable: false,
-        publishPackage: null
+        artifact: validArtifact(),
+        finishAvailable: false
       })
     ).toThrow("AI suggestions must include exactly three items.");
   });
@@ -266,14 +306,8 @@ describe("DirectorOutputSchema", () => {
           { ...option, id: "c", kind: "finish" },
           { ...option, id: "a", label: "Try another angle" }
         ],
-        draft: {
-          title: "",
-          body: "",
-          hashtags: [],
-          imagePrompt: ""
-        },
-        finishAvailable: false,
-        publishPackage: null
+        artifact: validArtifact(),
+        finishAvailable: false
       })
     ).toThrow("AI suggestions must include exactly three items.");
   });
@@ -295,14 +329,8 @@ describe("DirectorOutputSchema", () => {
           { ...option, label: "Deepen the proof" },
           { ...option, label: "Try another angle" }
         ],
-        draft: {
-          title: "",
-          body: "",
-          hashtags: [],
-          imagePrompt: ""
-        },
-        finishAvailable: false,
-        publishPackage: null
+        artifact: validArtifact(),
+        finishAvailable: false
       })
     ).toThrow("AI suggestions must include IDs a, b, and c exactly once.");
   });
@@ -324,14 +352,8 @@ describe("DirectorOutputSchema", () => {
           { ...option, id: "b", kind: "deepen" },
           { ...option, id: "custom-user", label: "User custom branch" }
         ],
-        draft: {
-          title: "",
-          body: "",
-          hashtags: [],
-          imagePrompt: ""
-        },
-        finishAvailable: false,
-        publishPackage: null
+        artifact: validArtifact(),
+        finishAvailable: false
       })
     ).toThrow("AI suggestions must include IDs a, b, and c exactly once.");
   });
@@ -495,6 +517,9 @@ describe("SessionStateSchema", () => {
       id: "node-1",
       sessionId: "session-1",
       parentId: null,
+      kind: "artifact",
+      producedArtifactId: "artifact-1",
+      sourceArtifactIds: [],
       roundIndex: 0,
       roundIntent: "Start",
       options: [option],
@@ -505,35 +530,17 @@ describe("SessionStateSchema", () => {
     };
 
     const parsed = SessionStateSchema.parse({
-      rootMemory: {
-        id: "root-1",
-        preferences: {
-          domains: ["AI"],
-          tones: ["calm"],
-          styles: ["opinion-driven"],
-          personas: ["practitioner"]
-        },
-        summary: "",
-        learnedSummary: "",
-        createdAt: "2026-04-24T00:00:00.000Z",
-        updatedAt: "2026-04-24T00:00:00.000Z"
-      },
+      rootMemory: validRootMemory(),
       session: {
+        ...validSession(),
         artifactTypeId: "prd",
-        id: "session-1",
         title: "Treeable session",
-        status: "active",
-        currentNodeId: "node-1",
-        createdAt: "2026-04-24T00:00:00.000Z",
-        updatedAt: "2026-04-24T00:00:00.000Z"
+        currentNodeId: "node-1"
       },
       currentNode: node,
-      currentDraft: {
-        title: "",
-        body: "",
-        hashtags: [],
-        imagePrompt: ""
-      },
+      currentArtifact: validArtifact(),
+      artifacts: [validArtifact()],
+      nodeArtifacts: [{ nodeId: "node-1", artifact: validArtifact() }],
       selectedPath: [node],
       enabledSkillIds: ["skill-analysis"],
       enabledSkills: [
@@ -557,11 +564,68 @@ describe("SessionStateSchema", () => {
           option,
           createdAt: "2026-04-24T00:00:00.000Z"
         }
-      ],
-      publishPackage: null
+      ]
     });
 
     expect(parsed.session.status).toBe("active");
     expect(parsed.session.artifactTypeId).toBe("prd");
+  });
+});
+
+describe("ArtifactSchema", () => {
+  it("parses generic artifacts and node artifacts", () => {
+    const artifact = ArtifactSchema.parse({
+      id: "artifact-1",
+      type: "social-post",
+      version: 1,
+      payload: { title: "T", body: "B", hashtags: [], imagePrompt: "" },
+      sourceArtifactIds: ["artifact-0"],
+      createdByNodeId: "node-1",
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z"
+    });
+
+    expect(artifact.type).toBe("social-post");
+    expect(NodeArtifactSchema.parse({ nodeId: "node-1", artifact }).artifact.id).toBe("artifact-1");
+  });
+
+  it("parses workflow nodes without produced artifacts", () => {
+    const node = TreeNodeSchema.parse({
+      id: "node-1",
+      sessionId: "session-1",
+      parentId: null,
+      parentOptionId: null,
+      kind: "analysis",
+      producedArtifactId: null,
+      sourceArtifactIds: [],
+      roundIndex: 1,
+      roundIntent: "只分析，不生成产物",
+      options: [],
+      selectedOptionId: null,
+      foldedOptions: [],
+      agentMessages: [],
+      createdAt: "2026-05-18T00:00:00.000Z"
+    });
+
+    expect(node.producedArtifactId).toBeNull();
+  });
+
+  it("rejects legacy draft fields in session state", () => {
+    const result = SessionStateSchema.safeParse({
+      rootMemory: validRootMemory(),
+      session: validSession(),
+      currentNode: null,
+      currentArtifact: null,
+      artifacts: [],
+      nodeArtifacts: [],
+      selectedPath: [],
+      enabledSkillIds: [],
+      enabledSkills: [],
+      foldedBranches: [],
+      currentDraft: { title: "legacy", body: "legacy", hashtags: [], imagePrompt: "" },
+      publishPackage: null
+    });
+
+    expect(result.success).toBe(false);
   });
 });

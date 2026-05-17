@@ -1115,8 +1115,9 @@ function summarizeRuntimeStreamChunk(
   index: number,
   source: RuntimeStreamChunkSummary["source"]
 ): RuntimeStreamChunkSummary {
-  const payload = isObjectRecord(chunk) && isObjectRecord(chunk.payload) ? chunk.payload : null;
-  const toolName = payload ? toolNameFromPayload(payload) : isObjectRecord(chunk) ? toolNameFromPayload(chunk) : "";
+  const toolChunk = isObjectRecord(chunk) ? nestedAgentExecutionChunk(chunk) ?? chunk : null;
+  const payload = toolChunk && isObjectRecord(toolChunk.payload) ? toolChunk.payload : null;
+  const toolName = payload ? toolNameFromPayload(payload) : toolChunk ? toolNameFromPayload(toolChunk) : "";
   return {
     index,
     keys: streamChunkKeysForLog(chunk),

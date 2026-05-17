@@ -2137,6 +2137,60 @@ describe("tree director compatibility generators", () => {
     expect(stream).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts runtime options without decision rationale after nested non-final subagent tool activity", async () => {
+    const finalObject = {
+      roundIntent: "选择差异化角度",
+      options: [
+        { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略，聚焦低幼家庭。", impact: "目标读者更明确。", kind: "explore" },
+        { id: "b", label: "做反攻略", description: "把热门打卡点改成避坑判断。", impact: "和保姆级攻略拉开距离。", kind: "reframe" },
+        { id: "c", label: "做实时决策表", description: "根据天气和拥挤度组织内容。", impact: "更像工具而不是普通长文。", kind: "deepen" }
+      ]
+    };
+    const stream = vi.fn(async () => ({
+      fullStream: async function* () {
+        yield {
+          type: "agent-execution-event-tool-result",
+          payload: {
+            type: "tool-result",
+            payload: {
+              toolCallId: "tool-1",
+              toolName: "run_subagent_template",
+              result: {
+                ok: true,
+                output: "已分析可选方向。"
+              }
+            }
+          }
+        };
+        yield {
+          type: "tool-call",
+          payload: {
+            toolCallId: "submit-1",
+            toolName: "submit_tree_options",
+            args: finalObject
+          }
+        };
+      },
+      object: Promise.resolve(undefined)
+    }));
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate: vi.fn()
+      };
+    });
+
+    await expect(
+      streamTreeOptions({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" }
+      })
+    ).resolves.toMatchObject(finalObject);
+
+    expect(stream).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts runtime next-step draft and complete actions without decision rationale", async () => {
     const draftObject = {
       action: "draft",

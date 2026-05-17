@@ -98,6 +98,7 @@ function createSchema(sqlite: DatabaseSync) {
       description TEXT NOT NULL,
       prompt TEXT NOT NULL,
       applies_to TEXT NOT NULL DEFAULT 'both',
+      sort_order INTEGER NOT NULL DEFAULT 0,
       is_system INTEGER NOT NULL,
       default_enabled INTEGER NOT NULL,
       is_archived INTEGER NOT NULL,
@@ -185,6 +186,7 @@ function createSchema(sqlite: DatabaseSync) {
   addColumnIfMissing(sqlite, "tree_nodes", "is_terminal", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(sqlite, "tree_nodes", "agent_messages_json", "TEXT NOT NULL DEFAULT '[]'");
   addColumnIfMissing(sqlite, "skills", "applies_to", "TEXT NOT NULL DEFAULT 'both'");
+  addColumnIfMissing(sqlite, "skills", "sort_order", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(sqlite, "root_memory", "user_id", "TEXT REFERENCES users(id)");
   addColumnIfMissing(sqlite, "sessions", "user_id", "TEXT REFERENCES users(id)");
   addColumnIfMissing(sqlite, "sessions", "is_archived", "INTEGER NOT NULL DEFAULT 0");

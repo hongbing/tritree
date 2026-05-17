@@ -10,11 +10,11 @@ import {
 
 const exampleDefaultsConfigPath = path.resolve("config/defaults.example.json");
 const defaultSystemSkillIds = [
-  "system-publisher",
   "system-planner",
   "system-researcher",
+  "system-writer",
   "system-reviewer",
-  "system-writer"
+  "system-publisher"
 ];
 const roleSectionPhrases = ["角色职责", "有用输出", "适合委托", "调用前最小上下文"];
 const protocolPhrases = ["roundIntent", "options[]", "三个答案", "让用户选择"];
@@ -208,7 +208,7 @@ describe("defaults config loader", () => {
 
     const systemSkillsById = new Map(defaults.systemSkills.map((skill) => [skill.id, skill]));
 
-    expect(defaults.systemSkills.map((skill) => skill.id).sort()).toEqual([...defaultSystemSkillIds].sort());
+    expect(defaults.systemSkills.map((skill) => skill.id)).toEqual(defaultSystemSkillIds);
     expect(defaults.systemSkills).toHaveLength(defaultSystemSkillIds.length);
     expect(systemSkillsById.get("system-planner")?.title).toBe("策划");
     expect(systemSkillsById.get("system-researcher")?.title).toBe("资料员");
@@ -217,6 +217,8 @@ describe("defaults config loader", () => {
     expect(systemSkillsById.get("system-publisher")?.title).toBe("发布编辑");
     expect(systemSkillsById.get("system-researcher")?.prompt).toContain("material-search");
     expect(systemSkillsById.get("system-publisher")?.prompt).toContain("platform-rewrite");
+    expect(defaults.systemSkills.filter((skill) => skill.defaultEnabled).map((skill) => skill.id)).toEqual(defaultSystemSkillIds);
+    expect(defaults.systemSkills.map((skill) => skill.sortOrder)).toEqual([0, 1, 2, 3, 4]);
 
     for (const skillId of defaultSystemSkillIds) {
       const skill = systemSkillsById.get(skillId);

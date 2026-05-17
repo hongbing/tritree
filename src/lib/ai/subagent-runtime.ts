@@ -77,12 +77,12 @@ export function createSubagentRuntimeTools({
         };
       }
     }),
-    run_temporary_subagent: createTool({
-      id: "run_temporary_subagent",
+    run_custom_subagent: createTool({
+      id: "run_custom_subagent",
       description:
-        "Run a temporary one-off Tritree subagent for a bounded task that does not need a precreated template.",
+        "Run a custom one-off Tritree subagent only when no precreated template matches a bounded task.",
       inputSchema: z.object({
-        title: z.string().min(1).describe("Short role title for the temporary subagent."),
+        title: z.string().min(1).describe("Short role title for the custom subagent."),
         task: z.string().min(1).describe("Specific bounded task for the subagent."),
         context: z.string().min(1).describe("Context the subagent needs to complete the task."),
         expectedOutput: z.string().min(1).describe("Expected output shape or content requirements."),
@@ -112,8 +112,8 @@ export function createSubagentRuntimeTools({
   return {
     subagentTemplateSummaries: [formatSubagentTemplateSummaries(templates)],
     toolSummaries: [
-      "run_subagent_template：运行预创建子代理模板，适合素材搜索、资料整理、独立审读、标题变体、平台改写等重复长上下文任务。",
-      "run_temporary_subagent：运行一次性临时子代理，适合没有预创建模板但边界清晰的短任务。"
+      "run_subagent_template：运行预创建子代理模板；当模板列表中某个 templateId 与任务匹配时使用。",
+      "run_custom_subagent：运行自定义子代理，仅当预创建模板不匹配且任务边界清晰时使用；如果任务适合 subagent，优先使用 run_subagent_template。"
     ],
     tools
   };

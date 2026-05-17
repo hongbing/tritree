@@ -9,7 +9,8 @@ type StringEnv = Record<string, string | undefined>;
 export const DEFAULTS_CONFIG_PATH_ENV = "TRITREE_DEFAULTS_CONFIG_PATH";
 
 const ConfiguredSystemSkillSchema = SkillUpsertSchema.extend({
-  id: z.string().trim().min(1)
+  id: z.string().trim().min(1),
+  sortOrder: z.number().int().nonnegative().optional()
 });
 
 const ConfiguredCreationRequestOptionSchema = CreationRequestOptionUpsertSchema.extend({
@@ -17,14 +18,17 @@ const ConfiguredCreationRequestOptionSchema = CreationRequestOptionUpsertSchema.
 });
 
 const DefaultsConfigSchema = z.object({
-  systemSkills: z.array(ConfiguredSystemSkillSchema).min(1, "systemSkills must be a non-empty array"),
+  systemSkills: z
+    .array(ConfiguredSystemSkillSchema)
+    .min(1, "systemSkills must be a non-empty array")
+    .transform((skills) => skills.map((skill, index) => ({ ...skill, sortOrder: skill.sortOrder ?? index }))),
   creationRequestOptions: z.array(ConfiguredCreationRequestOptionSchema),
   inspirations: z.array(InspirationSchema)
 });
 
-export type ConfiguredSystemSkill = z.infer<typeof ConfiguredSystemSkillSchema>;
 export type ConfiguredCreationRequestOption = z.infer<typeof ConfiguredCreationRequestOptionSchema>;
 export type ConfiguredDefaults = z.infer<typeof DefaultsConfigSchema>;
+export type ConfiguredSystemSkill = ConfiguredDefaults["systemSkills"][number];
 
 export function defaultDefaultsConfigPath(cwd = process.cwd()) {
   return path.join(cwd, ".tritree", "defaults.json");

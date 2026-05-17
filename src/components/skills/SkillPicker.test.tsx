@@ -63,4 +63,44 @@ describe("SkillPicker", () => {
 
     expect(onChange).toHaveBeenCalledWith(["editor-logic", "shared-title"]);
   });
+
+  it("orders content team skills by the creation workflow", () => {
+    const contentTeamSkills: Skill[] = [
+      contentTeamSkill("system-writer", "写手", 2),
+      contentTeamSkill("system-publisher", "发布编辑", 4),
+      contentTeamSkill("system-reviewer", "审稿", 3),
+      contentTeamSkill("system-planner", "策划", 0),
+      contentTeamSkill("system-researcher", "资料员", 1)
+    ];
+
+    render(<SkillPicker skills={contentTeamSkills} selectedSkillIds={contentTeamSkills.map((skill) => skill.id)} onChange={vi.fn()} />);
+
+    const contentTeamGroup = screen.getByRole("group", { name: "内容团队" });
+    const labels = within(contentTeamGroup).getAllByRole("checkbox").map((checkbox) => checkbox.closest("label")?.textContent);
+
+    expect(labels).toEqual([
+      expect.stringContaining("策划"),
+      expect.stringContaining("资料员"),
+      expect.stringContaining("写手"),
+      expect.stringContaining("审稿"),
+      expect.stringContaining("发布编辑")
+    ]);
+  });
 });
+
+function contentTeamSkill(id: string, title: string, sortOrder: number): Skill {
+  return {
+    id,
+    title,
+    category: "content-team",
+    description: `${title}说明。`,
+    prompt: `${title} prompt`,
+    appliesTo: "both",
+    isSystem: true,
+    sortOrder,
+    defaultEnabled: true,
+    isArchived: false,
+    createdAt: "2026-05-01T00:00:00.000Z",
+    updatedAt: "2026-05-01T00:00:00.000Z"
+  };
+}

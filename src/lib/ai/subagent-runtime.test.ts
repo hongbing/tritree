@@ -43,15 +43,18 @@ describe("subagent runtime tools", () => {
     mockAgentConstructor.mockClear();
   });
 
-  it("exposes template and temporary subagent tools with summaries", () => {
+  it("exposes template and custom subagent tools with summaries", () => {
     const runtime = createSubagentRuntimeTools({
       runSubagentTask: async () => "unused"
     });
 
-    expect(Object.keys(runtime.tools)).toEqual(["run_subagent_template", "run_temporary_subagent"]);
+    expect(Object.keys(runtime.tools)).toEqual(["run_subagent_template", "run_custom_subagent"]);
     expect(runtime.subagentTemplateSummaries).toHaveLength(1);
     expect(runtime.toolSummaries.join("\n")).toContain("run_subagent_template");
-    expect(runtime.toolSummaries.join("\n")).toContain("run_temporary_subagent");
+    expect(runtime.toolSummaries.join("\n")).toContain("run_custom_subagent");
+    expect(runtime.toolSummaries.join("\n")).toContain("优先使用 run_subagent_template");
+    expect(runtime.toolSummaries.join("\n")).not.toContain("临时");
+    expect(runtime.toolSummaries.join("\n")).not.toContain("temporary");
   });
 
   it("runs a selected template with fallback expected output", async () => {
@@ -114,18 +117,18 @@ describe("subagent runtime tools", () => {
     );
   });
 
-  it("runs a temporary subagent with constraints", async () => {
+  it("runs a custom subagent with constraints", async () => {
     const calls: SubagentTask[] = [];
     const controller = new AbortController();
     const runtime = createSubagentRuntimeTools({
       env: { TRITREE_MAX_OUTPUT_TOKENS: "1234" },
       runSubagentTask: async (task) => {
         calls.push(task);
-        return "temporary result";
+        return "custom result";
       }
     });
 
-    const result = await executableTool(runtime.tools.run_temporary_subagent).execute(
+    const result = await executableTool(runtime.tools.run_custom_subagent).execute(
       {
         title: "事实核查",
         task: "检查这段话是否自洽",
@@ -138,19 +141,19 @@ describe("subagent runtime tools", () => {
 
     expect(result).toEqual({
       ok: true,
-      result: "temporary result",
+      result: "custom result",
       title: "事实核查"
     });
     expect(calls).toEqual([
       {
         constraints: "不要扩写正文",
         context: "待审文本",
-        env: { TRITREE_MAX_OUTPUT_TOKENS: "1234" },
-        expectedOutput: "列出问题和建议",
+      env: { TRITREE_MAX_OUTPUT_TOKENS: "1234" },
+      expectedOutput: "列出问题和建议",
         task: "检查这段话是否自洽",
         template: undefined,
-        title: "事实核查",
-        abortSignal: controller.signal
+      title: "事实核查",
+      abortSignal: controller.signal
       }
     ]);
   });
@@ -165,7 +168,7 @@ describe("subagent runtime tools", () => {
       env: { KIMI_API_KEY: "test-token" },
       expectedOutput: "输出",
       task: "任务",
-      title: "临时子代理"
+      title: "自定义子代理"
     });
 
     expect(result).toBe("model result");

@@ -1,6 +1,7 @@
 "use client";
 
 import type { Skill } from "@/lib/domain";
+import { orderSkillsForDisplay } from "@/lib/skills/skill-order";
 
 const effectGroups = [
   { appliesTo: "writer", title: "草稿工作", effect: "作用：内容更新" },
@@ -34,7 +35,7 @@ export function SkillPicker({
   return (
     <div className="skill-picker">
       {effectGroups.map((group) => {
-        const groupSkills = skills.filter((skill) => skill.appliesTo === group.appliesTo);
+        const groupSkills = orderSkillsForDisplay(skills.filter((skill) => skill.appliesTo === group.appliesTo));
         if (groupSkills.length === 0) return null;
 
         return (

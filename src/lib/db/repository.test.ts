@@ -15,11 +15,11 @@ function testDbPath() {
 
 const exampleDefaultsConfigPath = path.resolve("config/defaults.example.json");
 const defaultSystemSkillIds = [
-  "system-publisher",
   "system-planner",
   "system-researcher",
+  "system-writer",
   "system-reviewer",
-  "system-writer"
+  "system-publisher"
 ];
 
 const repositorySystemSkills: ConfiguredSystemSkill[] = [
@@ -30,6 +30,7 @@ const repositorySystemSkills: ConfiguredSystemSkill[] = [
     description: "负责生成和改写草稿，控制改动幅度并保留创作者原意。",
     prompt: "你是写作者。负责把 seed、当前草稿、用户选择和已启用技能写成下一版草稿。",
     appliesTo: "writer",
+    sortOrder: 0,
     defaultEnabled: true,
     isArchived: false
   },
@@ -40,6 +41,7 @@ const repositorySystemSkills: ConfiguredSystemSkill[] = [
     description: "负责诊断主线、读者、逻辑和发布前风险，并提出下一步选择。",
     prompt: "你是审核者。负责判断当前作品最需要创作者澄清、选择或推进什么。",
     appliesTo: "editor",
+    sortOrder: 1,
     defaultEnabled: true,
     isArchived: false
   }
@@ -932,8 +934,7 @@ describe("Treeable repository", () => {
     const user = await createTestUser(repo, "writer");
 
     const systemSkillIds = repo.listSkills(user.id).filter((skill) => skill.isSystem).map((skill) => skill.id);
-    expect(systemSkillIds).toEqual(expect.arrayContaining(defaultSystemSkillIds));
-    expect(systemSkillIds).toHaveLength(defaultSystemSkillIds.length);
+    expect(systemSkillIds).toEqual(defaultSystemSkillIds);
     expect(repo.defaultEnabledSkillIds()).toEqual(defaultSystemSkillIds);
   });
 

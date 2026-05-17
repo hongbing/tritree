@@ -109,6 +109,31 @@ function renderRootMemorySetup(props: Partial<ComponentProps<typeof RootMemorySe
   );
 }
 
+function contentTeamSkill(id: string, title: string): Skill {
+  const sortOrders = new Map([
+    ["system-planner", 0],
+    ["system-researcher", 1],
+    ["system-writer", 2],
+    ["system-reviewer", 3],
+    ["system-publisher", 4]
+  ]);
+
+  return {
+    id,
+    title,
+    category: "content-team",
+    description: `${title}说明。`,
+    prompt: `${title} prompt`,
+    appliesTo: "both",
+    isSystem: true,
+    sortOrder: sortOrders.get(id),
+    defaultEnabled: true,
+    isArchived: false,
+    createdAt: "2026-05-01T00:00:00.000Z",
+    updatedAt: "2026-05-01T00:00:00.000Z"
+  };
+}
+
 describe("RootMemorySetup", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
@@ -812,6 +837,39 @@ describe("RootMemorySetup", () => {
 
     expect(screen.getByRole("group", { name: "判断工作" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "技能库" })).toBeInTheDocument();
+  });
+
+  it("summarizes default content team skills in creation workflow order", async () => {
+    const contentTeamSkills: Skill[] = [
+      contentTeamSkill("system-writer", "写手"),
+      contentTeamSkill("system-publisher", "发布编辑"),
+      contentTeamSkill("system-reviewer", "审稿"),
+      contentTeamSkill("system-planner", "策划"),
+      contentTeamSkill("system-researcher", "资料员")
+    ];
+    renderRootMemorySetup({ skills: contentTeamSkills });
+
+    const summary = screen.getByLabelText("已启用技能摘要");
+    expect(within(summary).getByText("策划")).toBeInTheDocument();
+    expect(within(summary).getByText("资料员")).toBeInTheDocument();
+    expect(within(summary).getByText("写手")).toBeInTheDocument();
+    expect(within(summary).getByRole("button", { name: "还有 2 个" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "还有 2 个" }));
+
+    const contentTeamGroup = screen.getByRole("group", { name: "内容团队" });
+    const labels = within(contentTeamGroup).getAllByRole("checkbox").map((checkbox) => checkbox.closest("label")?.textContent);
+
+    expect(labels).toEqual([
+      expect.stringContaining("策划"),
+      expect.stringContaining("资料员"),
+      expect.stringContaining("写手"),
+      expect.stringContaining("审稿"),
+      expect.stringContaining("发布编辑")
+    ]);
+    expect(within(contentTeamGroup).getAllByRole("checkbox").every((checkbox) => checkbox instanceof HTMLInputElement && checkbox.checked)).toBe(
+      true
+    );
   });
 
   it("disables submit while saving", async () => {

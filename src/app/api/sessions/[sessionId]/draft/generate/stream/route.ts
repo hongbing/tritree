@@ -11,6 +11,7 @@ import { focusSessionStateForNode, summarizeSessionForDirector } from "@/lib/app
 import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
 import { getRepository } from "@/lib/db/repository";
 import { OptionGenerationModeSchema, type AgentMessage, type BranchOption, type SessionState, type TreeNode } from "@/lib/domain";
+import { isSeedDraft } from "@/lib/seed-draft";
 import { encodeNdjson } from "@/lib/stream/ndjson";
 
 export const runtime = "nodejs";
@@ -84,23 +85,29 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
           selectedOption.mode ?? body.optionMode
         );
         const memory = { resource: state.rootMemory.id, thread: sessionId };
-        const nextStep = await streamDirectorNextStep(directorParts, {
-          memory,
-          signal: request.signal,
-          onReasoningText(event) {
-            send({ type: "thinking", nodeId: targetNode.id, stage: "options", text: event.accumulatedText });
-          },
-          onText(event) {
-            if (event.partialOptions) {
-              send({
-                type: "options",
-                nodeId: targetNode.id,
-                roundIntent: event.partialRoundIntent,
-                options: event.partialOptions
-              });
+        const nextStep = shouldDraftDirectly(parentState)
+          ? {
+              action: "draft" as const,
+              agentMessages: [] as AgentMessage[],
+              roundIntent: directDraftRoundIntent(selectedOption, body.note)
             }
-          }
-        });
+          : await streamDirectorNextStep(directorParts, {
+              memory,
+              signal: request.signal,
+              onReasoningText(event) {
+                send({ type: "thinking", nodeId: targetNode.id, stage: "options", text: event.accumulatedText });
+              },
+              onText(event) {
+                if (event.partialOptions) {
+                  send({
+                    type: "options",
+                    nodeId: targetNode.id,
+                    roundIntent: event.partialRoundIntent,
+                    options: event.partialOptions
+                  });
+                }
+              }
+            });
 
         if (nextStep.action === "options") {
           const nextState = repository.updateNodeOptions({
@@ -196,6 +203,20 @@ function parentStateForDraftNode(state: SessionState, node: TreeNode) {
 function selectedOptionForDraftNode(state: SessionState | null, node: TreeNode): BranchOption | null {
   if (!state || !node.parentOptionId) return null;
   return state.currentNode?.options.find((option) => option.id === node.parentOptionId) ?? null;
+}
+
+function shouldDraftDirectly(state: SessionState) {
+  return Boolean(state.currentDraft && isSeedDraft(state.currentDraft, state.rootMemory.preferences.seed ?? ""));
+}
+
+function directDraftRoundIntent(option: BranchOption, note: string | undefined) {
+  return [
+    option.label,
+    option.description,
+    note?.trim() ? `用户补充要求：${note.trim()}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function agentMessagesArgument(...messageGroups: Array<AgentMessage[] | undefined>) {

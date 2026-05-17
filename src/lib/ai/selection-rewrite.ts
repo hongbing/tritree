@@ -63,47 +63,44 @@ type StructuredObjectStreamResult = {
 type StreamSource<T> = AsyncIterable<T> | ReadableStream<T> | (() => AsyncIterable<T>);
 
 const SELECTION_REWRITE_SYSTEM_PROMPT = `
-You rewrite only the selected passage from an existing draft.
-Use the surrounding draft, learned preferences, and enabled skills as context.
+You are a focused structured-output agent.
+Use active skills and the provided context to transform only the selected field segment requested by the user.
 Return only JSON. Do not wrap it in Markdown.
-All user-facing text must be Simplified Chinese unless the user's own text requires otherwise.
-Preserve the user's intent, local tone, and useful wording; only rewrite the selected passage.
+User-facing fields default to Simplified Chinese unless the user content or an active skill requires otherwise.
 `.trim();
 
 export function buildSelectionRewritePrompt(input: SelectionRewriteInput) {
   const enabledSkills = skillsForTarget(input.enabledSkills as Skill[], "writer");
 
   return `
-# 本轮任务
-根据当前草稿上下文和用户修改要求，改写选中的局部片段。
-只返回替换选区的新片段，不要返回完整正文。
+# Runtime Input
+本消息只提供上下文数据和局部改写目标，不定义业务策略。请按系统提示词和已启用 Skills 完成本轮结构化输出。
 
-# 创作状态
-创作 seed：
+# Initial Input
 ${input.rootSummary}
 
 已学习偏好：
 ${input.learnedSummary || "暂无已学习偏好。"}
 
-当前草稿：
+# Current Draft
 标题：${input.currentDraft.title}
 正文：${input.currentDraft.body}
 话题：${input.currentDraft.hashtags.join(" ")}
 配图提示：${input.currentDraft.imagePrompt}
 
-# 已选技能
+# Active Skills
 ${formatEnabledSkills(enabledSkills)}
 
-# 选区
+# Selection
 字段：${input.field}
 选中的原文：
 ${input.selectedText}
 
-# 修改要求
+# User Request
 修改要求：
 ${input.instruction}
 
-# 返回格式
+# Output Contract
 Return only one valid JSON object. Do not wrap it in Markdown.
 The JSON object must match this shape:
 {

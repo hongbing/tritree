@@ -22,6 +22,7 @@ export const SkillUpsertSchema = z.object({
 export const SkillSchema = SkillUpsertSchema.extend({
   id: z.string().min(1),
   isSystem: z.boolean(),
+  sortOrder: z.number().int().nonnegative().optional(),
   createdAt: z.string(),
   updatedAt: z.string()
 });

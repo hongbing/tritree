@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MAX_SKILL_PROMPT_LENGTH, type Skill, type SkillCategory, type SkillUpsert } from "@/lib/domain";
+import { orderSkillsForDisplay } from "@/lib/skills/skill-order";
 
 const emptyForm: SkillUpsert = {
   title: "",
@@ -310,7 +311,7 @@ function groupSkills(skills: Skill[]) {
   ] as const;
 
   return groups
-    .map(([label, appliesTo]) => [label, skills.filter((skill) => skill.appliesTo === appliesTo)] as const)
+    .map(([label, appliesTo]) => [label, orderSkillsForDisplay(skills.filter((skill) => skill.appliesTo === appliesTo))] as const)
     .filter(([, groupSkills]) => groupSkills.length > 0);
 }
 

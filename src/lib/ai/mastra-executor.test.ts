@@ -95,11 +95,11 @@ beforeEach(() => {
     subagentTemplateSummaries: ["material-search｜素材搜索：围绕给定主题快速寻找可用素材。"],
     toolSummaries: [
       "run_subagent_template：运行预创建子代理模板。",
-      "run_temporary_subagent：运行一次性临时子代理。"
+      "run_custom_subagent：运行自定义子代理。"
     ],
     tools: {
       run_subagent_template: { id: "run_subagent_template", description: "Run template", execute: vi.fn() },
-      run_temporary_subagent: { id: "run_temporary_subagent", description: "Run temporary", execute: vi.fn() }
+      run_custom_subagent: { id: "run_custom_subagent", description: "Run custom", execute: vi.fn() }
     }
   });
   mocks.createMcpRuntimeTools.mockResolvedValue({ disconnect: vi.fn(), toolSummaries: [], tools: {} });
@@ -307,7 +307,7 @@ describe("tree director compatibility generators", () => {
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:next-step]",
-      expect.stringContaining("决定下一步 action 是 options、draft 或 complete")
+      expect.stringContaining("本轮固定目标：提交 next-step 路由结果")
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:next-step]",
@@ -447,9 +447,9 @@ describe("tree director compatibility generators", () => {
       description: "Run a template subagent.",
       execute: vi.fn()
     };
-    const runTemporarySubagent = {
-      id: "run_temporary_subagent",
-      description: "Run a temporary subagent.",
+    const runCustomSubagent = {
+      id: "run_custom_subagent",
+      description: "Run a custom subagent.",
       execute: vi.fn()
     };
     const readFile = {
@@ -477,11 +477,11 @@ describe("tree director compatibility generators", () => {
       subagentTemplateSummaries: ["material-search｜素材搜索：围绕给定主题快速寻找可用素材。"],
       toolSummaries: [
         "run_subagent_template：运行预创建子代理模板。",
-        "run_temporary_subagent：运行一次性临时子代理。"
+        "run_custom_subagent：运行自定义子代理。"
       ],
       tools: {
         run_subagent_template: runSubagentTemplate,
-        run_temporary_subagent: runTemporarySubagent
+        run_custom_subagent: runCustomSubagent
       }
     });
     mocks.createMcpRuntimeTools.mockResolvedValueOnce({
@@ -512,7 +512,7 @@ describe("tree director compatibility generators", () => {
         existingTools: {
           run_skill_command: runSkillCommand,
           run_subagent_template: runSubagentTemplate,
-          run_temporary_subagent: runTemporarySubagent
+          run_custom_subagent: runCustomSubagent
         }
       })
     );
@@ -521,7 +521,7 @@ describe("tree director compatibility generators", () => {
         tools: expect.objectContaining({
           run_skill_command: runSkillCommand,
           run_subagent_template: runSubagentTemplate,
-          run_temporary_subagent: runTemporarySubagent,
+          run_custom_subagent: runCustomSubagent,
           filesystem_read_file: readFile
         })
       })
@@ -2011,7 +2011,7 @@ describe("tree director compatibility generators", () => {
     );
     expect(mocks.agentConstructor).toHaveBeenCalledWith(
       expect.objectContaining({
-        instructions: expect.stringContaining("最终目标就是调用 submit_tree_options 完成本轮澄清选项任务")
+        instructions: expect.stringContaining("最终目标就是调用 submit_tree_options 完成本轮 options 任务")
       })
     );
     const streamOptions = (stream.mock.calls as unknown as Array<[unknown, Record<string, unknown>]>)[0]?.[1];
@@ -2082,8 +2082,8 @@ describe("tree director compatibility generators", () => {
 
     expect(stream).toHaveBeenCalledTimes(2);
     const retryMessages = stream.mock.calls[1]?.[0] as Array<{ content: string; role: string }>;
-    expect(retryMessages.at(-1)?.content).toContain("You must do actual work before ending this turn");
-    expect(retryMessages.at(-1)?.content).toContain("clear blocker rationale");
+    expect(retryMessages.at(-1)?.content).toContain("You must complete a meaningful ReAct step before ending this turn");
+    expect(retryMessages.at(-1)?.content).toContain("inspect any tool or subagent result");
   });
 
   it("accepts runtime options without decision rationale after non-final subagent tool activity", async () => {
@@ -2135,6 +2135,148 @@ describe("tree director compatibility generators", () => {
     ).resolves.toMatchObject(finalObject);
 
     expect(stream).toHaveBeenCalledTimes(1);
+  });
+
+  it("streams subagent tool activity with template title, task, and completion status", async () => {
+    const finalObject = {
+      roundIntent: "选择差异化角度",
+      options: [
+        { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略。", impact: "目标读者更明确。", kind: "explore" },
+        { id: "b", label: "做反攻略", description: "写成避坑判断。", impact: "角度更鲜明。", kind: "reframe" },
+        { id: "c", label: "做实时决策表", description: "按天气组织内容。", impact: "更像工具。", kind: "deepen" }
+      ]
+    };
+    const stream = vi.fn(async () => ({
+      fullStream: async function* () {
+        yield {
+          type: "tool-call",
+          payload: {
+            toolCallId: "subagent-1",
+            toolName: "run_subagent_template",
+            args: {
+              context: "主题：青岛亲子游",
+              task: "找三条低幼家庭可用素材",
+              templateId: "material-search"
+            }
+          }
+        };
+        yield {
+          type: "tool-result",
+          payload: {
+            toolCallId: "subagent-1",
+            toolName: "run_subagent_template",
+            result: {
+              ok: true,
+              result: "三条素材",
+              templateId: "material-search",
+              title: "素材搜索"
+            }
+          }
+        };
+        yield {
+          type: "tool-call",
+          payload: {
+            toolCallId: "submit-1",
+            toolName: "submit_tree_options",
+            args: {
+              decisionRationale: "子代理素材已检查，可以给用户三个角度。",
+              ...finalObject
+            }
+          }
+        };
+      },
+      object: Promise.resolve(undefined)
+    }));
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate: vi.fn()
+      };
+    });
+    const progressEvents: Array<{ accumulatedText: string; delta: string }> = [];
+
+    await expect(
+      streamTreeOptions({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" },
+        onReasoningText: (event) => progressEvents.push(event)
+      })
+    ).resolves.toMatchObject(finalObject);
+
+    expect(progressEvents.at(-1)?.accumulatedText).toContain("[子代理] 运行 素材搜索");
+    expect(progressEvents.at(-1)?.accumulatedText).toContain("找三条低幼家庭可用素材");
+    expect(progressEvents.at(-1)?.accumulatedText).toContain("[子代理] 素材搜索 完成，主 agent 正在检查返回值");
+    expect(progressEvents.at(-1)?.accumulatedText).not.toContain("run_subagent_template");
+  });
+
+  it("does not expose partial custom subagent arguments while streaming tool input", async () => {
+    const finalObject = {
+      roundIntent: "选择差异化角度",
+      options: [
+        { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略。", impact: "目标读者更明确。", kind: "explore" },
+        { id: "b", label: "做反攻略", description: "写成避坑判断。", impact: "角度更鲜明。", kind: "reframe" },
+        { id: "c", label: "做实时决策表", description: "按天气组织内容。", impact: "更像工具。", kind: "deepen" }
+      ]
+    };
+    const stream = vi.fn(async () => ({
+      fullStream: async function* () {
+        yield {
+          type: "tool-call-streaming-start",
+          payload: {
+            toolCallId: "custom-subagent-1",
+            toolName: "run_custom_subagent"
+          }
+        };
+        yield {
+          type: "tool-call-delta",
+          payload: {
+            toolCallId: "custom-subagent-1",
+            toolName: "run_custom_subagent",
+            argsTextDelta: '{"title":"社'
+          }
+        };
+        yield {
+          type: "tool-call-delta",
+          payload: {
+            toolCallId: "custom-subagent-1",
+            toolName: "run_custom_subagent",
+            argsTextDelta: '媒写手","task":"把这个方案写成一篇完整草稿"}'
+          }
+        };
+        yield {
+          type: "tool-call",
+          payload: {
+            toolCallId: "submit-1",
+            toolName: "submit_tree_options",
+            args: finalObject
+          }
+        };
+      },
+      object: Promise.resolve(undefined)
+    }));
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate: vi.fn()
+      };
+    });
+    const progressEvents: Array<{ accumulatedText: string; delta: string }> = [];
+
+    await expect(
+      streamTreeOptions({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" },
+        onReasoningText: (event) => progressEvents.push(event)
+      })
+    ).resolves.toMatchObject(finalObject);
+
+    const visibleProgress = progressEvents.map((event) => event.accumulatedText).join("\n");
+    expect(visibleProgress).toContain("[子代理] 准备运行 自定义子代理");
+    expect(visibleProgress).not.toContain("run_custom_subagent");
+    expect(visibleProgress).not.toContain("社媒写手");
+    expect(visibleProgress).not.toContain("把这个方案写成一篇完整草稿");
   });
 
   it("accepts runtime options without decision rationale after nested non-final subagent tool activity", async () => {
@@ -2846,7 +2988,7 @@ describe("tree director compatibility generators", () => {
     expect(progressEvents).toEqual([]);
     expect(mocks.agentConstructor).toHaveBeenCalledWith(
       expect.objectContaining({
-        instructions: expect.stringContaining("最终目标就是调用 submit_tree_draft 完成本轮写作任务")
+        instructions: expect.stringContaining("最终目标就是调用 submit_tree_draft 完成本轮 draft 任务")
       })
     );
     expect(partials[0]).toMatchObject({

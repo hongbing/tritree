@@ -60,6 +60,7 @@ import {
   stripSkillRuntimeMetadata,
   type InstalledSkillImport
 } from "@/lib/skills/skill-installer";
+import { compareSkillsForDisplay } from "@/lib/skills/skill-order";
 import {
   loadConfiguredDefaults,
   type ConfiguredCreationRequestOption,
@@ -160,6 +161,7 @@ type SkillRow = {
   description: string;
   prompt: string;
   applies_to: string;
+  sort_order: number;
   is_system: number;
   default_enabled: number;
   is_archived: number;
@@ -178,14 +180,6 @@ type CreationRequestOptionRow = {
 };
 
 const MAX_NODE_AGENT_MESSAGES_JSON_CHARS = 48000;
-const skillTitleCollator = new Intl.Collator("zh-Hans-CN");
-const CONTENT_TEAM_DEFAULT_SKILL_ORDER = new Map([
-  ["system-publisher", 0],
-  ["system-planner", 1],
-  ["system-researcher", 2],
-  ["system-reviewer", 3],
-  ["system-writer", 4]
-]);
 
 function now() {
   return new Date().toISOString();
@@ -349,6 +343,7 @@ function toSkill(row: SkillRow): Skill {
     prompt: stripSkillRuntimeMetadata(row.prompt),
     appliesTo: row.applies_to || "both",
     isSystem: Boolean(row.is_system),
+    sortOrder: row.sort_order,
     defaultEnabled: Boolean(row.default_enabled),
     isArchived: Boolean(row.is_archived),
     createdAt: row.created_at,
@@ -427,8 +422,9 @@ export function createTreeableRepository(
 
   function ensureSystemSkills(systemSkills: ConfiguredSystemSkill[]) {
     const timestamp = now();
-    for (const skill of systemSkills) {
+    for (const [index, skill] of systemSkills.entries()) {
       const parsed = SkillUpsertSchema.parse(skill);
+      const sortOrder = skill.sortOrder ?? index;
       const existing = db.prepare("SELECT * FROM skills WHERE id = ?").get(skill.id) as SkillRow | undefined;
       if (existing) {
         if (existing.user_id !== null || !existing.is_system) {
@@ -437,7 +433,7 @@ export function createTreeableRepository(
         db.prepare(
           `
             UPDATE skills
-            SET user_id = NULL, title = ?, category = ?, description = ?, prompt = ?, applies_to = ?, is_system = 1, default_enabled = ?, is_archived = ?, updated_at = ?
+            SET user_id = NULL, title = ?, category = ?, description = ?, prompt = ?, applies_to = ?, sort_order = ?, is_system = 1, default_enabled = ?, is_archived = ?, updated_at = ?
             WHERE id = ?
           `
         ).run(
@@ -446,6 +442,7 @@ export function createTreeableRepository(
           parsed.description,
           parsed.prompt,
           parsed.appliesTo,
+          sortOrder,
           parsed.defaultEnabled ? 1 : 0,
           parsed.isArchived ? 1 : 0,
           timestamp,
@@ -454,8 +451,8 @@ export function createTreeableRepository(
       } else {
         db.prepare(
           `
-            INSERT INTO skills (id, title, category, description, prompt, applies_to, is_system, default_enabled, is_archived, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+            INSERT INTO skills (id, title, category, description, prompt, applies_to, sort_order, is_system, default_enabled, is_archived, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
           `
         ).run(
           skill.id,
@@ -464,6 +461,7 @@ export function createTreeableRepository(
           parsed.description,
           parsed.prompt,
           parsed.appliesTo,
+          sortOrder,
           parsed.defaultEnabled ? 1 : 0,
           parsed.isArchived ? 1 : 0,
           timestamp,
@@ -695,16 +693,16 @@ export function createTreeableRepository(
       .prepare(
         includeArchived
           ? `
-              SELECT *
-              FROM skills
-              WHERE user_id IS NULL OR user_id = ?
-              ORDER BY is_system DESC, category, title
+            SELECT *
+            FROM skills
+            WHERE user_id IS NULL OR user_id = ?
+              ORDER BY is_system DESC, sort_order, category, title
             `
           : `
               SELECT *
               FROM skills
               WHERE (user_id IS NULL OR user_id = ?) AND is_archived = 0
-              ORDER BY is_system DESC, category, title
+              ORDER BY is_system DESC, sort_order, category, title
             `
       )
       .all(userId) as SkillRow[];
@@ -718,21 +716,8 @@ export function createTreeableRepository(
     return rows
       .map(toSkill)
       .filter((skill) => skill.defaultEnabled)
-      .sort(compareDefaultEnabledSkills)
+      .sort(compareSkillsForDisplay)
       .map((skill) => skill.id);
-  }
-
-  function compareDefaultEnabledSkills(left: Skill, right: Skill) {
-    const categoryComparison = left.category.localeCompare(right.category);
-    if (categoryComparison !== 0) return categoryComparison;
-
-    const leftContentTeamOrder = CONTENT_TEAM_DEFAULT_SKILL_ORDER.get(left.id);
-    const rightContentTeamOrder = CONTENT_TEAM_DEFAULT_SKILL_ORDER.get(right.id);
-    if (left.category === "content-team" && leftContentTeamOrder !== undefined && rightContentTeamOrder !== undefined) {
-      return leftContentTeamOrder - rightContentTeamOrder;
-    }
-
-    return skillTitleCollator.compare(left.title, right.title);
   }
 
   function resolveSkillsByIds(skillIds: string[], userId: string) {

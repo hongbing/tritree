@@ -217,6 +217,51 @@ describe("POST /api/sessions/:sessionId/draft/generate/stream", () => {
     });
   });
 
+  it("drafts directly from an unformed seed draft without routing through next-step", async () => {
+    const seedDraft = { title: "写一个产品故事", body: "写一个产品故事", hashtags: [], imagePrompt: "" };
+    const seedState = {
+      ...state,
+      nodeDrafts: [{ nodeId: "node-1", draft: seedDraft }]
+    };
+    const finalOutput = {
+      roundIntent: "扩写\n扩写",
+      draft: { title: "新", body: "新正文", hashtags: ["#新"], imagePrompt: "新图" }
+    };
+    const finalState = {
+      ...seedState,
+      currentDraft: finalOutput.draft,
+      nodeDrafts: [...seedState.nodeDrafts, { nodeId: "node-2", draft: finalOutput.draft }]
+    };
+    const updateNodeDraft = vi.fn().mockReturnValue(finalState);
+    getRepositoryMock.mockReturnValue({
+      getSessionState: vi.fn().mockReturnValue(seedState),
+      updateNodeDraft
+    });
+    streamDirectorDraftMock.mockResolvedValue(finalOutput);
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/draft/generate/stream", {
+        method: "POST",
+        body: JSON.stringify({ nodeId: "node-2" })
+      }),
+      { params: Promise.resolve({ sessionId: "session-1" }) }
+    );
+    const text = await response.text();
+
+    expect(streamDirectorNextStepMock).not.toHaveBeenCalled();
+    expect(streamDirectorDraftMock).toHaveBeenCalled();
+    expect(updateNodeDraft).toHaveBeenCalledWith({
+      userId: "user-1",
+      sessionId: "session-1",
+      nodeId: "node-2",
+      output: {
+        roundIntent: finalOutput.roundIntent,
+        draft: finalOutput.draft
+      }
+    });
+    expect(text).toContain('"type":"done"');
+  });
+
   it("lets the director continue with three choices instead of calling the draft agent", async () => {
     const nextStepOutput = {
       action: "options",

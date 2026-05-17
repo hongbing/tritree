@@ -81,6 +81,37 @@ describe("summarizeSessionForDirector", () => {
     expect(optionMessages.at(-1)?.content ?? optionMessages[0].content).toContain("作品类型：PRD 文档");
   });
 
+  it("marks the seed draft as an unformed draft in writer and reviewer context", () => {
+    const state = {
+      ...createStateWithPath([]),
+      rootMemory: {
+        ...createStateWithPath([]).rootMemory,
+        preferences: {
+          ...createStateWithPath([]).rootMemory.preferences,
+          seed: "我想写 AI 产品经理的真实困境"
+        },
+        summary: "Seed：我想写 AI 产品经理的真实困境"
+      },
+      currentDraft: {
+        title: "我想写 AI 产品经理的真实困境",
+        body: "我想写 AI 产品经理的真实困境",
+        hashtags: [],
+        imagePrompt: ""
+      }
+    };
+
+    const draftSummary = summarizeSessionForDirector(state, option("a", "先写第一版"));
+    const optionSummary = summarizeCurrentDraftOptionsForDirector(state);
+    const draftMessages = (draftSummary as any).messages as Array<{ role: string; content: string }>;
+    const optionMessages = (optionSummary as any).messages as Array<{ role: string; content: string }>;
+
+    expect(draftSummary.currentDraft).toContain("当前只有种子念头，尚未形成正式草稿");
+    expect(optionSummary.currentDraft).toContain("当前只有种子念头，尚未形成正式草稿");
+    expect(draftMessages.at(-2)?.content).toContain("尚未形成正式草稿");
+    expect(optionMessages.at(-1)?.content ?? optionMessages[0].content).toContain("尚未形成正式草稿");
+    expect(optionMessages.at(-1)?.content ?? optionMessages[0].content).not.toContain("当前内容：\n标题：");
+  });
+
   it("includes user notes for the selected option", () => {
     const summary = summarizeSessionForDirector(
       {

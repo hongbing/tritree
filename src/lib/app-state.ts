@@ -9,6 +9,7 @@ import {
 } from "@/lib/domain";
 import type { DirectorInputParts, DirectorMessage } from "@/lib/ai/prompts";
 import { formatArtifactInstructionsForDirector } from "@/lib/artifacts";
+import { isSeedDraft } from "@/lib/seed-draft";
 
 export function summarizeSessionForDirector(
   state: SessionState,
@@ -25,7 +26,7 @@ export function summarizeSessionForDirector(
     artifactContext: artifactContextForState(state),
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
-    currentDraft: currentDraft ? formatDraftForDirector(currentDraft) : "",
+    currentDraft: currentDraft ? formatDraftForDirectorInState(state, currentDraft) : "",
     pathSummary: "",
     foldedSummary: "",
     selectedOptionLabel,
@@ -99,7 +100,7 @@ export function summarizeEditedDraftForDirector(state: SessionState, draft: Draf
     artifactContext: artifactContextForState(state),
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
-    currentDraft: formatDraftForDirector(draft),
+    currentDraft: formatDraftForDirectorInState(state, draft),
     pathSummary: "",
     foldedSummary: "",
     selectedOptionLabel,
@@ -119,7 +120,7 @@ export function summarizeCurrentDraftOptionsForDirector(
     artifactContext: artifactContextForState(state),
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
-    currentDraft: currentDraft ? formatDraftForDirector(currentDraft) : "",
+    currentDraft: currentDraft ? formatDraftForDirectorInState(state, currentDraft) : "",
     pathSummary: "",
     foldedSummary: "",
     selectedOptionLabel,
@@ -225,7 +226,7 @@ function buildDraftConversationMessages(state: SessionState, finalUserRequest: s
   });
 
   if (state.selectedPath.length === 0 && state.currentDraft) {
-    messages.push({ role: "assistant", content: formatCurrentDraftForWriter(state.currentDraft) });
+    messages.push({ role: "assistant", content: formatCurrentDraftForWriter(state, state.currentDraft) });
   }
 
   messages.push({ role: "user", content: finalUserRequest });
@@ -271,6 +272,7 @@ function buildEditorMessages(state: SessionState, currentDraft: Draft | null, re
   });
 
   const finalReviewMaterial = formatEditorCurrentReviewMaterial({
+    state,
     currentDraft,
     latestRevisionSummary,
     reviewInstruction
@@ -312,6 +314,10 @@ function formatDraftHistoryRoundForWriter(
 ) {
   const draft = draftForNode(state, node);
   if (draft && includeFullDraft) {
+    if (isSeedDraftForState(state, draft)) {
+      return formatUnformedSeedDraftForDirector(draft);
+    }
+
     return [
       `第 ${node.roundIndex} 版已形成草稿`,
       formatDraftForDirector(draft)
@@ -322,13 +328,23 @@ function formatDraftHistoryRoundForWriter(
 
   return [
     `第 ${node.roundIndex} 版已形成版本摘要`,
-    `形成版本：${draft ? formatDraftVersionSummary(draft) : "暂无可用正文，仅保留本轮意图。"}`
+    `形成版本：${
+      draft
+        ? isSeedDraftForState(state, draft)
+          ? "当前只有种子念头，尚未形成正式草稿。"
+          : formatDraftVersionSummary(draft)
+        : "暂无可用正文，仅保留本轮意图。"
+    }`
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-function formatCurrentDraftForWriter(draft: Draft) {
+function formatCurrentDraftForWriter(state: SessionState, draft: Draft) {
+  if (isSeedDraftForState(state, draft)) {
+    return formatUnformedSeedDraftForDirector(draft);
+  }
+
   return ["当前已形成草稿", formatDraftForDirector(draft)].join("\n");
 }
 
@@ -382,10 +398,12 @@ function shouldRepeatArtifactContextForFinalRequest(state: SessionState) {
 }
 
 function formatEditorCurrentReviewMaterial({
+  state,
   currentDraft,
   latestRevisionSummary,
   reviewInstruction
 }: {
+  state: SessionState;
   currentDraft: Draft | null;
   latestRevisionSummary: string;
   reviewInstruction: string;
@@ -393,11 +411,30 @@ function formatEditorCurrentReviewMaterial({
   return [
     "本轮审稿材料：",
     reviewInstruction ? `本轮要求：\n${reviewInstruction}` : "",
-    `当前内容：\n${currentDraft ? formatDraftForDirector(currentDraft) : "暂无内容。"}`,
+    `当前内容：\n${currentDraft ? formatDraftForDirectorInState(state, currentDraft) : "暂无内容。"}`,
     latestRevisionSummary
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function formatDraftForDirectorInState(state: SessionState, draft: Draft) {
+  if (isSeedDraftForState(state, draft)) {
+    return formatUnformedSeedDraftForDirector(draft);
+  }
+
+  return formatDraftForDirector(draft);
+}
+
+function formatUnformedSeedDraftForDirector(draft: Draft) {
+  return [
+    "当前只有种子念头，尚未形成正式草稿。",
+    `种子内容：${draft.body}`
+  ].join("\n");
+}
+
+function isSeedDraftForState(state: SessionState, draft: Draft) {
+  return isSeedDraft(draft, state.rootMemory.preferences.seed ?? "");
 }
 
 function formatEditorSuggestionRound(node: SessionState["selectedPath"][number]) {

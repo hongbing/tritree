@@ -27,6 +27,7 @@ import { buildDirectorInput, parseDirectorJsonObject } from "./director";
 import { createMcpRuntimeTools, type McpRuntimeTools } from "./mcp-runtime";
 import type { DirectorInputParts } from "./prompts";
 import { createSubagentRuntimeTools } from "./subagent-runtime";
+import { getSubagentTemplate } from "./subagent-templates";
 
 export type MastraConversationMessage = {
   role: "assistant" | "tool" | "user";
@@ -194,8 +195,10 @@ const MASTRA_STRUCTURED_OUTPUT_VALIDATION_ID = "STRUCTURED_OUTPUT_SCHEMA_VALIDAT
 const SUBMIT_TREE_DRAFT_TOOL_NAME = "submit_tree_draft";
 const SUBMIT_TREE_NEXT_STEP_TOOL_NAME = "submit_tree_next_step";
 const SUBMIT_TREE_OPTIONS_TOOL_NAME = "submit_tree_options";
+const RUN_SUBAGENT_TEMPLATE_TOOL_NAME = "run_subagent_template";
+const RUN_CUSTOM_SUBAGENT_TOOL_NAME = "run_custom_subagent";
 const ACTUAL_WORK_RETRY_MESSAGE =
-  "You must do actual work before ending this turn. Call a tool or subagent, submit an updated draft or publish package, mark the task complete, or ask the user through three choices with a clear blocker rationale.";
+  "You must complete a meaningful ReAct step before ending this turn. Handle the task yourself when possible, inspect any tool or subagent result you use, call the required final submit tool, or submit three user-facing options only when a real user decision is blocked.";
 
 type TreeNextStepAgentLike = TreeOptionsAgentLike;
 
@@ -588,7 +591,7 @@ function withFinalSubmitToolSummary(
     ...context,
     toolSummaries: [
       ...(context.toolSummaries ?? []),
-      `${toolName}：最终提交工具，也是本轮任务唯一完成方式。完成必要的外部查询和分析后，必须调用此工具提交 Tritree 固定目标结果；调用 ${toolName} 后必须立即停止，不要继续输出 thinking、解释、总结、Markdown、JSON 文本或普通自然语言，也不要再调用其他工具。${finalShape}`
+      `${toolName}：最终提交工具，也是本轮任务唯一完成方式。完成必要的工具调用和结果检查后，必须调用此工具提交本轮结构化结果；调用 ${toolName} 后必须立即停止，不要继续输出 thinking、解释、总结、Markdown、JSON 文本或普通自然语言，也不要再调用其他工具。${finalShape}`
     ]
   };
 }
@@ -601,10 +604,10 @@ function withFinalSubmitTool(tools: ToolsInput, target: RuntimeSubmitTarget): To
       id: toolName,
       description:
         target === "draft"
-          ? "Submit the final Tritree draft output. This is the last step after runtime skill tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls."
+          ? "Submit the final draft output. This is the last step after runtime tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls."
           : target === "next-step"
-            ? "Submit the final Tritree next-step routing decision. This is the last step after runtime tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls."
-            : "Submit the final Tritree branch options output. This is the last step after runtime skill tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls.",
+            ? "Submit the final next-step routing decision. This is the last step after runtime tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls."
+            : "Submit the final branch options output. This is the last step after runtime tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls.",
       inputSchema:
         target === "draft"
           ? DirectorDraftOutputSchema
@@ -1340,7 +1343,7 @@ function structuredOutputRepairMessage({
   return {
     role: "user",
     content: [
-      `上一轮最终输出没有通过 Tritree 固定结构校验。请根据原始任务、已启用 Skills 和已经获得的工具结果，重新生成一个完整合法的最终结果。`,
+      `上一轮最终输出没有通过固定结构校验。请根据原始任务、已启用 Skills 和已经获得的工具结果，重新生成一个完整合法的最终结果。`,
       `结构修复重试 ${retryNumber}/${MAX_STRUCTURED_OUTPUT_RETRIES}。不要解释错误原因，不要输出诊断报告。${runtimeReminder}`,
       "结构问题：",
       structuredOutputIssueSummary(error),
@@ -1727,16 +1730,30 @@ function toolProgressDeltaFromStreamChunk(chunk: unknown): string {
   if (isFinalSubmitToolName(toolName)) return "";
 
   if (chunkType === "tool-call" || chunkType === "tool-execution-start") {
+    if (isSubagentToolName(toolName)) {
+      return `\n[子代理] 运行 ${subagentCallLabel(toolName, toolInputFromPayload(payload))}`;
+    }
+
     return `\n[工具] 调用 ${toolName}`;
   }
 
   if (chunkType === "tool-result" || chunkType === "tool-output" || chunkType === "tool-execution-end") {
     const output = toolOutputFromPayload(payload);
     const verb = isFailedToolOutput(output, payload) ? "失败" : "完成";
+    if (isSubagentToolName(toolName)) {
+      return `\n[子代理] ${subagentResultTitle(toolName, output)} ${
+        verb === "失败" ? "失败" : "完成，主 agent 正在检查返回值"
+      }`;
+    }
+
     return `\n[工具] ${toolName} ${verb}`;
   }
 
   if (chunkType === "tool-error" || chunkType === "tool-execution-abort") {
+    if (isSubagentToolName(toolName)) {
+      return `\n[子代理] ${subagentToolFallbackTitle(toolName)} 失败`;
+    }
+
     return `\n[工具] ${toolName} 失败`;
   }
 
@@ -1762,17 +1779,54 @@ function toolCallDeltaProgressFromStreamChunk(chunk: unknown, state: ToolCallDel
     state.argsById.set(toolCallId, "");
     if (state.announcedIds.has(toolCallId)) return "";
     state.announcedIds.add(toolCallId);
+    if (isSubagentToolName(toolName)) {
+      return `\n[子代理] 准备运行 ${subagentToolFallbackTitle(toolName)}`;
+    }
+
     return `\n[工具] 准备调用 ${toolName}`;
   }
 
   const argsTextDelta = stringFromPayload(payload, "argsTextDelta", "delta", "text");
   if (!argsTextDelta) return "";
 
-  state.argsById.set(toolCallId, `${state.argsById.get(toolCallId) ?? ""}${argsTextDelta}`);
+  const argsText = `${state.argsById.get(toolCallId) ?? ""}${argsTextDelta}`;
+  state.argsById.set(toolCallId, argsText);
+
   if (state.announcedIds.has(toolCallId)) return "";
 
   state.announcedIds.add(toolCallId);
   return `\n[工具] 准备调用 ${toolName}`;
+}
+
+function isSubagentToolName(toolName: string) {
+  return toolName === RUN_SUBAGENT_TEMPLATE_TOOL_NAME || toolName === RUN_CUSTOM_SUBAGENT_TOOL_NAME;
+}
+
+function subagentCallLabel(toolName: string, input: unknown) {
+  const parsedInput = parseMaybeJson(input);
+  if (!isObjectRecord(parsedInput)) return subagentToolFallbackTitle(toolName);
+
+  const templateId = typeof parsedInput.templateId === "string" ? parsedInput.templateId : "";
+  const templateTitle = templateId ? getSubagentTemplate(templateId)?.title : "";
+  const customTitle = typeof parsedInput.title === "string" ? parsedInput.title.trim() : "";
+  const title = templateTitle || customTitle || subagentToolFallbackTitle(toolName);
+  const task = typeof parsedInput.task === "string" ? truncateText(parsedInput.task, 80) : "";
+  return task ? `${title}：${task}` : title;
+}
+
+function subagentResultTitle(toolName: string, output: unknown) {
+  const parsedOutput = parseMaybeJson(output);
+  if (!isObjectRecord(parsedOutput)) return subagentToolFallbackTitle(toolName);
+
+  const title = typeof parsedOutput.title === "string" ? parsedOutput.title.trim() : "";
+  if (title) return title;
+
+  const templateId = typeof parsedOutput.templateId === "string" ? parsedOutput.templateId : "";
+  return (templateId ? getSubagentTemplate(templateId)?.title : "") || subagentToolFallbackTitle(toolName);
+}
+
+function subagentToolFallbackTitle(toolName: string) {
+  return toolName === RUN_SUBAGENT_TEMPLATE_TOOL_NAME ? "预定义子代理" : "自定义子代理";
 }
 
 function collectAgentMessageFromStreamChunk(chunk: unknown, state: AgentMessageHistoryState) {

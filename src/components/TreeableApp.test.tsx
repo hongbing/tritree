@@ -122,7 +122,7 @@ vi.mock("@/components/tree/TreeCanvas", () => ({
 vi.mock("@/components/artifacts/ArtifactWorkspace", () => ({
   ArtifactWorkspace: (props: {
     artifacts: Artifact[];
-    currentNode: { id: string } | null;
+    currentNode: { id: string; options?: Array<{ id: string; label: string }> } | null;
     isBusy: boolean;
     isGenerating: boolean;
     onAction?: (actionId: string, artifact: Artifact) => void | Promise<void>;
@@ -604,6 +604,141 @@ describe("TreeableApp", () => {
           selectedArtifactId: "artifact-2"
         })
       );
+    });
+  });
+
+  it("selects the current artifact from a done state even when no artifact.replace event was streamed", async () => {
+    const artifactStream = controlledNdjsonResponse();
+    const childNode = {
+      ...artifactState().currentNode!,
+      id: "node-2",
+      parentId: "node-1",
+      parentOptionId: "a" as const,
+      kind: "analysis" as const,
+      producedArtifactId: null,
+      sourceArtifactIds: ["artifact-1"],
+      roundIndex: 2,
+      roundIntent: "A",
+      options: []
+    };
+    const chosenState = artifactState({
+      session: { ...artifactState().session, currentNodeId: "node-2" },
+      currentNode: childNode,
+      currentArtifact: null,
+      artifacts: [socialPostArtifact],
+      nodeArtifacts: [{ nodeId: "node-1", artifact: socialPostArtifact }],
+      selectedPath: [artifactState().currentNode!, childNode]
+    });
+    const finalState = artifactState({
+      session: { ...artifactState().session, currentNodeId: "node-2" },
+      currentNode: {
+        ...childNode,
+        kind: "artifact",
+        producedArtifactId: "artifact-2",
+        options: artifactState().currentNode!.options
+      },
+      currentArtifact: generatedArtifact,
+      artifacts: [socialPostArtifact, generatedArtifact],
+      nodeArtifacts: [
+        { nodeId: "node-1", artifact: socialPostArtifact },
+        { nodeId: "node-2", artifact: generatedArtifact }
+      ],
+      selectedPath: [
+        artifactState().currentNode!,
+        { ...childNode, kind: "artifact", producedArtifactId: "artifact-2", options: artifactState().currentNode!.options }
+      ]
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: artifactState() }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: chosenState }) })
+      .mockResolvedValueOnce(artifactStream.response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "choose displayed option" }));
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/sessions/session-1/artifact/generate/stream", expect.anything());
+    });
+
+    act(() => {
+      artifactStream.push({ type: "done", state: finalState });
+      artifactStream.close();
+    });
+
+    await vi.waitFor(() => {
+      expect(artifactWorkspaceMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          selectedArtifactId: "artifact-2"
+        })
+      );
+    });
+  });
+
+  it("passes the displayed streaming node state into the artifact workspace", async () => {
+    const artifactStream = controlledNdjsonResponse();
+    const childNode = {
+      ...artifactState().currentNode!,
+      id: "node-2",
+      parentId: "node-1",
+      parentOptionId: "a" as const,
+      kind: "analysis" as const,
+      producedArtifactId: null,
+      sourceArtifactIds: ["artifact-1"],
+      roundIndex: 2,
+      roundIntent: "A",
+      options: []
+    };
+    const chosenState = artifactState({
+      session: { ...artifactState().session, currentNodeId: "node-2" },
+      currentNode: childNode,
+      currentArtifact: null,
+      artifacts: [socialPostArtifact],
+      nodeArtifacts: [{ nodeId: "node-1", artifact: socialPostArtifact }],
+      selectedPath: [artifactState().currentNode!, childNode]
+    });
+    const streamedOptions = [
+      { id: "a" as const, label: "继续", description: "继续", impact: "继续", kind: "deepen" as const },
+      { id: "b" as const, label: "换角度", description: "换角度", impact: "换角度", kind: "reframe" as const },
+      { id: "c" as const, label: "完成", description: "完成", impact: "完成", kind: "finish" as const }
+    ];
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: artifactState() }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: chosenState }) })
+      .mockResolvedValueOnce(artifactStream.response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "choose displayed option" }));
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/sessions/session-1/artifact/generate/stream", expect.anything());
+    });
+
+    act(() => {
+      artifactStream.push({ type: "options", nodeId: "node-2", roundIntent: "流式选项", options: streamedOptions });
+    });
+
+    await vi.waitFor(() => {
+      expect(artifactWorkspaceMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          currentNode: expect.objectContaining({
+            id: "node-2",
+            options: streamedOptions
+          })
+        })
+      );
+    });
+
+    act(() => {
+      artifactStream.push({ type: "done", state: chosenState });
+      artifactStream.close();
     });
   });
 

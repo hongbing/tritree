@@ -1,262 +1,179 @@
-# Content Team Skill Workflow Design
+# Skill-Guided Subagent Workflow Design
 
 Date: 2026-05-18
 
 ## Summary
 
-Tritree should feel like a small content creation team, not a workflow engine and not a long list of abstract creator moves. The earlier creator-native design correctly moved away from rigid stages, but seven visible moves are still too much for users to understand at a glance. The revised model should expose a small, familiar team of content roles as visible Skills.
+Tritree should feel like a small content team. The team is represented by visible role Skills. Each Skill defines how a role thinks, what it is responsible for, what kind of output helps the work move forward, and which concrete tasks are good candidates for delegation.
 
-The user-facing loop stays simple: current work, one useful question, three choices, next version or next question. Behind that loop, Tritree chooses which content-team role should be active now: planning the piece, finding material, drafting, reviewing, or preparing publication.
+The main agent owns orchestration and user interaction. It reads the current work, loads the enabled Skills, chooses the next useful action, calls tools or subagents when useful, and decides whether the result should update the work, complete the task, or ask the user to choose.
+
+The three-choice loop is the main agent's interaction protocol. Role Skills focus on role work; subagents perform bounded tasks; the main agent decides when a user decision is genuinely needed.
 
 ## Goals
 
-- Preserve the mobile-friendly three-choice loop.
-- Make Tritree feel like a content team with understandable roles.
-- Replace hidden hardcoded stage instructions with a small set of visible system Skills.
-- Keep the user from having to understand seven or more creative micro-actions.
-- Support beginner users by defaulting to a complete content team.
-- Support advanced users by letting them disable roles they do not need.
-- Treat subagents as reusable execution helpers that any role may use when the work is clear.
-- Recommend subagent use purposefully: use it for bounded execution, avoid it when the user still needs to make the core creative choice.
-- Keep the first implementation prompt-and-default-Skill focused, without schema or UI redesign.
-
-## Non-Goals
-
-- Do not expose a workflow state machine to users.
-- Do not ask users to manually choose which role acts each round.
-- Do not create separate "beginner" and "advanced" modes.
-- Do not create skill bundles, role packs, or nested presets in this pass.
-- Do not make subagent usage mandatory for any role.
-- Do not bind subagents to the writer role.
-- Do not replace three choices with a long form or chat-only flow.
-- Do not add new persisted workflow metadata in the first pass.
+- Preserve the mobile-friendly three-choice interaction.
+- Make role Skills the visible content-team model.
+- Let Skills recommend delegation for specific bounded tasks.
+- Support both precreated subagent templates and temporary subagents.
+- Keep subagents as shared execution capability available to any suitable task.
+- Make the main agent perform useful work before asking the user to choose, except when user input is the blocker.
+- Retry no-op model runs.
+- Use fresh default-role configuration as the first implementation target.
 
 ## Product Mental Model
 
-A user should understand Tritree as:
+Users should understand Tritree as:
 
 ```text
 Tritree gives you a small content team.
-策划 helps decide what this piece is about.
-资料员 helps find what to write with.
-写手 helps turn it into a draft.
-审稿 helps find what does not work.
-发布编辑 helps make it ready to publish.
+You can enable the roles that help your work.
+Tritree does the next useful piece of work and asks you to choose when your decision matters.
 ```
 
-The user does not pick a role every round. They enable or disable roles as long-term preferences for the work. Tritree decides which enabled role is most useful for the next three choices.
+Beginner users can leave all default roles enabled and use the end-to-end loop. Advanced creators can disable roles or use only the specific capabilities they need.
 
-## Visible System Skills
+## System Model
 
-The default system Skills should shift from broad internal roles such as `系统写作者` and `系统审核者` toward the following five visible roles. These should be visible in the Skill library and default-enabled unless a self-hosted instance changes defaults.
+### Main Agent
 
-### 策划
+The main agent coordinates each turn:
 
-Purpose: decide what the piece is about and why it is worth writing.
+- Read the current work, history, user intent, enabled Skills, available tools, and available subagent templates.
+- Choose the role Skill or combination of Skills most relevant to the next step.
+- Decide whether the next action should be handled directly, through a normal tool, through a precreated subagent template, or through a temporary subagent.
+- Use returned work results to update the draft, prepare a publish package, mark the task complete, or ask the user to choose.
+- Record enough reasoning in the structured result for the executor to validate that the turn performed meaningful work or has a clear user-decision blocker.
 
-Responsibilities:
+The main agent prompt contains the three-choice protocol, the actual-work rule, and the retry-facing constraints.
 
-- Find the most promising topic, angle, reader, conflict, feeling, or claim.
-- Turn a vague seed into one useful creative question.
-- Prevent generic expansion before the piece has a center.
+### Role Skills
 
-Expected effect:
+The default role Skills are visible and default-enabled:
 
-- Early choices feel intentional.
-- The user feels Tritree is helping them decide what to write, not just generating text.
+- `策划`: clarifies topic, reader, claim, angle, conflict, and creative direction.
+- `资料员`: finds, organizes, and verifies examples, scenes, facts, references, and missing evidence.
+- `写手`: turns an agreed direction and usable material into a draft or revision.
+- `审稿`: evaluates main line, logic, specificity, credibility, reader entry, tone, and risk.
+- `发布编辑`: prepares near-finished work for a platform or reader-facing delivery.
 
-Subagent guidance:
+Each role Skill prompt contains:
 
-- Usually avoid subagents when the user still needs to choose the core direction.
-- A subagent may list possible angles for a broad topic, but `策划` must select the final three user-facing choices.
+- Role responsibility.
+- Inputs the role should pay attention to.
+- Useful output shape for the main agent, such as direction notes, material notes, draft text, review findings, or publish-package notes.
+- Delegation guidance for concrete tasks.
+- Context checklist for delegation, so the main agent can pass a short and sufficient prompt to a subagent.
 
-### 资料员
+### Subagent Execution
 
-Purpose: find or organize the material that makes the piece concrete and credible.
+Subagent execution is a shared capability. It is useful when a task has a clear boundary, can run with a compact context, and can return a specific result.
 
-Responsibilities:
+Tritree supports two subagent paths.
 
-- Surface examples, scenes, facts, background, comparisons, quotes, references, and details.
-- Notice when a draft is too abstract because it lacks material.
-- Group scattered notes into usable material categories.
+#### Precreated Subagent Templates
 
-Expected effect:
+Precreated templates reduce prompt overhead for common tasks. The main agent calls a template with a short task, relevant context, and expected output.
 
-- The piece gains specificity and evidence.
-- AI output becomes less empty because it has something real to work with.
+Initial templates:
 
-Subagent guidance:
+- `material-search`: find candidate sources, examples, references, or background material.
+- `material-organizer`: group notes, extract useful claims, and identify missing evidence.
+- `independent-review`: read a draft independently and list issues or opportunities.
+- `title-variants`: generate title/opening variants under clear constraints.
+- `platform-rewrite`: adapt an existing draft for a target platform or length.
 
-- Strong fit for subagents when the request is bounded: find examples, summarize source material, group notes, or list missing evidence.
-- Do not let a subagent invent facts. If external information is needed, use available tools or ask the user.
+Role Skills may recommend these template ids. For example, `资料员` can recommend `material-search`, and `发布编辑` can recommend `platform-rewrite`.
 
-### 写手
+#### Temporary Subagents
 
-Purpose: turn a clear direction and usable material into a draft.
+The main agent can create a temporary subagent for one-off bounded tasks. The temporary subagent receives:
 
-Responsibilities:
+- A short task description.
+- Minimal relevant context.
+- Expected output format.
+- Constraints inherited from the active role Skill and user request.
 
-- Write the first version or next version.
-- Preserve the user's intent, useful wording, and desired tone.
-- Control rewrite intensity based on how mature the current draft is.
+Good temporary-subagent tasks include comparing two candidate structures, extracting objections from pasted feedback, producing alternate examples from existing notes, or doing a focused second read of a section.
 
-Expected effect:
+## Skill Delegation Guidance
 
-- The work becomes actual text on the page.
-- The user can stop thinking in fragments and start reacting to a version.
-
-Subagent guidance:
-
-- Good fit for subagents when the selected direction is clear.
-- Subagent usage is not exclusive to `写手`; this role is simply the most common place where drafting delegation happens.
-
-### 审稿
-
-Purpose: read the draft and identify what is not working.
-
-Responsibilities:
-
-- Check main line, logic, specificity, credibility, reader entry, title promise, tone, and risk.
-- Notice where the piece feels false, empty, repetitive, over-explained, unsupported, or confusing.
-- Turn review into choices, not a long critique report.
-
-Expected effect:
-
-- The user gets useful editorial judgment without being overwhelmed.
-- Choices explain what would improve and why.
-
-Subagent guidance:
-
-- Good fit for subagents when an independent read would help.
-- A subagent may surface issues, but `审稿` should synthesize them into one question and three choices.
-
-### 发布编辑
-
-Purpose: make a near-finished piece ready for readers or a platform.
-
-Responsibilities:
-
-- Prepare title, opening, ending, compression, platform version, hashtags, image prompt, and risk wording.
-- Shift the work from "still writing" to "ready to be seen".
-- Avoid large conceptual rewrites unless the piece is not actually ready.
-
-Expected effect:
-
-- The work becomes publishable.
-- Tritree stops endlessly expanding and helps the user finish.
-
-Subagent guidance:
-
-- Good fit for subagents when producing concrete deliverables: short version, platform variant, title options, final check, or publish package.
-- `发布编辑` still decides whether the piece is ready for publication or should return to planning, material, writing, or review.
-
-## Prompting Model
-
-The options agent should act as the content team lead:
-
-1. Read the current work.
-2. Decide which enabled role should be active now.
-3. Use that role's Skill instructions as the main working method.
-4. If the role suggests subagent use, decide whether the task is clear and bounded enough to delegate.
-5. Produce one user-facing question and exactly three answers.
-
-The draft-producing path should not be treated as the only subagent use case. It is one execution path, often used by `写手`, but `资料员`, `审稿`, and `发布编辑` may also use subagents when useful.
-
-Prompt rule for subagents:
+Role Skills can include delegation guidance in this shape:
 
 ```text
-Subagents are shared execution helpers. Use them for clear, bounded work that can produce material, variants, checks, or a draft. Do not use them to hide or replace the user's core creative choice. When the current issue is still a question of topic, angle, reader, or tradeoff, ask the user through the three choices first.
+适合委托：当需要查找资料、归纳来源、整理案例时，优先建议使用 material-search 或 material-organizer。
+保留给主 agent / 用户：本文最终立场、读者对象、发布判断。
+调用前最小上下文：主题、当前草稿、用户已确认约束、需要查找的问题。
+回来后如何使用：把结果合并成素材判断，再由主 agent 决定更新草稿、继续执行或向用户发起选择。
 ```
 
-## Three-Choice Behavior
+This lets Skills stay focused on role judgment while giving the main agent practical delegation hints.
 
-Three choices should not force role names into the UI. They should feel like natural content decisions.
+## Three-Choice Protocol
 
-Example where `策划` is active:
+Three choices are submitted by the main agent when a real user decision is the next useful step.
 
-```text
-这件事最值得写的地方可能在哪里？
+Valid three-choice situations:
 
-1. 那个反差
-表面是效率工具，实际写的是人被流程改变。
+- A creative decision blocks progress.
+- Useful work has produced multiple viable directions.
+- The user needs to choose topic, angle, reader, material tradeoff, rewrite intensity, or publication direction.
+- The seed or current request is too vague for meaningful execution, and user input is the blocker.
 
-2. 那个瞬间
-从一个具体场景进入，让读者先看见发生了什么。
+Each three-choice result should include a short blocker or decision rationale. This lets the executor distinguish a real user-decision point from a no-op.
 
-3. 那个判断
-直接把你的观点立起来，再用例子支撑。
-```
+## Actual Work And Retry Rule
 
-Example where `资料员` is active:
+Each main-agent run should end in at least one meaningful action:
 
-```text
-这篇现在最缺哪类素材？
+- Call a normal tool.
+- Call a precreated subagent template.
+- Create a temporary subagent.
+- Submit an updated draft.
+- Submit a publish package.
+- Submit completion.
+- Submit a three-choice decision with a clear blocker rationale.
 
-1. 一个真实场景
-先补一段具体发生过的画面，让读者看见问题。
-
-2. 一个对比例子
-用前后变化或两种做法对比，把判断写实。
-
-3. 一个背景解释
-先补清楚为什么这件事会发生，避免结论太跳。
-```
-
-Example where `发布编辑` is active:
+If a run produces none of those actions, the executor retries with this reminder:
 
 ```text
-这版准备见人前，最该收哪一下？
-
-1. 压成发布短版
-主线已经成立，先删掉重复解释和松散句子。
-
-2. 对齐标题承诺
-标题和开头略大，先让它们和正文实际内容一致。
-
-3. 做最后风险检查
-把绝对化判断和不确定事实改得更稳。
+You must do actual work before ending this turn. Call a tool or subagent, submit an updated draft or publish package, mark the task complete, or ask the user through three choices with a clear blocker rationale.
 ```
 
 ## Data And Defaults
 
-First implementation should update default system Skills rather than add workflow schema.
+Recommended first-pass data shape:
 
-`config/defaults.example.json` should define the new visible Skills. The runtime already supports system Skills, `appliesTo`, and default enablement, so the first pass can use existing storage and routing.
+- Default role Skills live in `config/defaults.example.json`.
+- Precreated subagent templates live in config or code, depending on the existing tool architecture.
+- Each template has `id`, `title`, `description`, `prompt`, and expected output guidance.
+- Role Skill prompts reference template ids as recommendations.
+- The main agent prompt owns orchestration, interaction protocol, and retry rule.
+- Fresh defaults are the source of truth for this pass.
 
-Suggested applicability:
+## Implementation Notes
 
-- `策划`: `editor`
-- `资料员`: `editor`
-- `写手`: `writer`
-- `审稿`: `editor`
-- `发布编辑`: `both`
+Implementation should produce these outcomes:
 
-The exact split can be adjusted during implementation, but the user-visible model should remain content-team roles, not agent internals.
-
-## Migration From Current Branch
-
-The current branch introduced `src/lib/ai/content-workflow.ts` with hardcoded stage instructions. This should be replaced or reduced. The new design should not keep a large hidden stage instruction block that duplicates visible Skills.
-
-Recommended migration:
-
-1. Move useful language from `content-workflow.ts` into the five default system Skills.
-2. Replace `buildContentWorkflowOptionInstructions()` with a small content-team-lead instruction, or remove it if the five role Skills fully cover the behavior.
-3. Update tests from "workflow stage text appears in prompt" to "visible content-team Skills are seeded and routed correctly".
-4. Keep executor coverage that draft prompts do not receive editor-only role Skills.
+1. Default role Skills are seeded with role-focused prompts.
+2. Role prompts include delegation guidance and context checklists.
+3. The main agent prompt includes available Skills, available subagent templates, temporary-subagent capability, three-choice eligibility, and actual-work expectations.
+4. Precreated and temporary subagent capabilities are exposed to the main agent as executable paths.
+5. A new implementation plan is written from this spec before implementation starts.
 
 ## Testing
 
 Add or update tests for:
 
-- Default system Skills include `策划`, `资料员`, `写手`, `审稿`, and `发布编辑`.
-- These Skills are visible, not archived, and default-enabled.
-- Editor-target prompt receives `策划`, `资料员`, `审稿`, and shared roles.
-- Writer-target prompt receives `写手` and shared roles.
-- Generated instructions no longer depend on hidden `# 内容工作流阶段` text.
-- Existing three-choice structured output remains unchanged.
+- Default role Skills include `策划`, `资料员`, `写手`, `审稿`, and `发布编辑`.
+- Role Skill prompts contain role responsibility, useful output shape, delegation guidance, and context checklist.
+- Main-agent prompt contains the three-choice protocol and actual-work rule.
+- Main-agent prompt includes both precreated and temporary subagent paths.
+- Precreated subagent templates are available to the main agent with concise descriptions.
+- A no-op model response triggers retry with the explicit actual-work reminder.
+- Three choices are accepted when the structured result includes a clear blocker rationale.
+- Existing structured outputs for draft, options, and completion remain valid.
 
 ## Open Design Principle
 
-Tritree should not make users manage a process. It should give them a small content team, then quietly decide which role is useful for the next choice.
-
-That is the feeling this design should protect.
+Tritree should keep the loop simple for users while doing real work behind the scenes. The main agent manages the loop. Skills provide role judgment. Subagents do bounded work when useful. Three choices appear when the next best thing is genuinely a user decision.

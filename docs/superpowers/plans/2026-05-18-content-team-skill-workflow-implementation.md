@@ -1,5 +1,7 @@
 # Content Team Skill Workflow Implementation Plan
 
+> **Superseded:** Do not execute this plan. It was written for the earlier content-team-role prompt design and is now replaced by the revised Skill-guided subagent workflow design in `docs/superpowers/specs/2026-05-18-content-team-skill-workflow-design.md`. A new implementation plan should be written after that revised spec is reviewed.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the hidden content workflow stage prompt with five visible content-team system Skills: `策划`, `资料员`, `写手`, `审稿`, and `发布编辑`.

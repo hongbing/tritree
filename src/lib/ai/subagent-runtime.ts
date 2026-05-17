@@ -15,6 +15,7 @@ import {
 type StringEnv = Record<string, string | undefined>;
 
 export type SubagentTask = {
+  abortSignal?: AbortSignal;
   constraints?: string;
   context: string;
   env?: StringEnv;
@@ -25,6 +26,10 @@ export type SubagentTask = {
 };
 
 export type SubagentTaskRunner = (task: SubagentTask) => Promise<string>;
+
+type ToolExecuteContext = {
+  abortSignal?: AbortSignal;
+};
 
 type CreateSubagentRuntimeToolsOptions = {
   env?: StringEnv;
@@ -48,13 +53,14 @@ export function createSubagentRuntimeTools({
         context: z.string().min(1).describe("Context the subagent needs to complete the task."),
         expectedOutput: z.string().min(1).optional().describe("Optional output override for this run.")
       }),
-      execute: async ({ templateId, task, context, expectedOutput }) => {
+      execute: async ({ templateId, task, context, expectedOutput }, executeContext?: ToolExecuteContext) => {
         const template = getSubagentTemplate(templateId, templates);
         if (!template) {
           throw new Error(`Unknown subagent template: ${templateId}`);
         }
 
         const result = await runSubagentTask({
+          abortSignal: executeContext?.abortSignal,
           context,
           env,
           expectedOutput: expectedOutput ?? template.expectedOutput,
@@ -82,8 +88,9 @@ export function createSubagentRuntimeTools({
         expectedOutput: z.string().min(1).describe("Expected output shape or content requirements."),
         constraints: z.string().min(1).optional().describe("Optional constraints for this run.")
       }),
-      execute: async ({ title, task, context, expectedOutput, constraints }) => {
+      execute: async ({ title, task, context, expectedOutput, constraints }, executeContext?: ToolExecuteContext) => {
         const result = await runSubagentTask({
+          abortSignal: executeContext?.abortSignal,
           constraints,
           context,
           env,
@@ -128,7 +135,7 @@ export async function runSubagentTaskWithModel(task: SubagentTask): Promise<stri
       role: "user",
       content: buildSubagentUserPrompt(task)
     }
-  ]);
+  ], { abortSignal: task.abortSignal });
 
   return resultToText(result);
 }

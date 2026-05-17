@@ -1,6 +1,29 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentTask } from "./subagent-runtime";
-import { createSubagentRuntimeTools } from "./subagent-runtime";
+import { createSubagentRuntimeTools, runSubagentTaskWithModel } from "./subagent-runtime";
+
+const mockGenerate = vi.fn();
+const mockAgentConstructor = vi.fn();
+
+vi.mock("@mastra/core/agent", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@mastra/core/agent")>();
+  return {
+    ...actual,
+    Agent: vi.fn(
+      class {
+        generate = mockGenerate;
+
+        constructor(options: unknown) {
+          mockAgentConstructor(options);
+        }
+      }
+    )
+  };
+});
+
+vi.mock("./mastra-agents", () => ({
+  createTreeableAnthropicModel: vi.fn(() => "mock-model")
+}));
 
 type ExecutableTool = {
   execute: (input: Record<string, unknown>, context: Record<string, unknown>) => Promise<unknown>;
@@ -15,6 +38,11 @@ function executableTool(tool: unknown) {
 }
 
 describe("subagent runtime tools", () => {
+  beforeEach(() => {
+    mockGenerate.mockReset();
+    mockAgentConstructor.mockClear();
+  });
+
   it("exposes template and temporary subagent tools with summaries", () => {
     const runtime = createSubagentRuntimeTools({
       runSubagentTask: async () => "unused"
@@ -28,6 +56,7 @@ describe("subagent runtime tools", () => {
 
   it("runs a selected template with fallback expected output", async () => {
     const calls: SubagentTask[] = [];
+    const controller = new AbortController();
     const runtime = createSubagentRuntimeTools({
       env: { KIMI_API_KEY: "test-token" },
       runSubagentTask: vi.fn(async (task) => {
@@ -42,7 +71,7 @@ describe("subagent runtime tools", () => {
         task: "找三条资料",
         context: "主题：周末短途旅行"
       },
-      {}
+      { abortSignal: controller.signal }
     );
 
     expect(result).toEqual({
@@ -58,7 +87,8 @@ describe("subagent runtime tools", () => {
       expectedOutput: "资料清单：每条包含来源、要点、可用角度和可信度提示。",
       task: "找三条资料",
       template: expect.objectContaining({ id: "material-search", title: "素材搜索" }),
-      title: "素材搜索"
+      title: "素材搜索",
+      abortSignal: controller.signal
     });
   });
 
@@ -86,6 +116,7 @@ describe("subagent runtime tools", () => {
 
   it("runs a temporary subagent with constraints", async () => {
     const calls: SubagentTask[] = [];
+    const controller = new AbortController();
     const runtime = createSubagentRuntimeTools({
       env: { TRITREE_MAX_OUTPUT_TOKENS: "1234" },
       runSubagentTask: async (task) => {
@@ -102,7 +133,7 @@ describe("subagent runtime tools", () => {
         expectedOutput: "列出问题和建议",
         constraints: "不要扩写正文"
       },
-      {}
+      { abortSignal: controller.signal }
     );
 
     expect(result).toEqual({
@@ -118,8 +149,30 @@ describe("subagent runtime tools", () => {
         expectedOutput: "列出问题和建议",
         task: "检查这段话是否自洽",
         template: undefined,
-        title: "事实核查"
+        title: "事实核查",
+        abortSignal: controller.signal
       }
     ]);
+  });
+
+  it("passes abortSignal to the default Mastra agent generate call", async () => {
+    const controller = new AbortController();
+    mockGenerate.mockResolvedValueOnce({ text: "model result" });
+
+    const result = await runSubagentTaskWithModel({
+      abortSignal: controller.signal,
+      context: "背景",
+      env: { KIMI_API_KEY: "test-token" },
+      expectedOutput: "输出",
+      task: "任务",
+      title: "临时子代理"
+    });
+
+    expect(result).toBe("model result");
+    expect(mockAgentConstructor).toHaveBeenCalledWith(expect.objectContaining({ model: "mock-model" }));
+    expect(mockGenerate).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ role: "user", content: expect.stringContaining("任务") })]),
+      { abortSignal: controller.signal }
+    );
   });
 });

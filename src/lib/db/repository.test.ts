@@ -383,6 +383,37 @@ describe("Treeable repository", () => {
     expect(completed.artifacts).toHaveLength(1);
   });
 
+  it("completeNode clears the current artifact when completing an artifact node without one", async () => {
+    const { repo, user } = await createRepositoryHarness();
+    const first = await createSessionWithOptions(repo, user.id);
+    const child = repo.createArtifactChild({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: first.currentNode!.id,
+      selectedOptionId: "a",
+      roundIntent: "先写一个版本",
+      artifact: {
+        type: "social-post",
+        payload: socialPostPayload("先写一个版本"),
+        sourceArtifactIds: [first.currentArtifact!.id]
+      }
+    });
+
+    const completed = repo.completeNode({
+      userId: user.id,
+      sessionId: first.session.id,
+      nodeId: child.currentNode!.id,
+      output: { roundIntent: "只保留分析结论" },
+      artifact: null
+    });
+
+    expect(completed.currentNode?.kind).toBe("analysis");
+    expect(completed.currentNode?.producedArtifactId).toBeNull();
+    expect(completed.currentArtifact).toBeNull();
+    expect(completed.nodeArtifacts.some((item) => item.nodeId === child.currentNode!.id)).toBe(false);
+    expect(completed.artifacts).toHaveLength(2);
+  });
+
   it("completeNode can finish a workflow node while storing an artifact", async () => {
     const { repo, user } = await createRepositoryHarness();
     const first = await createSessionWithOptions(repo, user.id);
@@ -445,8 +476,12 @@ describe("Treeable repository", () => {
 
     expect(withArtifact.currentNode?.kind).toBe("artifact");
     expect(withArtifact.currentArtifact?.payload).toEqual(socialPostPayload("写出版本"));
+    expect(withArtifact.currentArtifact?.id).toBe(withArtifact.currentNode?.producedArtifactId);
     expect(withoutArtifact.currentNode?.kind).toBe("analysis");
     expect(withoutArtifact.currentNode?.producedArtifactId).toBeNull();
+    expect(withoutArtifact.currentArtifact).toBeNull();
+    expect(withoutArtifact.nodeArtifacts.some((item) => item.nodeId === child.currentNode!.id)).toBe(false);
+    expect(withoutArtifact.artifacts).toHaveLength(2);
   });
 
   it("lists, renames, and archives artifact sessions by user", async () => {

@@ -1897,9 +1897,13 @@ export function createTreeableRepository(
       .sort((a, b) => a.roundIndex - b.roundIndex);
     const artifactRows = db.prepare("SELECT * FROM artifacts WHERE session_id = ? ORDER BY created_at ASC, rowid ASC").all(sessionId) as ArtifactRow[];
     const artifacts = artifactRows.map(toArtifact);
-    const artifactByNodeId = new Map(artifacts.map((artifact) => [artifact.createdByNodeId, artifact]));
+    const artifactById = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
     const currentNode = session.current_node_id ? nodes.find((node) => node.id === session.current_node_id) ?? null : null;
-    const currentArtifact = currentNode ? artifactByNodeId.get(currentNode.id) ?? null : null;
+    const currentArtifact = currentNode?.producedArtifactId ? artifactById.get(currentNode.producedArtifactId) ?? null : null;
+    const nodeArtifacts = nodes.flatMap((node) => {
+      const artifact = node.producedArtifactId ? artifactById.get(node.producedArtifactId) : null;
+      return artifact ? [{ nodeId: node.id, artifact }] : [];
+    });
     const historyRows = db.prepare("SELECT * FROM branch_history WHERE session_id = ?").all(sessionId) as BranchHistoryRow[];
     const selectedPath = activePathFor(nodes, currentNode);
     const enabledSkills = enabledSkillsForSession(sessionId, userId);
@@ -1918,7 +1922,7 @@ export function createTreeableRepository(
       currentNode,
       currentArtifact,
       artifacts,
-      nodeArtifacts: artifacts.map((artifact) => ({ nodeId: artifact.createdByNodeId, artifact })),
+      nodeArtifacts,
       selectedPath,
       treeNodes: nodes,
       enabledSkillIds: enabledSkills.map((skill) => skill.id),

@@ -1,5 +1,17 @@
 import type { Skill } from "@/lib/domain";
 
+const WEEKDAY_NAMES_ZH = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+export function formatCurrentDateTime(now: Date = new Date()): string {
+  const weekday = WEEKDAY_NAMES_ZH[now.getDay()];
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const hours = String(now.getHours()).padStart(2, "0");
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day} ${weekday} ${hours}:${minutes}`;
+}
+
 export type SharedAgentContextInput = {
   rootSummary: string;
   learnedSummary: string;

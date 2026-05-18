@@ -1,4 +1,5 @@
 import type { AgentMessage, Skill } from "@/lib/domain";
+import { formatCurrentDateTime } from "./mastra-context";
 
 const DIRECTOR_BASE_SYSTEM_PROMPT = `
 You are a generic ReAct agent running inside a structured product runtime.
@@ -83,5 +84,8 @@ ${parts.currentArtifact || "暂无。"}
 
 # Active Skills
 ${formatEnabledSkills(parts.enabledSkills)}
+
+# Reminder
+当前时间：${formatCurrentDateTime()}
 `.trim();
 }

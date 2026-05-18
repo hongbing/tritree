@@ -92,7 +92,7 @@ beforeEach(() => {
   mocks.createAnthropic.mockReturnValue(modelFactory);
   mocks.createSkillRuntimeTools.mockResolvedValue({ toolSummaries: [], tools: {} });
   mocks.createSubagentRuntimeTools.mockReturnValue({
-    subagentTemplateSummaries: ["material-search｜素材搜索：围绕给定主题快速寻找可用素材。"],
+    subagentTemplateSummaries: ["material-search｜搜索资料：围绕给定主题快速寻找可用素材。"],
     toolSummaries: [
       "run_subagent_template：运行预创建子代理模板。",
       "run_custom_subagent：运行自定义子代理。"
@@ -517,7 +517,7 @@ describe("tree director compatibility generators", () => {
       tools: { run_skill_command: runSkillCommand }
     });
     mocks.createSubagentRuntimeTools.mockReturnValueOnce({
-      subagentTemplateSummaries: ["material-search｜素材搜索：围绕给定主题快速寻找可用素材。"],
+      subagentTemplateSummaries: ["material-search｜搜索资料：围绕给定主题快速寻找可用素材。"],
       toolSummaries: [
         "run_subagent_template：运行预创建子代理模板。",
         "run_custom_subagent：运行自定义子代理。"
@@ -2070,8 +2070,8 @@ describe("tree director compatibility generators", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
-  it("retries runtime options when no actual work or blocker rationale happened before final submit", async () => {
-    const firstObject = {
+  it("accepts runtime options when the final submit provides three user-facing choices", async () => {
+    const finalObject = {
       roundIntent: "选择差异化角度",
       options: [
         { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略，聚焦低幼家庭。", impact: "目标读者更明确。", kind: "explore" },
@@ -2079,38 +2079,19 @@ describe("tree director compatibility generators", () => {
         { id: "c", label: "做实时决策表", description: "根据天气和拥挤度组织内容。", impact: "更像工具而不是普通长文。", kind: "deepen" }
       ]
     };
-    const finalObject = {
-      ...firstObject,
-      decisionRationale: "没有足够信息直接继续创作，需要用户先选择清晰阻塞方向。"
-    };
-    const stream = vi
-      .fn()
-      .mockResolvedValueOnce({
-        fullStream: async function* () {
-          yield {
-            type: "tool-call",
-            payload: {
-              toolCallId: "submit-1",
-              toolName: "submit_tree_options",
-              args: firstObject
-            }
-          };
-        },
-        object: Promise.resolve(undefined)
-      })
-      .mockResolvedValueOnce({
-        fullStream: async function* () {
-          yield {
-            type: "tool-call",
-            payload: {
-              toolCallId: "submit-2",
-              toolName: "submit_tree_options",
-              args: finalObject
-            }
-          };
-        },
-        object: Promise.resolve(undefined)
-      });
+    const stream = vi.fn(async () => ({
+      fullStream: async function* () {
+        yield {
+          type: "tool-call",
+          payload: {
+            toolCallId: "submit-1",
+            toolName: "submit_tree_options",
+            args: finalObject
+          }
+        };
+      },
+      object: Promise.resolve(undefined)
+    }));
     mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
       return {
         options,
@@ -2126,10 +2107,7 @@ describe("tree director compatibility generators", () => {
       })
     ).resolves.toMatchObject(finalObject);
 
-    expect(stream).toHaveBeenCalledTimes(2);
-    const retryMessages = stream.mock.calls[1]?.[0] as Array<{ content: string; role: string }>;
-    expect(retryMessages.at(-1)?.content).toContain("You must complete a meaningful ReAct step before ending this turn");
-    expect(retryMessages.at(-1)?.content).toContain("inspect any tool or subagent result");
+    expect(stream).toHaveBeenCalledTimes(1);
   });
 
   it("accepts runtime options without decision rationale after non-final subagent tool activity", async () => {
@@ -2214,7 +2192,7 @@ describe("tree director compatibility generators", () => {
               ok: true,
               result: "三条素材",
               templateId: "material-search",
-              title: "素材搜索"
+              title: "搜索资料"
             }
           }
         };
@@ -2249,9 +2227,9 @@ describe("tree director compatibility generators", () => {
       })
     ).resolves.toMatchObject(finalObject);
 
-    expect(progressEvents.at(-1)?.accumulatedText).toContain("[子代理] 运行 素材搜索");
+    expect(progressEvents.at(-1)?.accumulatedText).toContain("[子代理] 运行 搜索资料");
     expect(progressEvents.at(-1)?.accumulatedText).toContain("找三条低幼家庭可用素材");
-    expect(progressEvents.at(-1)?.accumulatedText).toContain("[子代理] 素材搜索 完成，主 agent 正在检查返回值");
+    expect(progressEvents.at(-1)?.accumulatedText).toContain("[子代理] 搜索资料 完成，主 agent 正在检查返回值");
     expect(progressEvents.at(-1)?.accumulatedText).not.toContain("run_subagent_template");
   });
 

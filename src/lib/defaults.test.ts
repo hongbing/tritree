@@ -216,7 +216,7 @@ describe("defaults config loader", () => {
     expect(systemSkillsById.get("system-reviewer")?.title).toBe("审稿");
     expect(systemSkillsById.get("system-publisher")?.title).toBe("发布编辑");
     expect(systemSkillsById.get("system-researcher")?.prompt).toContain("material-search");
-    expect(systemSkillsById.get("system-publisher")?.prompt).toContain("platform-rewrite");
+    expect(systemSkillsById.get("system-publisher")?.prompt).not.toContain("platform-rewrite");
     expect(defaults.systemSkills.filter((skill) => skill.defaultEnabled).map((skill) => skill.id)).toEqual(defaultSystemSkillIds);
     expect(defaults.systemSkills.map((skill) => skill.sortOrder)).toEqual([0, 1, 2, 3, 4]);
 

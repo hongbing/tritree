@@ -94,7 +94,7 @@ describe("subagent runtime tools", () => {
       ok: true,
       result: "search result",
       templateId: "material-search",
-      title: "素材搜索"
+      title: "搜索资料"
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
@@ -102,8 +102,8 @@ describe("subagent runtime tools", () => {
       env: { KIMI_API_KEY: "test-token" },
       expectedOutput: "资料清单：每条包含来源、要点、可用角度和可信度提示。",
       task: "找三条资料",
-      template: expect.objectContaining({ id: "material-search", title: "素材搜索" }),
-      title: "素材搜索",
+      template: expect.objectContaining({ id: "material-search", title: "搜索资料" }),
+      title: "搜索资料",
       abortSignal: controller.signal
     });
     expect(calls[0].context).toContain("# Scoped Working Context");
@@ -111,22 +111,22 @@ describe("subagent runtime tools", () => {
   });
 
   it("runs a selected template with expected output override", async () => {
-    const runSubagentTask = vi.fn(async () => "rewrite result");
+    const runSubagentTask = vi.fn(async () => "search result");
     const runtime = createSubagentRuntimeTools({ runSubagentTask });
 
     await executableTool(runtime.tools.run_subagent_template).execute(
       {
-        templateId: "platform-rewrite",
-        task: "改写为两个平台版本",
-        expectedOutput: "只返回两个版本"
+        templateId: "material-search",
+        task: "找两个可核查资料线索",
+        expectedOutput: "只返回两个资料线索"
       },
       {}
     );
 
     expect(runSubagentTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        expectedOutput: "只返回两个版本",
-        template: expect.objectContaining({ id: "platform-rewrite" })
+        expectedOutput: "只返回两个资料线索",
+        template: expect.objectContaining({ id: "material-search" })
       })
     );
   });

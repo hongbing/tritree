@@ -1011,6 +1011,9 @@ function assertMeaningfulRuntimeAction({
   if (target === "next-step" && isObjectRecord(output) && (output.action === "draft" || output.action === "complete")) {
     return;
   }
+  if ((target === "options" || target === "next-step") && hasUserFacingOptions(output)) {
+    return;
+  }
   if (hasDecisionRationale(output)) return;
 
   throw new ZodError([
@@ -1028,6 +1031,20 @@ function hasNonFinalToolActivity(summary: RuntimeToolStreamSummary) {
 
 function hasDecisionRationale(output: unknown) {
   return isObjectRecord(output) && typeof output.decisionRationale === "string" && output.decisionRationale.trim().length > 0;
+}
+
+function hasUserFacingOptions(output: unknown) {
+  if (!isObjectRecord(output) || typeof output.roundIntent !== "string" || !output.roundIntent.trim()) return false;
+  if (!Array.isArray(output.options) || output.options.length !== 3) return false;
+
+  return output.options.every(
+    (option) =>
+      isObjectRecord(option) &&
+      typeof option.label === "string" &&
+      option.label.trim().length > 0 &&
+      typeof option.description === "string" &&
+      option.description.trim().length > 0
+  );
 }
 
 function isActualWorkRetryError(error: unknown) {

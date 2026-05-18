@@ -182,22 +182,28 @@ describe("DirectorOptionsOutputSchema", () => {
 });
 
 describe("DirectorNextStepOutputSchema", () => {
-  it("accepts a decision to generate an artifact without options", () => {
+  it("accepts a routing decision to generate an artifact without embedding the artifact", () => {
     const parsed = DirectorNextStepOutputSchema.parse({
       action: "artifact",
-      roundIntent: "信息足够，生成一版 PRD",
-      artifact: {
-        type: "prd",
-        payload: { title: "登录 PRD", markdown: "## 背景\n登录慢。" }
-      }
+      roundIntent: "信息足够，生成一版 PRD"
     });
 
     expect(parsed.action).toBe("artifact");
-    if (parsed.action === "artifact") {
-      expect(parsed.artifact?.type).toBe("prd");
-    }
     expect(parsed).not.toHaveProperty("options");
     expect(parsed).not.toHaveProperty("memoryObservation");
+  });
+
+  it("rejects an inline artifact in a next-step routing decision", () => {
+    expect(() =>
+      DirectorNextStepOutputSchema.parse({
+        action: "artifact",
+        roundIntent: "信息足够，生成一版 PRD",
+        artifact: {
+          type: "prd",
+          payload: { title: "登录 PRD", markdown: "## 背景\n登录慢。" }
+        }
+      })
+    ).toThrow();
   });
 
   it("accepts a decision to complete the current path without more options or a work", () => {

@@ -12,7 +12,7 @@ import {
 } from "@/lib/domain";
 import type { ToolsInput } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
-import { ZodError, type ZodIssue } from "zod";
+import { z, ZodError, type ZodIssue } from "zod";
 import { createSkillRuntimeTools } from "@/lib/skills/skill-runtime";
 import { createTreeArtifactAgent, createTreeNextStepAgent, createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-agents";
 import { compactDirectorMessagesForModel } from "./model-context";
@@ -131,6 +131,8 @@ type ReasoningTextEvent = {
   accumulatedText: string;
 };
 
+export type ProcessDataDisplay = z.infer<typeof ShowProcessDataInputSchema>;
+
 type ParseableOutputSchema<TOutput> = {
   parse(value: unknown): TOutput;
 };
@@ -196,12 +198,35 @@ const MASTRA_STRUCTURED_OUTPUT_VALIDATION_ID = "STRUCTURED_OUTPUT_SCHEMA_VALIDAT
 const SUBMIT_TREE_ARTIFACT_TOOL_NAME = "submit_tree_artifact";
 const SUBMIT_TREE_NEXT_STEP_TOOL_NAME = "submit_tree_next_step";
 const SUBMIT_TREE_OPTIONS_TOOL_NAME = "submit_tree_options";
+const SHOW_PROCESS_DATA_TOOL_NAME = "show_process_data";
 const RUN_SUBAGENT_TEMPLATE_TOOL_NAME = "run_subagent_template";
 const RUN_CUSTOM_SUBAGENT_TOOL_NAME = "run_custom_subagent";
 const ACTUAL_WORK_RETRY_MESSAGE =
   "You must complete a meaningful ReAct step before ending this turn. Handle the task yourself when possible, inspect any tool or subagent result you use, call the required final submit tool, or submit three user-facing options only when a real user decision is blocked.";
 
+const ProcessDataDisplayItemSchema = z
+  .object({
+    title: z.string().trim().min(1).max(160),
+    subtitle: z.string().trim().max(400).optional(),
+    meta: z.string().trim().max(160).optional(),
+    url: z.string().trim().max(1000).optional()
+  })
+  .strict();
+
+const ShowProcessDataInputSchema = z
+  .object({
+    title: z.string().trim().min(1).max(80),
+    sourceToolCallIds: z.array(z.string().trim().min(1)).max(20).default([]),
+    items: z.array(ProcessDataDisplayItemSchema).min(1).max(30),
+    note: z.string().trim().max(500).optional()
+  })
+  .strict();
+
 type TreeNextStepAgentLike = TreeOptionsAgentLike;
+
+type DirectorRuntimeToolPolicy = {
+  includeSubagentTools?: boolean;
+};
 
 export async function generateTreeArtifact({
   parts,
@@ -255,7 +280,9 @@ export async function generateTreeNextStep({
   treeNextStepAgent?: TreeNextStepAgentLike;
   suppressResponseLog?: boolean;
 }): Promise<DirectorNextStepOutput> {
-  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeNextStepAgent));
+  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeNextStepAgent), {
+    includeSubagentTools: false
+  });
   const { agentContext, tools } = executionContext;
   try {
     const messages = directorMessagesForParts(parts, env);
@@ -291,18 +318,26 @@ export async function streamTreeNextStep({
   context,
   treeNextStepAgent,
   onPartialObject,
+  onProcessData,
   onReasoningText
 }: TreeDirectorExecutionInput & {
   treeNextStepAgent?: TreeNextStepAgentLike;
   onPartialObject?: (partial: TreeNextStepPartial) => void;
+  onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorNextStepOutput & DirectorAgentTrace> {
-  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeNextStepAgent));
+  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeNextStepAgent), {
+    includeSubagentTools: false
+  });
   const { agentContext, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
-    const agentContextWithSubmit = runtimeHasTools ? withFinalSubmitToolSummary(agentContext, "next-step") : agentContext;
-    const agentTools = runtimeHasTools ? withFinalSubmitTool(tools, "next-step") : tools;
+    let agentContextWithSubmit = agentContext;
+    let agentTools = tools;
+    if (runtimeHasTools) {
+      agentContextWithSubmit = withFinalSubmitToolSummary(withProcessDataDisplayToolSummary(agentContext), "next-step");
+      agentTools = withFinalSubmitTool(withProcessDataDisplayTool(tools), "next-step");
+    }
     const messages = directorMessagesForParts(parts, env);
     logMastraPrompt("next-step", agentContextWithSubmit, messages);
     const agent = treeNextStepAgent ?? (createTreeNextStepAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeNextStepAgentLike);
@@ -314,6 +349,7 @@ export async function streamTreeNextStep({
         memory: memory ?? memoryScopeForDirectorParts(parts),
         messages,
         onPartialObject,
+        onProcessData,
         onReasoningText,
         schema: DirectorNextStepOutputSchema,
         signal,
@@ -388,18 +424,24 @@ export async function streamTreeArtifact({
   context,
   treeArtifactAgent,
   onPartialObject,
+  onProcessData,
   onReasoningText
 }: TreeDirectorExecutionInput & {
   treeArtifactAgent?: TreeArtifactAgentLike;
   onPartialObject?: (partial: TreeArtifactPartial) => void;
+  onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorArtifactOutput & DirectorAgentTrace> {
   const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeArtifactAgent));
   const { agentContext, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
-    const agentContextWithSubmit = runtimeHasTools ? withFinalSubmitToolSummary(agentContext, "artifact") : agentContext;
-    const agentTools = runtimeHasTools ? withFinalSubmitTool(tools, "artifact") : tools;
+    let agentContextWithSubmit = agentContext;
+    let agentTools = tools;
+    if (runtimeHasTools) {
+      agentContextWithSubmit = withFinalSubmitToolSummary(withProcessDataDisplayToolSummary(agentContext), "artifact");
+      agentTools = withFinalSubmitTool(withProcessDataDisplayTool(tools), "artifact");
+    }
     const messages = directorMessagesForParts(parts, env);
     logMastraPrompt("artifact", agentContextWithSubmit, messages);
     const agent =
@@ -412,6 +454,7 @@ export async function streamTreeArtifact({
         memory: memory ?? memoryScopeForDirectorParts(parts),
         messages,
         onPartialObject,
+        onProcessData,
         onReasoningText,
         schema: DirectorArtifactOutputSchema,
         signal,
@@ -486,18 +529,24 @@ export async function streamTreeOptions({
   context,
   treeOptionsAgent,
   onPartialObject,
+  onProcessData,
   onReasoningText
 }: TreeDirectorExecutionInput & {
   treeOptionsAgent?: TreeOptionsAgentLike;
   onPartialObject?: (partial: TreeOptionsPartial) => void;
+  onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorOptionsOutput & DirectorAgentTrace> {
   const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeOptionsAgent));
   const { agentContext, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
-    const agentContextWithSubmit = runtimeHasTools ? withFinalSubmitToolSummary(agentContext, "options") : agentContext;
-    const agentTools = runtimeHasTools ? withFinalSubmitTool(tools, "options") : tools;
+    let agentContextWithSubmit = agentContext;
+    let agentTools = tools;
+    if (runtimeHasTools) {
+      agentContextWithSubmit = withFinalSubmitToolSummary(withProcessDataDisplayToolSummary(agentContext), "options");
+      agentTools = withFinalSubmitTool(withProcessDataDisplayTool(tools), "options");
+    }
     const messages = directorMessagesForParts(parts, env);
     logMastraPrompt("options", agentContextWithSubmit, messages);
     const agent = treeOptionsAgent ?? (createTreeOptionsAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeOptionsAgentLike);
@@ -509,6 +558,7 @@ export async function streamTreeOptions({
         memory: memory ?? memoryScopeForDirectorParts(parts),
         messages,
         onPartialObject,
+        onProcessData,
         onReasoningText,
         schema: DirectorOptionsOutputSchema,
         signal,
@@ -593,8 +643,31 @@ function withFinalSubmitToolSummary(
     ...context,
     toolSummaries: [
       ...(context.toolSummaries ?? []),
-      `${toolName}：最终提交工具，也是本轮任务唯一完成方式。完成必要的工具调用和结果检查后，必须调用此工具提交本轮结构化结果；调用 ${toolName} 后必须立即停止，不要继续输出 thinking、解释、总结、Markdown、JSON 文本或普通自然语言，也不要再调用其他工具。${finalShape}`
+      `${toolName}：最终提交工具，也是本轮任务唯一完成方式。完成必要的工具调用和结果检查后，必须调用此工具提交本轮结构化结果；调用 ${toolName} 后必须立即停止，不要继续输出 thinking、解释、总结、Markdown、JSON 文本或普通自然语言，也不要再调用其他工具。${finalSubmitRoutingGuidance(target)}${finalShape}`
     ]
+  };
+}
+
+function withProcessDataDisplayToolSummary(context: SharedAgentContextInput): SharedAgentContextInput {
+  return {
+    ...context,
+    toolSummaries: [
+      ...(context.toolSummaries ?? []),
+      `${SHOW_PROCESS_DATA_TOOL_NAME}：向用户展示本轮工具调用后值得看见的过程数据。调用其他工具并检查返回值后，如果资料、搜索结果、参考清单或证据摘要会影响用户选择或理解，可在最终提交前调用；只提交通用展示结构 { title, sourceToolCallIds, items, note }，不要把原始工具输出或业务专用字段直接塞给 UI。`
+    ]
+  };
+}
+
+function withProcessDataDisplayTool(tools: ToolsInput): ToolsInput {
+  return {
+    ...tools,
+    [SHOW_PROCESS_DATA_TOOL_NAME]: createTool({
+      id: SHOW_PROCESS_DATA_TOOL_NAME,
+      description:
+        "Display user-facing process data from already inspected tool results during this ReAct turn. Use before the final submit tool when the user should see source material or evidence. The UI renders exactly this generic display shape.",
+      inputSchema: ShowProcessDataInputSchema,
+      execute: async (input) => input
+    })
   };
 }
 
@@ -608,7 +681,7 @@ function withFinalSubmitTool(tools: ToolsInput, target: RuntimeSubmitTarget): To
         target === "artifact"
           ? "Submit the final artifact output. This is the last step after runtime tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls."
           : target === "next-step"
-            ? "Submit the final next-step routing decision. This is the last step after runtime tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls."
+            ? "Submit the final next-step routing decision. Use options after research, reference gathering, analysis, review, or comparison when the user should choose how to proceed; use artifact when the next work result is already clear; use complete only when the current request can be closed without another user choice or work result. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls."
             : "Submit the final branch options output. This is the last step after runtime tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls.",
       inputSchema:
         target === "artifact"
@@ -619,6 +692,17 @@ function withFinalSubmitTool(tools: ToolsInput, target: RuntimeSubmitTarget): To
       execute: async (input) => input
     })
   };
+}
+
+function finalSubmitRoutingGuidance(target: RuntimeSubmitTarget) {
+  if (target !== "next-step") return "";
+
+  return [
+    "\nnext-step action 选择：",
+    "action=options 用于需要用户继续选择的本轮结果，尤其是资料、搜索、参考、素材收集、分析、审稿或比较之后。",
+    "action=artifact 用于下一步已经明确、可以直接生成或更新作品。",
+    "action=complete 用于当前请求已经可以收束，适合用户明确要求结束、发布、交付、停止继续澄清，或当前目标已经没有可行动下一步。"
+  ].join("\n");
 }
 
 function finalSubmitToolName(target: RuntimeSubmitTarget) {
@@ -648,6 +732,7 @@ async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
   memory,
   messages,
   onPartialObject,
+  onProcessData,
   onReasoningText,
   schema,
   signal,
@@ -659,6 +744,7 @@ async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
   memory: MemoryScope;
   messages: MastraConversationMessage[];
   onPartialObject?: (partial: TPartial) => void;
+  onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
   schema: ParseableOutputSchema<TOutput>;
   signal?: AbortSignal;
@@ -672,6 +758,7 @@ async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
       env,
       memory,
       onPartialObject,
+      onProcessData,
       onReasoningText,
       schema,
       signal,
@@ -696,6 +783,7 @@ async function streamRuntimeToolsOnce<TPartial, TOutput>({
   env,
   memory,
   onPartialObject,
+  onProcessData,
   onReasoningText,
   schema,
   signal,
@@ -707,6 +795,7 @@ async function streamRuntimeToolsOnce<TPartial, TOutput>({
   env: Record<string, string | undefined> | undefined;
   memory: MemoryScope;
   onPartialObject?: (partial: TPartial) => void;
+  onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
   schema: ParseableOutputSchema<TOutput>;
   signal?: AbortSignal;
@@ -738,6 +827,7 @@ async function streamRuntimeToolsOnce<TPartial, TOutput>({
 
   const summary = await consumeRuntimeReActStream<TPartial>(stream, {
     onPartialObject,
+    onProcessData,
     onReasoningText,
     signal,
     target
@@ -752,6 +842,7 @@ async function consumeRuntimeReActStream<TPartial>(
   stream: StructuredObjectStreamResult,
   options: {
     onPartialObject?: (partial: TPartial) => void;
+    onProcessData?: (data: ProcessDataDisplay) => void;
     onReasoningText?: (event: ReasoningTextEvent) => void;
     signal?: AbortSignal;
     target: RuntimeSubmitTarget;
@@ -778,6 +869,7 @@ async function consumeRuntimeReActStream<TPartial>(
     argsById: new Map(),
     submittedOutputById: new Map()
   };
+  const emittedProcessDataIds = new Set<string>();
 
   if (stream.fullStream) {
     for await (const chunk of toAsyncIterable(stream.fullStream)) {
@@ -786,6 +878,7 @@ async function consumeRuntimeReActStream<TPartial>(
       const textDelta = textDeltaFromStreamChunk(chunk);
       const submittedDeltaOutput = submittedOutputDeltaFromStreamChunk(chunk, toolCallDeltaState);
       const submittedChunkOutput = submittedOutputFromStreamChunk(chunk);
+      const processData = processDataDisplayFromStreamChunk(chunk, emittedProcessDataIds);
       const reasoningDelta = hasSeenFinalSubmitOutput ? "" : reasoningDeltaFromStreamChunk(chunk);
       const toolProgressDelta =
         toolProgressDeltaFromStreamChunk(chunk) || toolCallDeltaProgressFromStreamChunk(chunk, toolCallDeltaState);
@@ -836,6 +929,10 @@ async function consumeRuntimeReActStream<TPartial>(
           delta: visibleDelta,
           accumulatedText: accumulatedProgressText
         });
+      }
+
+      if (processData) {
+        options.onProcessData?.(processData);
       }
 
       if (hiddenTextDebugDelta) {
@@ -1332,7 +1429,9 @@ function nextStepOutputShapeSummary() {
   return [
     "必须返回对象：{ action, roundIntent }。",
     "action 只能是 artifact、options 或 complete。",
-    "当 action=artifact 时不要返回 options；可以返回 artifact，也可以只返回 action 和 roundIntent 表示进入产物生成。",
+    "资料、搜索、参考、素材收集、分析、审稿或比较之后，通常用 action=options 让用户决定如何继续，或用 action=artifact 直接生成已明确的作品更新。",
+    "action=complete 表示当前请求已经可以收束，适合用户明确要求结束、发布、交付、停止继续澄清，或当前目标已经没有可行动下一步。",
+    "当 action=artifact 时只返回 action 和 roundIntent，后续 artifact 阶段负责生成作品内容。",
     "当 action=complete 时不要返回 options；如果包含 artifact，只能是 null。",
     "当 action=options 时必须返回 options 正好 3 项；每项只需要包含 { label, description, impact }，系统会自动补 id 和 kind。"
   ].join("\n");
@@ -1342,7 +1441,8 @@ async function executionContextForDirectorParts(
   parts: DirectorInputParts,
   env: Record<string, string | undefined> | undefined,
   context: Partial<AgentExecutionContextOverride> = {},
-  skipRuntimeTools = false
+  skipRuntimeTools = false,
+  toolPolicy: DirectorRuntimeToolPolicy = {}
 ) {
   const baseContext = contextForDirectorParts(parts, context);
   if (skipRuntimeTools) {
@@ -1359,7 +1459,10 @@ async function executionContextForDirectorParts(
   const runtimeAvailableSkillSummaries = Array.isArray(runtime.availableSkillSummaries)
     ? runtime.availableSkillSummaries
     : [];
-  const subagentRuntime = createSubagentRuntimeTools({ contextSource: parts, env });
+  const includeSubagentTools = toolPolicy.includeSubagentTools ?? true;
+  const subagentRuntime = includeSubagentTools
+    ? createSubagentRuntimeTools({ contextSource: parts, env })
+    : { subagentTemplateSummaries: [], toolSummaries: [], tools: {} };
   const tools = {
     ...(runtime.tools ?? {}),
     ...(mcpRuntime.tools ?? {}),
@@ -1631,6 +1734,7 @@ function toolProgressDeltaFromStreamChunk(chunk: unknown): string {
   const toolName = toolNameFromPayload(payload);
   if (!toolName) return "";
   if (isFinalSubmitToolName(toolName)) return "";
+  if (isProcessDataDisplayToolName(toolName)) return "";
 
   if (chunkType === "tool-call" || chunkType === "tool-execution-start") {
     if (isSubagentToolName(toolName)) {
@@ -1676,6 +1780,7 @@ function toolCallDeltaProgressFromStreamChunk(chunk: unknown, state: ToolCallDel
   const toolName = toolNameFromPayload(payload);
   if (!toolName) return "";
   if (isFinalSubmitToolName(toolName)) return "";
+  if (isProcessDataDisplayToolName(toolName)) return "";
 
   const toolCallId = stringFromPayload(payload, "toolCallId", "id") || toolName;
   if (chunkType === "tool-call-streaming-start") {
@@ -1701,6 +1806,45 @@ function toolCallDeltaProgressFromStreamChunk(chunk: unknown, state: ToolCallDel
 
 function isSubagentToolName(toolName: string) {
   return toolName === RUN_SUBAGENT_TEMPLATE_TOOL_NAME || toolName === RUN_CUSTOM_SUBAGENT_TOOL_NAME;
+}
+
+function isProcessDataDisplayToolName(toolName: string) {
+  return toolName === SHOW_PROCESS_DATA_TOOL_NAME;
+}
+
+function processDataDisplayFromStreamChunk(chunk: unknown, emittedIds: Set<string>): ProcessDataDisplay | null {
+  if (!isObjectRecord(chunk)) return null;
+
+  const nestedAgentChunk = nestedAgentExecutionChunk(chunk);
+  if (nestedAgentChunk) return processDataDisplayFromStreamChunk(nestedAgentChunk, emittedIds);
+
+  const chunkType = typeof chunk.type === "string" ? chunk.type : "";
+  if (!chunkType.includes("tool")) return null;
+
+  const payload = isObjectRecord(chunk.payload) ? chunk.payload : chunk;
+  const toolName = toolNameFromPayload(payload);
+  if (!isProcessDataDisplayToolName(toolName)) return null;
+
+  const toolCallId = stringFromPayload(payload, "toolCallId", "id") || "";
+  const rawValue =
+    chunkType === "tool-call" || chunkType === "tool-execution-start"
+      ? toolInputFromPayload(payload)
+      : chunkType === "tool-result" || chunkType === "tool-output" || chunkType === "tool-execution-end"
+        ? unwrapToolOutputValue(toolOutputFromPayload(payload))
+        : null;
+  const parsed = ShowProcessDataInputSchema.safeParse(rawValue);
+  if (!parsed.success) return null;
+
+  const emitKey = toolCallId || JSON.stringify(parsed.data);
+  if (emittedIds.has(emitKey)) return null;
+  emittedIds.add(emitKey);
+  return parsed.data;
+}
+
+function unwrapToolOutputValue(output: unknown) {
+  if (!isObjectRecord(output)) return output;
+  if (output.type === "json" && Object.prototype.hasOwnProperty.call(output, "value")) return output.value;
+  return output;
 }
 
 function subagentCallLabel(toolName: string, input: unknown) {

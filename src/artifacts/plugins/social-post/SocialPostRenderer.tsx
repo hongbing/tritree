@@ -15,9 +15,16 @@ type CapturedTextSelection = {
   selectionStart: number;
 };
 
-export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: ArtifactRendererProps) {
+type DiffSegment = {
+  text: string;
+  type: "added" | "removed" | "same";
+};
+
+export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previousArtifact }: ArtifactRendererProps) {
   const parsed = SocialPostPayloadSchema.safeParse(artifact.payload);
   const payload = parsed.success ? parsed.data : null;
+  const previousPayload = previousArtifact?.type === artifact.type ? SocialPostPayloadSchema.safeParse(previousArtifact.payload) : null;
+  const previousSocialPayload = previousPayload?.success ? previousPayload.data : null;
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(() => payload?.title ?? "");
   const [body, setBody] = useState(() => payload?.body ?? "");
@@ -66,6 +73,10 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
 
   const payloadBody = payload.body;
   const displayTitle = resolveSocialPostTitle(payload.title, payload.body);
+  const previousDisplayTitle = previousSocialPayload
+    ? resolveSocialPostTitle(previousSocialPayload.title, previousSocialPayload.body)
+    : "";
+  const shouldShowInlineDiff = Boolean(isBusy && previousSocialPayload && previousArtifact?.id !== artifact.id);
   const bodyParagraphs = splitBodyParagraphsWithOffsets(payloadBody);
   const canUseSelectionRewrite = Boolean(onAction);
 
@@ -283,19 +294,35 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
           </div>
         ) : (
           <div className="work-content">
-            <h2>{displayTitle}</h2>
+            <h2>
+              {shouldShowInlineDiff ? (
+                <InlineDiffText current={displayTitle} previous={previousDisplayTitle} />
+              ) : (
+                displayTitle
+              )}
+            </h2>
             <div className="work-body" onMouseDown={preserveDisplayBodySelection} onMouseUp={captureDisplayBodySelection}>
-              {bodyParagraphs.map((paragraph) => (
-                <p data-body-end={paragraph.end} data-body-start={paragraph.start} key={`${paragraph.start}-${paragraph.text}`}>
-                  {paragraph.text}
-                </p>
-              ))}
+              {shouldShowInlineDiff && previousSocialPayload ? (
+                <div className="work-inline-diff" data-testid="social-post-inline-diff">
+                  <InlineDiffText current={payloadBody} previous={previousSocialPayload.body} />
+                </div>
+              ) : (
+                bodyParagraphs.map((paragraph) => (
+                  <p data-body-end={paragraph.end} data-body-start={paragraph.start} key={`${paragraph.start}-${paragraph.text}`}>
+                    {paragraph.text}
+                  </p>
+                ))
+              )}
             </div>
             {payload.hashtags.length ? (
               <div className="tag-row">
-                {payload.hashtags.map((tag) => (
-                  <span key={tag}>{tag}</span>
-                ))}
+                {shouldShowInlineDiff && previousSocialPayload ? (
+                  <InlineDiffText current={payload.hashtags.join(" ")} previous={previousSocialPayload.hashtags.join(" ")} />
+                ) : (
+                  payload.hashtags.map((tag) => (
+                    <span key={tag}>{tag}</span>
+                  ))
+                )}
               </div>
             ) : null}
             <section className="image-prompt">
@@ -348,6 +375,87 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave }: Artif
       ) : null}
     </article>
   );
+}
+
+function InlineDiffText({ current, previous }: { current: string; previous: string }) {
+  return (
+    <>
+      {diffText(previous, current).map((segment, index) => (
+        <span className={`work-diff-token work-diff-token--${segment.type}`} key={`${segment.type}-${index}-${segment.text}`}>
+          {segment.text}
+        </span>
+      ))}
+    </>
+  );
+}
+
+function diffText(previous: string, current: string): DiffSegment[] {
+  if (previous === current) return previous ? [{ text: previous, type: "same" }] : [];
+
+  const previousTokens = tokenizeDiffText(previous);
+  const currentTokens = tokenizeDiffText(current);
+  const matrix = longestCommonSubsequenceMatrix(previousTokens, currentTokens);
+  const segments: DiffSegment[] = [];
+  let previousIndex = previousTokens.length;
+  let currentIndex = currentTokens.length;
+
+  while (previousIndex > 0 || currentIndex > 0) {
+    if (
+      previousIndex > 0 &&
+      currentIndex > 0 &&
+      previousTokens[previousIndex - 1] === currentTokens[currentIndex - 1]
+    ) {
+      segments.push({ text: previousTokens[previousIndex - 1], type: "same" });
+      previousIndex -= 1;
+      currentIndex -= 1;
+      continue;
+    }
+
+    if (currentIndex > 0 && (previousIndex === 0 || matrix[previousIndex][currentIndex - 1] >= matrix[previousIndex - 1][currentIndex])) {
+      segments.push({ text: currentTokens[currentIndex - 1], type: "added" });
+      currentIndex -= 1;
+      continue;
+    }
+
+    if (previousIndex > 0) {
+      segments.push({ text: previousTokens[previousIndex - 1], type: "removed" });
+      previousIndex -= 1;
+    }
+  }
+
+  return mergeAdjacentDiffSegments(segments.reverse());
+}
+
+function tokenizeDiffText(value: string) {
+  return value.match(/(\s+|[\p{Script=Han}]|[A-Za-z0-9_]+|[^\s])/gu) ?? [];
+}
+
+function longestCommonSubsequenceMatrix(previousTokens: string[], currentTokens: string[]) {
+  const matrix = Array.from({ length: previousTokens.length + 1 }, () => Array(currentTokens.length + 1).fill(0) as number[]);
+
+  for (let previousIndex = 1; previousIndex <= previousTokens.length; previousIndex += 1) {
+    for (let currentIndex = 1; currentIndex <= currentTokens.length; currentIndex += 1) {
+      matrix[previousIndex][currentIndex] =
+        previousTokens[previousIndex - 1] === currentTokens[currentIndex - 1]
+          ? matrix[previousIndex - 1][currentIndex - 1] + 1
+          : Math.max(matrix[previousIndex - 1][currentIndex], matrix[previousIndex][currentIndex - 1]);
+    }
+  }
+
+  return matrix;
+}
+
+function mergeAdjacentDiffSegments(segments: DiffSegment[]) {
+  return segments.reduce<DiffSegment[]>((merged, segment) => {
+    const previous = merged.at(-1);
+    if (previous?.type === segment.type) {
+      previous.text += segment.text;
+      return merged;
+    }
+
+    merged.push({ ...segment });
+    return merged;
+  }, []);
 }
 
 function splitBodyParagraphsWithOffsets(body: string) {

@@ -26,7 +26,7 @@ import {
 } from "@/lib/domain";
 import { getArtifactType, listArtifactTypes, type ArtifactType } from "@/lib/artifacts";
 import type { UserRole } from "@/lib/auth/types";
-import { ArtifactWorkspace } from "@/components/artifacts/ArtifactWorkspace";
+import { ArtifactWorkspace, type ProcessMaterial } from "@/components/artifacts/ArtifactWorkspace";
 import { RootMemorySetup } from "@/components/root-memory/RootMemorySetup";
 import { SkillLibraryPanel } from "@/components/skills/SkillLibraryPanel";
 import { SkillPicker } from "@/components/skills/SkillPicker";
@@ -59,16 +59,19 @@ type TreeableAppProps = {
 type StreamingArtifactEntry = { artifact: Artifact; nodeId: string };
 type StreamingOptionsEntry = { nodeId: string; options: BranchOption[]; roundIntent?: string | null };
 type StreamingThinkingEntry = { nodeId: string | null; stage: NodeGenerationStage["stage"]; text: string };
+type StreamingProcessMaterialsEntry = { materials: ProcessMaterial[]; nodeId: string | null };
 type ArtifactStreamEvent =
   | { type: "artifact.replace"; artifact: Artifact }
   | { type: "artifact.patch"; path: string; value: unknown }
   | { type: "options"; nodeId: string; options: BranchOption[]; roundIntent?: string | null }
   | { type: "thinking"; nodeId?: string | null; stage?: NodeGenerationStage["stage"]; text: string }
+  | { type: "process_data"; nodeId?: string | null; data: ProcessMaterial }
   | { type: "done"; state: SessionState }
   | { type: "error"; error: string };
 type OptionsStreamEvent =
   | { type: "options"; nodeId: string; options: BranchOption[]; roundIntent?: string | null }
   | { type: "thinking"; nodeId?: string | null; text: string }
+  | { type: "process_data"; nodeId?: string | null; data: ProcessMaterial }
   | { type: "done"; state: SessionState }
   | { type: "error"; error: string };
 type ArtifactComparisonEntry = { artifact: Artifact; label: string; nodeId: string };
@@ -217,6 +220,8 @@ function isArtifactStreamEvent(value: unknown): value is ArtifactStreamEvent {
         (value.nodeId == null || typeof value.nodeId === "string") &&
         (value.stage == null || value.stage === "artifact" || value.stage === "options")
       );
+    case "process_data":
+      return (value.nodeId == null || typeof value.nodeId === "string") && isProcessMaterial(value.data);
     case "done":
       return SessionStateSchema.safeParse(value.state).success;
     case "error":
@@ -241,6 +246,8 @@ function isOptionsStreamEvent(value: unknown): value is OptionsStreamEvent {
       );
     case "thinking":
       return typeof value.text === "string" && (value.nodeId == null || typeof value.nodeId === "string");
+    case "process_data":
+      return (value.nodeId == null || typeof value.nodeId === "string") && isProcessMaterial(value.data);
     case "error":
       return typeof value.error === "string";
     default:
@@ -254,6 +261,25 @@ function findTreeNode(state: SessionState, nodeId: string | null) {
   return state.selectedPath.find((node) => node.id === nodeId) ?? state.treeNodes?.find((node) => node.id === nodeId) ?? null;
 }
 
+function isProcessMaterial(value: unknown): value is ProcessMaterial {
+  if (!isRecord(value)) return false;
+  if (typeof value.title !== "string" || !value.title.trim()) return false;
+  if (!Array.isArray(value.sourceToolCallIds) || !value.sourceToolCallIds.every((item) => typeof item === "string")) {
+    return false;
+  }
+  if (value.note != null && typeof value.note !== "string") return false;
+  if (!Array.isArray(value.items) || value.items.length === 0) return false;
+
+  return value.items.every((item) => {
+    if (!isRecord(item)) return false;
+    if (typeof item.title !== "string" || !item.title.trim()) return false;
+    if (item.subtitle != null && typeof item.subtitle !== "string") return false;
+    if (item.meta != null && typeof item.meta !== "string") return false;
+    if (item.url != null && typeof item.url !== "string") return false;
+    return true;
+  });
+}
+
 function artifactForNode(state: SessionState, nodeId: string | null) {
   if (!nodeId) return null;
   const artifacts = state.artifacts ?? [];
@@ -265,29 +291,44 @@ function artifactForNode(state: SessionState, nodeId: string | null) {
   return producedArtifactId ? artifacts.find((artifact) => artifact.id === producedArtifactId) ?? null : null;
 }
 
-function defaultSelectedArtifactId(state: SessionState, currentSelectedId: string | null) {
+function selectedArtifactIdForView(state: SessionState, viewNodeId: string | null) {
   const artifacts = state.artifacts ?? [];
-  const currentNodeArtifact = artifactForNode(state, state.currentNode?.id ?? null);
-  if (currentNodeArtifact) return currentNodeArtifact.id;
-
-  if (state.currentArtifact && artifacts.some((artifact) => artifact.id === state.currentArtifact?.id)) {
-    return state.currentArtifact.id;
+  const viewedArtifact = artifactForNode(state, viewNodeId);
+  if (viewedArtifact) return viewedArtifact.id;
+  if (viewNodeId && findTreeNode(state, viewNodeId)) {
+    return sourceArtifactForView(state, viewNodeId)?.id ?? null;
   }
-
-  if (currentSelectedId && artifacts.some((artifact) => artifact.id === currentSelectedId)) {
-    return currentSelectedId;
-  }
-
+  if (state.currentArtifact && artifacts.some((artifact) => artifact.id === state.currentArtifact?.id)) return state.currentArtifact.id;
   return artifacts.at(-1)?.id ?? null;
 }
 
-function selectedArtifactIdForDisplay(state: SessionState, currentSelectedId: string | null) {
+function sourceArtifactForView(state: SessionState, nodeId: string) {
   const artifacts = state.artifacts ?? [];
-  if (currentSelectedId && artifacts.some((artifact) => artifact.id === currentSelectedId)) {
-    return currentSelectedId;
+  const artifactFromSourceIds = (sourceArtifactIds: string[]) =>
+    sourceArtifactIds.map((artifactId) => artifacts.find((artifact) => artifact.id === artifactId) ?? null).find(Boolean) ?? null;
+
+  let node = findTreeNode(state, nodeId);
+  if (!node) return null;
+
+  const directSourceArtifact = artifactFromSourceIds(node.sourceArtifactIds);
+  if (directSourceArtifact) return directSourceArtifact;
+
+  const visited = new Set<string>([node.id]);
+  while (node.parentId && !visited.has(node.parentId)) {
+    visited.add(node.parentId);
+    const parentNode = findTreeNode(state, node.parentId);
+    if (!parentNode) return null;
+
+    const parentArtifact = artifactForNode(state, parentNode.id);
+    if (parentArtifact) return parentArtifact;
+
+    const parentSourceArtifact = artifactFromSourceIds(parentNode.sourceArtifactIds);
+    if (parentSourceArtifact) return parentSourceArtifact;
+
+    node = parentNode;
   }
 
-  return defaultSelectedArtifactId(state, null);
+  return null;
 }
 
 function withCustomOption(node: TreeNode, customOption: BranchOption | null) {
@@ -443,7 +484,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
   const [streamingArtifact, setStreamingArtifact] = useState<StreamingArtifactEntry | null>(null);
   const [streamingOptions, setStreamingOptions] = useState<StreamingOptionsEntry | null>(null);
   const [streamingThinking, setStreamingThinking] = useState<StreamingThinkingEntry | null>(null);
-  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
+  const [streamingProcessMaterials, setStreamingProcessMaterials] = useState<StreamingProcessMaterialsEntry | null>(null);
   const [artifactComparison, setArtifactComparison] = useState<ArtifactComparisonSelection | null>(null);
   const [isMobileTreeExpanded, setIsMobileTreeExpanded] = useState(false);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
@@ -504,10 +545,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       setArtifactComparison(null);
     }
   }, [sessionState?.currentNode?.id]);
-
-  useEffect(() => {
-    setSelectedArtifactId((current) => (sessionState ? defaultSelectedArtifactId(sessionState, current) : null));
-  }, [sessionState]);
 
   useEffect(() => {
     if (!isMobileArtifactGenerationActive) {
@@ -704,6 +741,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     setViewNodeId(state.currentNode?.id ?? nodeId);
     setStreamingOptions(null);
     setStreamingThinking(null);
+    setStreamingProcessMaterials(null);
     setIsSkillPanelOpen(false);
     setIsSkillLibraryOpen(false);
   }
@@ -873,6 +911,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
+      setStreamingProcessMaterials(null);
       setIsBusy(false);
     }
   }
@@ -922,6 +961,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
+      setStreamingProcessMaterials(null);
       setIsBusy(false);
     }
   }
@@ -936,6 +976,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
 
     setGenerationStage({ nodeId, stage: "artifact" });
     setStreamingThinking(null);
+    setStreamingProcessMaterials(null);
     const requestOptions = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -996,6 +1037,18 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     return true;
   }
 
+  function applyStreamingProcessData(value: { nodeId?: string | null; data: ProcessMaterial }, fallbackNodeId: string | null | undefined) {
+    const processNodeId = value.nodeId ?? fallbackNodeId ?? null;
+    setStreamingProcessMaterials((current) => {
+      if (!current || current.nodeId !== processNodeId) {
+        return { nodeId: processNodeId, materials: [value.data] };
+      }
+
+      const nextMaterials = current.materials.filter((material) => material.title !== value.data.title);
+      return { nodeId: processNodeId, materials: [...nextMaterials, value.data] };
+    });
+  }
+
   async function readArtifactStream(response: Response, nodeId: string) {
     if (!response.body) return null;
 
@@ -1003,6 +1056,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     let receivedArtifact = false;
     let receivedOptions = false;
     let receivedThinking = false;
+    let receivedProcessData = false;
     let receivedDone = false;
     let streamError: string | null = null;
     const completeOptionPreviewNodeIds = new Set<string>();
@@ -1020,7 +1074,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       if (value.type === "artifact.replace") {
         setGenerationStage({ nodeId, stage: "artifact" });
         setStreamingArtifact({ nodeId, artifact: value.artifact });
-        setSelectedArtifactId(value.artifact.id);
         receivedArtifact = true;
         return;
       }
@@ -1045,15 +1098,21 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
         return;
       }
 
+      if (value.type === "process_data") {
+        applyStreamingProcessData(value, nodeId);
+        receivedProcessData = true;
+        return;
+      }
+
       if (value.type === "done") {
         doneState = value.state;
         const completedArtifact = artifactForNode(value.state, nodeId);
         if (completedArtifact) {
           setStreamingArtifact({ nodeId, artifact: completedArtifact });
-          setSelectedArtifactId(completedArtifact.id);
         }
         receivedDone = true;
         setStreamingThinking(null);
+        setStreamingProcessMaterials(null);
         return;
       }
 
@@ -1062,10 +1121,11 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       }
     });
     const maybeAllowArtifactRender = async () => {
-      const shouldAllowArtifactRender = (receivedArtifact || receivedOptions || receivedThinking) && !receivedDone;
+      const shouldAllowArtifactRender = (receivedArtifact || receivedOptions || receivedThinking || receivedProcessData) && !receivedDone;
       receivedArtifact = false;
       receivedOptions = false;
       receivedThinking = false;
+      receivedProcessData = false;
       receivedDone = false;
       if (shouldAllowArtifactRender) await allowArtifactRender();
     };
@@ -1098,6 +1158,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     setGenerationStage({ nodeId, stage: "options" });
     setStreamingOptions({ nodeId, options: [] });
     setStreamingThinking(null);
+    setStreamingProcessMaterials(null);
     const response = await fetch(apiPath(`/api/sessions/${state.session.id}/options`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1125,6 +1186,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     let streamError: string | null = null;
     let receivedOptions = false;
     let receivedThinking = false;
+    let receivedProcessData = false;
     let receivedDone = false;
     const completeOptionPreviewNodeIds = new Set<string>();
     const decoder = new TextDecoder();
@@ -1148,12 +1210,19 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
         return;
       }
 
+      if (value.type === "process_data") {
+        applyStreamingProcessData(value, fallbackNodeId);
+        receivedProcessData = true;
+        return;
+      }
+
       if (value.type === "done") {
         doneState = value.state;
         receivedDone = true;
         setGenerationStage(null);
         setStreamingOptions(null);
         setStreamingThinking(null);
+        setStreamingProcessMaterials(null);
         return;
       }
 
@@ -1162,9 +1231,10 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       }
     });
     const maybeAllowOptionsRender = async () => {
-      const shouldAllowOptionsRender = (receivedOptions || receivedThinking) && !receivedDone;
+      const shouldAllowOptionsRender = (receivedOptions || receivedThinking || receivedProcessData) && !receivedDone;
       receivedOptions = false;
       receivedThinking = false;
+      receivedProcessData = false;
       receivedDone = false;
       if (shouldAllowOptionsRender) await allowArtifactRender();
     };
@@ -1205,6 +1275,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       setViewNodeId(optionsState.currentNode?.id ?? null);
       setStreamingOptions(null);
       setStreamingThinking(null);
+      setStreamingProcessMaterials(null);
       nextState = optionsState;
     }
 
@@ -1233,6 +1304,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
+      setStreamingProcessMaterials(null);
       setIsBusy(false);
     }
   }
@@ -1259,6 +1331,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
+      setStreamingProcessMaterials(null);
       setIsBusy(false);
     }
   }
@@ -1302,6 +1375,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     setStreamingArtifact(null);
     setStreamingOptions(null);
     setStreamingThinking(null);
+    setStreamingProcessMaterials(null);
     setViewNodeId(null);
     setIsSkillPanelOpen(false);
     setIsSkillLibraryOpen(false);
@@ -1350,7 +1424,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     setSessionState(data.state);
     setViewNodeId(nextNodeId);
     setCustomOption(null);
-    setSelectedArtifactId(data.state.currentArtifact?.id ?? artifact.id);
     previewArtifactGeneration(data.state, nextNodeId);
     if (data.error) {
       setMessage(apiKeyMessage(data.error));
@@ -1375,6 +1448,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
+      setStreamingProcessMaterials(null);
       setIsBusy(false);
     }
   }
@@ -1400,7 +1474,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       setSessionState(data.state);
       setViewNodeId(nextNodeId);
       setCustomOption(null);
-      setSelectedArtifactId(data.state.currentArtifact?.id ?? artifact.id);
       await allowArtifactRender();
       await finishNodeGeneration(data.state, nextNodeId);
     } catch (error) {
@@ -1411,6 +1484,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
+      setStreamingProcessMaterials(null);
       setIsBusy(false);
     }
   }
@@ -1462,7 +1536,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
   const activeViewNode = sessionState ? findTreeNode(sessionState, activeViewNodeId) : null;
   const activeStreamingArtifact = streamingArtifact?.nodeId === activeViewNodeId ? streamingArtifact : null;
   const baseArtifacts = sessionState?.artifacts ?? [];
-  const displayArtifacts = activeStreamingArtifact
+  const fullDisplayArtifacts = activeStreamingArtifact
     ? [
         ...baseArtifacts.filter((artifact) => artifact.id !== activeStreamingArtifact.artifact.id),
         activeStreamingArtifact.artifact
@@ -1471,12 +1545,12 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
   const displaySessionState = sessionState
     ? {
         ...sessionState,
-        artifacts: displayArtifacts,
+        artifacts: fullDisplayArtifacts,
         currentArtifact: activeStreamingArtifact?.artifact ?? sessionState.currentArtifact
       }
     : null;
   const effectiveSelectedArtifactId = displaySessionState
-    ? selectedArtifactIdForDisplay(displaySessionState, selectedArtifactId)
+    ? selectedArtifactIdForView(displaySessionState, activeViewNodeId)
     : null;
   const isArtifactGenerationForView = Boolean(
     activeViewNodeId && generationStage?.nodeId === activeViewNodeId && generationStage.stage === "artifact"
@@ -1514,6 +1588,10 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     : null;
   const activeThinking =
     streamingThinking && (!streamingThinking.nodeId || streamingThinking.nodeId === activeViewNodeId) ? streamingThinking : null;
+  const activeProcessMaterials =
+    streamingProcessMaterials && (!streamingProcessMaterials.nodeId || streamingProcessMaterials.nodeId === activeViewNodeId)
+      ? streamingProcessMaterials.materials
+      : [];
   const artifactGenerationStage =
     generationStage && (!generationStage.nodeId || generationStage.nodeId === activeViewNodeId) ? generationStage.stage : null;
   const isArtifactModuleGenerating = Boolean(artifactGenerationStage === "artifact");
@@ -1561,6 +1639,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     setStreamingArtifact(null);
     setStreamingOptions(null);
     setStreamingThinking(null);
+    setStreamingProcessMaterials(null);
     setIsBusy(true);
     setMessage("");
     try {
@@ -1575,6 +1654,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
+      setStreamingProcessMaterials(null);
       setIsBusy(false);
     }
   }
@@ -1771,7 +1851,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
           ref={mobileArtifactRegionRef}
         >
           <ArtifactWorkspace
-            artifacts={displayArtifacts}
+            artifacts={fullDisplayArtifacts}
             canCompareArtifacts={comparisonEntries.length >= 2}
             comparisonArtifacts={comparisonArtifacts}
             comparisonLabels={comparisonLabels}
@@ -1823,13 +1903,13 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
             }
             isBusy={isBusy}
             isComparisonMode={Boolean(artifactComparison)}
-            isGenerating={isArtifactModuleGenerating}
+            isGenerating={Boolean(artifactGenerationStage)}
             onAction={handleArtifactAction}
             onCancelComparison={cancelArtifactComparison}
             onSave={saveArtifact}
-            onSelectArtifact={setSelectedArtifactId}
             onStartComparison={startArtifactComparison}
             selectedArtifactId={effectiveSelectedArtifactId}
+            streamingProcessMaterials={activeProcessMaterials}
             thinkingText={activeThinking?.text}
           />
         </div>

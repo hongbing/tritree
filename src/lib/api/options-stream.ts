@@ -41,6 +41,9 @@ export async function streamOptionsForNode({
     onReasoningText(event) {
       send({ type: "thinking", nodeId, text: event.accumulatedText });
     },
+    onProcessData(data) {
+      send({ type: "process_data", nodeId, data });
+    },
     onText(event) {
       if (!event.partialOptions) return;
       send({

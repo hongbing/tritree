@@ -215,7 +215,14 @@ describe("defaults config loader", () => {
     expect(systemSkillsById.get("system-writer")?.title).toBe("写手");
     expect(systemSkillsById.get("system-reviewer")?.title).toBe("审稿");
     expect(systemSkillsById.get("system-publisher")?.title).toBe("发布编辑");
+    expect(systemSkillsById.get("system-planner")?.prompt).toContain("内容创作通常会在策划、资料、写作、审稿和发布编辑之间往复");
+    expect(systemSkillsById.get("system-planner")?.prompt).toContain("已经生成草稿后，也可以回到找资料");
     expect(systemSkillsById.get("system-researcher")?.prompt).toContain("material-search");
+    expect(systemSkillsById.get("system-researcher")?.prompt).toContain("补资料、搜参考、找素材、补充证据、核查事实或寻找来源");
+    expect(systemSkillsById.get("system-researcher")?.prompt).toContain("优先主动使用可用搜索、检索、MCP 或资料型能力获取或核验外部材料");
+    expect(systemSkillsById.get("system-researcher")?.prompt).toContain("交叉验证");
+    expect(systemSkillsById.get("system-researcher")?.prompt).toContain("不得编造来源、数字、人物话语或时间线");
+    expect(systemSkillsById.get("system-researcher")?.prompt).toContain("关键材料转成用户可见摘要");
     expect(systemSkillsById.get("system-publisher")?.prompt).not.toContain("platform-rewrite");
     expect(defaults.systemSkills.filter((skill) => skill.defaultEnabled).map((skill) => skill.id)).toEqual(defaultSystemSkillIds);
     expect(defaults.systemSkills.map((skill) => skill.sortOrder)).toEqual([0, 1, 2, 3, 4]);

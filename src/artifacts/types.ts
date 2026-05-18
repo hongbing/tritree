@@ -75,6 +75,7 @@ export type ArtifactRendererProps = {
   isBusy: boolean;
   onAction?: (actionId: string, input: unknown) => void | Promise<void>;
   onSave?: (payload: unknown) => void | Promise<void>;
+  previousArtifact?: Artifact | null;
 };
 
 export type ArtifactRenderer = (props: ArtifactRendererProps) => ReactNode;

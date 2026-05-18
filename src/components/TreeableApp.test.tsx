@@ -142,9 +142,14 @@ vi.mock("@/components/artifacts/ArtifactWorkspace", () => ({
     onAction?: (actionId: string, artifact: Artifact, input?: unknown) => void | Promise<void>;
     onCancelComparison?: () => void;
     onSave?: (artifact: Artifact) => void | Promise<void>;
-    onSelectArtifact?: (artifactId: string) => void;
     onStartComparison?: () => void;
     selectedArtifactId: string | null;
+    streamingProcessMaterials?: Array<{
+      items: Array<{ meta?: string; subtitle?: string; title: string; url?: string }>;
+      note?: string;
+      sourceToolCallIds: string[];
+      title: string;
+    }>;
     thinkingText?: string;
   }) => {
     const selectedArtifact = props.artifacts.find((artifact) => artifact.id === props.selectedArtifactId) ?? null;
@@ -170,6 +175,9 @@ vi.mock("@/components/artifacts/ArtifactWorkspace", () => ({
         <div data-testid="live-artifact-generation-status">
           {generationStatus}
         </div>
+        <div data-testid="live-process-materials">
+          {(props.streamingProcessMaterials ?? []).map((material) => material.items.map((item) => item.title).join("|")).join("||")}
+        </div>
         <div data-testid="artifact-generation-status">
           {generationStatus}
         </div>
@@ -181,11 +189,6 @@ vi.mock("@/components/artifacts/ArtifactWorkspace", () => ({
             {props.isComparisonMode ? "cancel comparison" : "start comparison"}
           </button>
         ) : null}
-        {props.artifacts.map((artifact) => (
-          <button key={artifact.id} onClick={() => props.onSelectArtifact?.(artifact.id)} type="button">
-            select {artifact.id}
-          </button>
-        ))}
         <button
           onClick={() => selectedArtifact && props.onAction?.("rewrite-selection", selectedArtifact)}
           type="button"
@@ -571,7 +574,7 @@ describe("TreeableApp", () => {
     );
   });
 
-  it("lets the user select a different artifact in the workspace", async () => {
+  it("does not switch the main artifact outside tree navigation", async () => {
     const state = artifactState({
       artifacts: [socialPostArtifact, prdArtifact],
       nodeArtifacts: [
@@ -589,13 +592,13 @@ describe("TreeableApp", () => {
     render(<TreeableApp />);
 
     expect(await screen.findByTestId("artifact-workspace")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "select artifact-prd" }));
-
     expect(artifactWorkspaceMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        selectedArtifactId: "artifact-prd"
+        artifacts: state.artifacts,
+        selectedArtifactId: "artifact-1"
       })
     );
+    expect(screen.queryByRole("button", { name: "select artifact-prd" })).not.toBeInTheDocument();
   });
 
   it("runs artifact actions from the selected artifact node", async () => {
@@ -727,6 +730,93 @@ describe("TreeableApp", () => {
         selectedArtifactId: "artifact-1"
       })
     );
+  });
+
+  it("shows the viewed branch parent artifact instead of the latest artifact from another branch", async () => {
+    const rootNode = {
+      ...artifactState().currentNode!,
+      id: "node-root",
+      parentId: null,
+      producedArtifactId: "artifact-root",
+      roundIndex: 1,
+      roundIntent: "Root"
+    };
+    const branchParentNode = {
+      ...artifactState().currentNode!,
+      id: "node-history",
+      parentId: "node-root",
+      producedArtifactId: "artifact-history",
+      roundIndex: 2,
+      roundIntent: "History branch"
+    };
+    const branchDraftNode = {
+      ...artifactState().currentNode!,
+      id: "node-branch-draft",
+      parentId: "node-history",
+      parentOptionId: "a" as const,
+      kind: "analysis" as const,
+      producedArtifactId: null,
+      sourceArtifactIds: [],
+      roundIndex: 3,
+      roundIntent: "New branch draft",
+      options: []
+    };
+    const otherBranchNode = {
+      ...artifactState().currentNode!,
+      id: "node-other",
+      parentId: "node-root",
+      producedArtifactId: "artifact-other",
+      roundIndex: 2,
+      roundIntent: "Other branch"
+    };
+    const rootArtifact = testSocialPostArtifact("artifact-root", "node-root", {
+      title: "Root",
+      body: "Root body",
+      hashtags: ["#root"],
+      imagePrompt: ""
+    });
+    const historyArtifact = testSocialPostArtifact("artifact-history", "node-history", {
+      title: "History",
+      body: "History body",
+      hashtags: ["#history"],
+      imagePrompt: ""
+    });
+    const otherArtifact = testSocialPostArtifact("artifact-other", "node-other", {
+      title: "Other",
+      body: "Other body",
+      hashtags: ["#other"],
+      imagePrompt: ""
+    });
+    const state = artifactState({
+      session: { ...artifactState().session, currentNodeId: "node-branch-draft" },
+      currentNode: branchDraftNode,
+      currentArtifact: null,
+      artifacts: [rootArtifact, historyArtifact, otherArtifact],
+      nodeArtifacts: [
+        { nodeId: "node-root", artifact: rootArtifact },
+        { nodeId: "node-history", artifact: historyArtifact },
+        { nodeId: "node-other", artifact: otherArtifact }
+      ],
+      selectedPath: [rootNode, branchParentNode, branchDraftNode],
+      treeNodes: [rootNode, branchParentNode, branchDraftNode, otherBranchNode]
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    expect(await screen.findByTestId("artifact-workspace")).toBeInTheDocument();
+    expect(artifactWorkspaceMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        artifacts: [rootArtifact, historyArtifact, otherArtifact],
+        selectedArtifactId: "artifact-history"
+      })
+    );
+    expect(screen.getByTestId("artifact-workspace-selected")).toHaveTextContent("artifact-history");
   });
 
   it("reads artifact.replace stream events and selects the streamed artifact", async () => {
@@ -3028,7 +3118,7 @@ describe("TreeableApp", () => {
       expect(liveArtifactMock).toHaveBeenLastCalledWith(
         expect.objectContaining({
           generationStage: "options",
-          isGenerating: false
+          isGenerating: true
         })
       );
     });
@@ -3042,6 +3132,83 @@ describe("TreeableApp", () => {
     });
 
     act(() => {
+      artifactStream.push({ type: "done", state: optionsState });
+      artifactStream.close();
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId("canvas-generation-stage")).toHaveTextContent("idle");
+    });
+  });
+
+  it("streams process data into the artifact workspace without putting the display tool in progress text", async () => {
+    const childNode = {
+      ...activeState.currentNode,
+      id: "node-2",
+      parentId: "node-1",
+      parentOptionId: "a" as const,
+      kind: "analysis" as const,
+      producedArtifactId: null,
+      sourceArtifactIds: ["artifact-1"],
+      roundIndex: 2,
+      roundIntent: "A",
+      options: []
+    };
+    const nodeOnlyState = {
+      ...activeState,
+      session: { ...activeState.session, currentNodeId: "node-2" },
+      currentNode: childNode,
+      currentArtifact: null,
+      artifacts: [activeState.currentArtifact],
+      selectedPath: [activeState.currentNode, childNode],
+      treeNodes: [activeState.currentNode, childNode]
+    };
+    const finalOptions = [
+      { id: "a", label: "用参考做开头", description: "A", impact: "A", kind: "explore" },
+      { id: "b", label: "做资料整理", description: "B", impact: "B", kind: "deepen" },
+      { id: "c", label: "直接改稿", description: "C", impact: "C", kind: "finish" }
+    ];
+    const optionsState = {
+      ...nodeOnlyState,
+      currentNode: {
+        ...nodeOnlyState.currentNode,
+        roundIntent: "你想怎么使用这些参考？",
+        options: finalOptions
+      }
+    };
+    const artifactStream = controlledNdjsonResponse();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: activeState }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: nodeOnlyState }) })
+      .mockResolvedValueOnce(artifactStream.response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "choose displayed option" }));
+
+    act(() => {
+      artifactStream.push({
+        type: "process_data",
+        nodeId: "node-2",
+        data: {
+          title: "参考材料",
+          sourceToolCallIds: ["tool-1"],
+          items: [{ title: "参考条目 A", subtitle: "内容参考" }]
+        }
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId("live-process-materials")).toHaveTextContent("参考条目 A");
+      expect(screen.getByTestId("live-artifact-generation-status")).not.toHaveTextContent("show_process_data");
+    });
+
+    act(() => {
+      artifactStream.push({ type: "options", nodeId: "node-2", roundIntent: "你想怎么使用这些参考？", options: finalOptions });
       artifactStream.push({ type: "done", state: optionsState });
       artifactStream.close();
     });
@@ -3234,7 +3401,7 @@ describe("TreeableApp", () => {
         expect.objectContaining({
           artifact: finalArtifact,
           generationStage: "options",
-          isGenerating: false
+          isGenerating: true
         })
       );
     });
@@ -3489,7 +3656,7 @@ describe("TreeableApp", () => {
         expect.objectContaining({
           artifact: finalArtifact,
           generationStage: "options",
-          isGenerating: false
+          isGenerating: true
         })
       );
     });
@@ -3778,6 +3945,84 @@ describe("TreeableApp", () => {
     );
   });
 
+  it("uses tree navigation to switch the single main draft view", async () => {
+    const rootNode = {
+      ...activeState.currentNode,
+      id: "node-1",
+      parentId: null,
+      roundIndex: 1,
+      producedArtifactId: "artifact-root",
+      roundIntent: "Root",
+      selectedOptionId: "a" as const
+    };
+    const historicalNode = {
+      ...activeState.currentNode,
+      id: "node-2",
+      parentId: "node-1",
+      roundIndex: 2,
+      producedArtifactId: "artifact-history",
+      roundIntent: "History",
+      selectedOptionId: "a" as const
+    };
+    const currentNode = {
+      ...activeState.currentNode,
+      id: "node-3",
+      parentId: "node-2",
+      roundIndex: 3,
+      producedArtifactId: "artifact-current",
+      roundIntent: "Current"
+    };
+    const rootArtifact = testSocialPostArtifact("artifact-root", "node-1", {
+      title: "Root",
+      body: "Root body",
+      hashtags: ["#root"],
+      imagePrompt: "Root image"
+    });
+    const historyArtifact = testSocialPostArtifact("artifact-history", "node-2", {
+      title: "History",
+      body: "History body",
+      hashtags: ["#history"],
+      imagePrompt: "History image"
+    });
+    const currentArtifact = testSocialPostArtifact("artifact-current", "node-3", {
+      title: "Current",
+      body: "Current body",
+      hashtags: ["#current"],
+      imagePrompt: "Current image"
+    });
+    const state = {
+      ...activeState,
+      session: { ...activeState.session, currentNodeId: "node-3" },
+      currentNode,
+      currentArtifact,
+      artifacts: [rootArtifact, historyArtifact, currentArtifact],
+      nodeArtifacts: [
+        { nodeId: "node-1", artifact: rootArtifact },
+        { nodeId: "node-2", artifact: historyArtifact },
+        { nodeId: "node-3", artifact: currentArtifact }
+      ],
+      selectedPath: [rootNode, historicalNode, currentNode],
+      treeNodes: [rootNode, historicalNode, currentNode]
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    expect(await screen.findByTestId("artifact-workspace-artifacts")).toHaveTextContent("artifact-root|artifact-history|artifact-current");
+    expect(screen.getByTestId("artifact-workspace-selected")).toHaveTextContent("artifact-current");
+
+    await userEvent.click(screen.getByRole("button", { name: "view historical node" }));
+
+    expect(screen.getByTestId("artifact-workspace-artifacts")).toHaveTextContent("artifact-root|artifact-history|artifact-current");
+    expect(screen.getByTestId("artifact-workspace-selected")).toHaveTextContent("artifact-history");
+    expect(screen.queryByRole("button", { name: "select artifact-history" })).not.toBeInTheDocument();
+  });
+
   it("requests missing options for the viewed historical node", async () => {
     const rootNode = {
       ...activeState.currentNode,
@@ -3969,7 +4214,6 @@ describe("TreeableApp", () => {
     render(<TreeableApp />);
 
     await userEvent.click(await screen.findByRole("button", { name: "view historical node" }));
-    await userEvent.click(screen.getByRole("button", { name: "select artifact-history" }));
     await userEvent.click(screen.getByRole("button", { name: "save artifact" }));
 
     await vi.waitFor(() => {

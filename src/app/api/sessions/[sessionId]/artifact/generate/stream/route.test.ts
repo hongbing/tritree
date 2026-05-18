@@ -191,6 +191,186 @@ describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
     expect(text.indexOf('"type":"artifact.replace"')).toBeLessThan(text.indexOf('"type":"done"'));
   });
 
+  it("streams partial draft previews before the saved artifact", async () => {
+    const generatedArtifact = {
+      type: "social-post",
+      payload: { title: "新", body: "新正文", hashtags: ["#新"], imagePrompt: "新图" },
+      sourceArtifactIds: ["artifact-1"]
+    };
+    const savedArtifact = {
+      id: "artifact-2",
+      version: 1,
+      createdByNodeId: "node-2",
+      createdAt: "2026-04-27T00:00:01.000Z",
+      updatedAt: "2026-04-27T00:00:01.000Z",
+      ...generatedArtifact
+    };
+    const finalState = {
+      ...state,
+      currentArtifact: savedArtifact,
+      artifacts: [...state.artifacts, savedArtifact],
+      nodeArtifacts: [...state.nodeArtifacts, { nodeId: "node-2", artifact: savedArtifact }],
+      currentNode: { ...childNode, kind: "artifact", producedArtifactId: "artifact-2" }
+    };
+    getRepositoryMock.mockReturnValue({
+      getSessionState: vi.fn().mockReturnValue(state),
+      updateNodeArtifact: vi.fn().mockReturnValue(finalState)
+    });
+    streamDirectorArtifactMock.mockImplementation(async (_parts, options) => {
+      options.onText?.({
+        accumulatedText: "",
+        delta: "",
+        partialArtifact: { type: "social-post", payload: { title: "新" } }
+      });
+      options.onText?.({
+        accumulatedText: "",
+        delta: "",
+        partialArtifact: { type: "social-post", payload: { title: "新", body: "新正文" } }
+      });
+      return {
+        roundIntent: "扩写",
+        artifact: generatedArtifact
+      };
+    });
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/artifact/generate/stream", {
+        method: "POST",
+        body: JSON.stringify({ nodeId: "node-2" })
+      }),
+      { params: Promise.resolve({ sessionId: "session-1" }) }
+    );
+    const text = await response.text();
+
+    expect(streamDirectorArtifactMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ onText: expect.any(Function) }));
+    expect(text).toContain('"id":"streaming-node-2"');
+    expect(text).toContain('"sourceArtifactIds":["artifact-1"]');
+    expect(text.indexOf('"id":"streaming-node-2"')).toBeLessThan(text.indexOf('"id":"artifact-2"'));
+    expect(text.match(/"type":"artifact\.replace"/g)).toHaveLength(3);
+  });
+
+  it("does not let next-step inline artifacts bypass the streaming draft stage", async () => {
+    const inlineNextStepArtifact = {
+      type: "social-post",
+      payload: { title: "短路草稿", body: "这份草稿没有流式预览", hashtags: ["#旧"], imagePrompt: "" },
+      sourceArtifactIds: ["artifact-1"]
+    };
+    const generatedArtifact = {
+      type: "social-post",
+      payload: { title: "流式草稿", body: "流式正文", hashtags: ["#新"], imagePrompt: "新图" },
+      sourceArtifactIds: ["artifact-1"]
+    };
+    const savedArtifact = {
+      id: "artifact-2",
+      version: 1,
+      createdByNodeId: "node-2",
+      createdAt: "2026-04-27T00:00:01.000Z",
+      updatedAt: "2026-04-27T00:00:01.000Z",
+      ...generatedArtifact
+    };
+    const finalState = {
+      ...state,
+      currentArtifact: savedArtifact,
+      artifacts: [...state.artifacts, savedArtifact],
+      nodeArtifacts: [...state.nodeArtifacts, { nodeId: "node-2", artifact: savedArtifact }],
+      currentNode: { ...childNode, kind: "artifact", producedArtifactId: "artifact-2" }
+    };
+    const updateNodeArtifact = vi.fn().mockReturnValue(finalState);
+    getRepositoryMock.mockReturnValue({
+      getSessionState: vi.fn().mockReturnValue(state),
+      updateNodeArtifact
+    });
+    streamDirectorNextStepMock.mockResolvedValue({
+      action: "artifact",
+      roundIntent: "进入成稿",
+      artifact: inlineNextStepArtifact
+    });
+    streamDirectorArtifactMock.mockImplementation(async (_parts, options) => {
+      options.onText?.({
+        accumulatedText: "",
+        delta: "",
+        partialArtifact: { type: "social-post", payload: { title: "流式草稿" } }
+      });
+      return {
+        roundIntent: "生成流式草稿",
+        artifact: generatedArtifact
+      };
+    });
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/artifact/generate/stream", {
+        method: "POST",
+        body: JSON.stringify({ nodeId: "node-2" })
+      }),
+      { params: Promise.resolve({ sessionId: "session-1" }) }
+    );
+    const text = await response.text();
+
+    expect(streamDirectorArtifactMock).toHaveBeenCalledTimes(1);
+    expect(updateNodeArtifact).toHaveBeenCalledWith(expect.objectContaining({ artifact: generatedArtifact }));
+    expect(text).toContain('"id":"streaming-node-2"');
+    expect(text).toContain("流式草稿");
+    expect(text).not.toContain("短路草稿");
+  });
+
+  it("ignores incomplete artifact type deltas until a registered plugin id is available", async () => {
+    const generatedArtifact = {
+      type: "social-post",
+      payload: { title: "完整草稿", body: "完整正文", hashtags: ["#新"], imagePrompt: "新图" },
+      sourceArtifactIds: ["artifact-1"]
+    };
+    const savedArtifact = {
+      id: "artifact-2",
+      version: 1,
+      createdByNodeId: "node-2",
+      createdAt: "2026-04-27T00:00:01.000Z",
+      updatedAt: "2026-04-27T00:00:01.000Z",
+      ...generatedArtifact
+    };
+    const finalState = {
+      ...state,
+      currentArtifact: savedArtifact,
+      artifacts: [...state.artifacts, savedArtifact],
+      nodeArtifacts: [...state.nodeArtifacts, { nodeId: "node-2", artifact: savedArtifact }],
+      currentNode: { ...childNode, kind: "artifact", producedArtifactId: "artifact-2" }
+    };
+    getRepositoryMock.mockReturnValue({
+      getSessionState: vi.fn().mockReturnValue(state),
+      updateNodeArtifact: vi.fn().mockReturnValue(finalState)
+    });
+    streamDirectorArtifactMock.mockImplementation(async (_parts, options) => {
+      options.onText?.({
+        accumulatedText: "",
+        delta: "",
+        partialArtifact: { type: "social", payload: { title: "半截类型" } }
+      });
+      options.onText?.({
+        accumulatedText: "",
+        delta: "",
+        partialArtifact: { type: "social-post", payload: { title: "完整草稿" } }
+      });
+      return {
+        roundIntent: "扩写",
+        artifact: generatedArtifact
+      };
+    });
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/artifact/generate/stream", {
+        method: "POST",
+        body: JSON.stringify({ nodeId: "node-2" })
+      }),
+      { params: Promise.resolve({ sessionId: "session-1" }) }
+    );
+    const text = await response.text();
+
+    expect(text).not.toContain('"type":"error"');
+    expect(text).not.toContain("Unknown artifact plugin");
+    expect(text).not.toContain("半截类型");
+    expect(text).toContain("完整草稿");
+    expect(text.match(/"type":"artifact\.replace"/g)).toHaveLength(2);
+  });
+
   it("finishes with done and no artifact.replace when the director produces no artifact", async () => {
     const finalState = {
       ...state,

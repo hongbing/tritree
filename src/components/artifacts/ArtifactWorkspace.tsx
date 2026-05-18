@@ -6,6 +6,22 @@ import type { Artifact, TreeNode } from "@/lib/domain";
 import { getArtifactClientManifest, getArtifactRenderer } from "@/artifacts/client-registry";
 import { ArtifactFallback } from "./ArtifactFallback";
 
+export type ProcessMaterialItem = {
+  meta?: string;
+  subtitle?: string;
+  title: string;
+  url?: string;
+};
+
+export type ProcessMaterial = {
+  items: ProcessMaterialItem[];
+  note?: string;
+  sourceToolCallIds: string[];
+  title: string;
+};
+
+const SHOW_PROCESS_DATA_TOOL_NAME = "show_process_data";
+
 export type ArtifactWorkspaceProps = {
   artifacts: Artifact[];
   canCompareArtifacts?: boolean;
@@ -22,9 +38,9 @@ export type ArtifactWorkspaceProps = {
   onAction: (actionId: string, artifact: Artifact, input?: unknown) => void | Promise<void>;
   onCancelComparison?: () => void;
   onSave: (artifact: Artifact) => void | Promise<void>;
-  onSelectArtifact: (artifactId: string) => void;
   onStartComparison?: () => void;
   selectedArtifactId: string | null;
+  streamingProcessMaterials?: ProcessMaterial[];
   thinkingText?: string;
 };
 
@@ -44,17 +60,27 @@ export function ArtifactWorkspace({
   onAction,
   onCancelComparison,
   onSave,
-  onSelectArtifact,
   onStartComparison,
   selectedArtifactId,
+  streamingProcessMaterials = [],
   thinkingText
 }: ArtifactWorkspaceProps) {
-  const selectedArtifact = artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? artifacts.at(-1) ?? null;
+  const selectedArtifact = selectedArtifactId
+    ? artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? null
+    : null;
+  const previousArtifact = selectedArtifact ? previousArtifactForRenderer(selectedArtifact, artifacts, currentNode) : null;
   const selectedManifest = selectedArtifact ? getArtifactClientManifest(selectedArtifact.type) : null;
   const SelectedRenderer = selectedManifest ? getArtifactRenderer(selectedManifest.rendererKey) : null;
   const trimmedThinkingText = thinkingText?.trim() ?? "";
   const hasNoArtifactForCurrentNode = currentNode ? currentNode.producedArtifactId === null : false;
   const canUseComparison = canCompareArtifacts || isComparisonMode;
+  const processMaterials = [...streamingProcessMaterials, ...processMaterialsForNode(currentNode)];
+  const processTitle =
+    generationStage === "artifact"
+      ? "AI 正在思考下一版产物..."
+      : generationStage === "options"
+        ? "AI 正在生成下一步选项..."
+        : "";
 
   return (
     <aside
@@ -82,27 +108,6 @@ export function ArtifactWorkspace({
       </header>
       {headerPanel}
 
-      {artifacts.length > 0 ? (
-        <div aria-label="产物列表" className="artifact-workspace__tabs" role="tablist">
-          {artifacts.map((artifact) => {
-            const isSelected = selectedArtifact?.id === artifact.id;
-
-            return (
-              <button
-                aria-selected={isSelected}
-                className="artifact-workspace__tab"
-                key={artifact.id}
-                onClick={() => onSelectArtifact(artifact.id)}
-                role="tab"
-                type="button"
-              >
-                {getArtifactLabel(artifact)}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-
       <div className="artifact-workspace__body">
         {hasNoArtifactForCurrentNode ? (
           <div className="artifact-workspace__status" role="status">
@@ -110,11 +115,19 @@ export function ArtifactWorkspace({
           </div>
         ) : null}
 
-        {isBusy && generationStage === "artifact" && trimmedThinkingText ? (
-          <div aria-live="polite" className="artifact-workspace__thinking">
-            {trimmedThinkingText}
+        {isBusy && generationStage ? (
+          <div aria-live="polite" className="artifact-workspace__process" role="status">
+            <div className="artifact-workspace__process-header">
+              <span className="artifact-workspace__process-dot" aria-hidden="true" />
+              <strong>{processTitle}</strong>
+            </div>
+            <div className="artifact-workspace__process-body">
+              {trimmedThinkingText ? trimmedThinkingText : generationStage === "artifact" ? "正在生成草稿内容。" : "正在生成可选择方向。"}
+            </div>
           </div>
         ) : null}
+
+        {processMaterials.length > 0 ? <ProcessMaterials materials={processMaterials} /> : null}
 
         {isComparisonMode ? (
           <ArtifactComparisonView
@@ -130,6 +143,7 @@ export function ArtifactWorkspace({
               isBusy={isBusy}
               onAction={(actionId, input) => onAction(actionId, selectedArtifact, input)}
               onSave={(payload) => onSave({ ...selectedArtifact, payload: payload ?? selectedArtifact.payload })}
+              previousArtifact={previousArtifact}
             />
           ) : (
             <ArtifactFallback artifact={selectedArtifact} />
@@ -141,6 +155,61 @@ export function ArtifactWorkspace({
         )}
       </div>
     </aside>
+  );
+}
+
+function previousArtifactForRenderer(selectedArtifact: Artifact, artifacts: Artifact[], currentNode: TreeNode | null) {
+  const sourceIds = [
+    ...(selectedArtifact.sourceArtifactIds ?? []),
+    ...(currentNode?.sourceArtifactIds ?? [])
+  ].filter((sourceId, index, all) => sourceId !== selectedArtifact.id && all.indexOf(sourceId) === index);
+
+  for (const sourceId of sourceIds) {
+    const sourceArtifact = artifacts.find((artifact) => artifact.id === sourceId);
+    if (sourceArtifact && sourceArtifact.type === selectedArtifact.type) return sourceArtifact;
+  }
+
+  return null;
+}
+
+function ProcessMaterials({ materials }: { materials: ProcessMaterial[] }) {
+  const totalItemCount = materials.reduce((count, material) => count + material.items.length, 0);
+
+  return (
+    <section className="artifact-workspace__materials" aria-labelledby="artifact-workspace-materials-title">
+      <div className="artifact-workspace__materials-header">
+        <h3 id="artifact-workspace-materials-title">过程材料</h3>
+        <span>{totalItemCount > 0 ? `${totalItemCount} 条` : `${materials.length} 个工具结果`}</span>
+      </div>
+      <div className="artifact-workspace__materials-list">
+        {materials.map((material, index) => (
+          <article className="artifact-workspace__material" key={`${material.title}-${index}`}>
+            <header className="artifact-workspace__material-header">
+              <h4>{material.title}</h4>
+              {material.sourceToolCallIds.length > 0 ? <span>{material.sourceToolCallIds.length} 个来源</span> : null}
+            </header>
+            {material.note ? <p className="artifact-workspace__material-note">{material.note}</p> : null}
+            <ol className="artifact-workspace__material-items">
+              {material.items.map((item, itemIndex) => (
+                <li className="artifact-workspace__material-item" key={`${item.title}-${itemIndex}`}>
+                  <div className="artifact-workspace__material-item-title">
+                    {item.url ? (
+                      <a href={item.url} rel="noreferrer" target="_blank">
+                        {item.title}
+                      </a>
+                    ) : (
+                      item.title
+                    )}
+                  </div>
+                  {item.subtitle ? <p>{item.subtitle}</p> : null}
+                  {item.meta ? <span>{item.meta}</span> : null}
+                </li>
+              ))}
+            </ol>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -193,60 +262,98 @@ function ArtifactPreview({ artifact, isBusy }: { artifact: Artifact; isBusy: boo
   return Renderer ? <Renderer artifact={artifact} isBusy={isBusy} /> : <ArtifactFallback artifact={artifact} />;
 }
 
-function getArtifactLabel(artifact: Artifact) {
-  try {
-    const payloadLabel = getPayloadLabel(artifact);
-    if (payloadLabel) return payloadLabel;
-  } catch {
-    // Bad payloads should not break artifact navigation.
-  }
+function processMaterialsForNode(node: TreeNode | null): ProcessMaterial[] {
+  if (!node) return [];
 
-  const manifest = getArtifactClientManifest(artifact.type);
-  const shortId = artifact.id.slice(0, 8);
+  return node.agentMessages
+    .flatMap((message) => {
+      if (message.role !== "tool") return [];
 
-  return `${manifest?.label ?? artifact.type} ${shortId}`;
+      return structuredParts(message.content).flatMap((part) => {
+        const result = processDataToolResultFromPart(part);
+        if (!result) return [];
+
+        const material = processMaterialFromValue(unwrapToolOutput(result.output));
+        return material ? [material] : [];
+      });
+    })
+    .slice(0, 6);
 }
 
-function getPayloadLabel(artifact: Artifact) {
-  if (!isRecord(artifact.payload)) return "";
-
-  if (artifact.type === "social-post") {
-    const title = asNonEmptyString(artifact.payload.title);
-    if (title) return title;
-
-    const body = asNonEmptyString(artifact.payload.body);
-    if (body) return truncate(body, 28);
-  }
-
-  if (artifact.type === "prd") {
-    const title = asNonEmptyString(artifact.payload.title);
-    if (title) return title;
-
-    const heading = getFirstMarkdownHeading(asNonEmptyString(artifact.payload.markdown));
-    if (heading) return heading;
-  }
-
-  return "";
+function structuredParts(content: TreeNode["agentMessages"][number]["content"]): unknown[] {
+  return Array.isArray(content) ? content : [content];
 }
 
-function asNonEmptyString(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
+function processDataToolResultFromPart(part: unknown): { output: unknown } | null {
+  if (!isRecord(part)) return null;
+
+  const type = stringField(part, "type");
+  const toolName = stringField(part, "toolName") ?? stringField(part, "name") ?? stringField(part, "tool");
+  if (toolName !== SHOW_PROCESS_DATA_TOOL_NAME) return null;
+
+  const hasResultShape = type?.includes("tool-result") || Object.prototype.hasOwnProperty.call(part, "output") || Object.prototype.hasOwnProperty.call(part, "result");
+  if (!hasResultShape) return null;
+
+  return {
+    output: Object.prototype.hasOwnProperty.call(part, "output") ? part.output : part.result
+  };
 }
 
-function getFirstMarkdownHeading(markdown: string) {
-  const heading = markdown
-    .split("\n")
-    .map((line) => line.match(/^#{1,6}\s+(.+)$/)?.[1]?.trim() ?? "")
-    .find(Boolean);
+function unwrapToolOutput(output: unknown): unknown {
+  if (!isRecord(output)) return output;
 
-  return heading ?? "";
+  const type = stringField(output, "type");
+  if (type === "json" && Object.prototype.hasOwnProperty.call(output, "value")) {
+    return output.value;
+  }
+
+  return output;
+}
+
+function processMaterialFromValue(value: unknown): ProcessMaterial | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const title = stringField(value, "title");
+  if (!title) return null;
+
+  const rawItems = Array.isArray(value.items) ? value.items : [];
+  const items = rawItems.map(processMaterialItemFromValue).filter((item): item is ProcessMaterialItem => Boolean(item));
+  if (items.length === 0) return null;
+
+  return {
+    items,
+    note: stringField(value, "note"),
+    sourceToolCallIds: stringArrayField(value, "sourceToolCallIds"),
+    title
+  };
+}
+
+function processMaterialItemFromValue(value: unknown): ProcessMaterialItem | null {
+  if (!isRecord(value)) return null;
+
+  const title = stringField(value, "title");
+  if (!title) return null;
+
+  return {
+    title,
+    ...(stringField(value, "subtitle") ? { subtitle: stringField(value, "subtitle") } : {}),
+    ...(stringField(value, "meta") ? { meta: stringField(value, "meta") } : {}),
+    ...(stringField(value, "url") ? { url: stringField(value, "url") } : {})
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function truncate(value: string, maxLength: number) {
-  const characters = Array.from(value);
-  return characters.length > maxLength ? `${characters.slice(0, maxLength).join("")}...` : value;
+function stringField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function stringArrayField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
 }

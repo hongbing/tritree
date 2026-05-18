@@ -400,23 +400,42 @@ describe("TreeCanvas", () => {
     const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
     const treeCanvasRule = css.match(/\.tree-canvas\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
     const treeShellRule = css.match(/\.tree-viewport-shell\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const operationHintRule = css.match(/\.tree-operation-hint\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const trayRule = css.match(/\.branch-option-tray\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
     const mainRule = css.match(/\.branch-option-main\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
     const cardRule = css.match(/\.branch-card--option:not\(\.branch-card--side\)\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const optionChooseRule =
+      css.match(/\.branch-card--option:not\(\.branch-card--side\) \.branch-card__choose\s*\{(?<body>[^}]+)\}/)
+        ?.groups?.body ?? "";
+    const optionHeaderRule =
+      css.match(/\.branch-card--option:not\(\.branch-card--side\) \.branch-card__header\s*\{(?<body>[^}]+)\}/)
+        ?.groups?.body ?? "";
+    const copyRule =
+      css.match(/\.branch-card--option:not\(\.branch-card--side\) \.branch-card__copy\s*\{(?<body>[^}]+)\}/)?.groups
+        ?.body ?? "";
     const descriptionRule =
       css.match(/\.branch-card--option:not\(\.branch-card--side\) \.branch-card__description\s*\{(?<body>[^}]+)\}/)
         ?.groups?.body ?? "";
+    const selectHintRule = css.match(/\.branch-card__select-hint\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
     const previewRule = css.match(/\.branch-card__hover-preview\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
     const hoverPreviewRule = css.match(/\.branch-card:hover \.branch-card__hover-preview\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
 
     expect(treeCanvasRule).toContain("min-height: 260px");
     expect(treeCanvasRule).toContain("grid-template-rows: minmax(260px, 1fr) auto");
     expect(treeShellRule).toContain("min-height: 260px");
+    expect(Number(trayRule.match(/z-index:\s*(\d+)/)?.[1] ?? 0)).toBeGreaterThan(
+      Number(operationHintRule.match(/z-index:\s*(\d+)/)?.[1] ?? 0)
+    );
     expect(mainRule).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
     expect(mainRule).toContain("align-items: start");
     expect(mainRule).toContain("overflow: visible");
     expect(cardRule).toContain("max-height: 176px");
+    expect(optionChooseRule).toContain("height: 100%");
+    expect(optionHeaderRule).toContain("height: 100%");
+    expect(copyRule).toContain("grid-template-rows: auto minmax(0, 1fr) auto");
     expect(descriptionRule).toContain("overflow: hidden");
     expect(descriptionRule).toContain("-webkit-line-clamp: 5");
+    expect(selectHintRule).toContain("align-self: end");
     expect(previewRule).toContain("position: absolute");
     expect(previewRule).toContain("bottom: calc(100% + 8px)");
     expect(hoverPreviewRule).toContain("display: block");
@@ -692,7 +711,7 @@ describe("TreeCanvas", () => {
     });
   });
 
-  it("lets the user choose a skill from More Directions", () => {
+  it("does not list skills inside the custom direction form", () => {
     const onAddCustomOption = vi.fn();
     render(
       <BranchOptionTray
@@ -720,15 +739,10 @@ describe("TreeCanvas", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "自己写方向" }));
-    fireEvent.click(screen.getByRole("button", { name: "使用技能 润色" }));
 
-    expect(onAddCustomOption).toHaveBeenCalledWith({
-      id: expect.stringMatching(/^custom-/),
-      label: "润色",
-      description: "使用技能「润色」继续。",
-      impact: "按当前作品启用技能继续生成。",
-      kind: "reframe"
-    });
+    expect(screen.queryByRole("button", { name: "使用技能 润色" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "自己写方向" })).toBeInTheDocument();
+    expect(onAddCustomOption).not.toHaveBeenCalled();
   });
 
   it("limits custom branch labels to fifteen characters", () => {
@@ -932,6 +946,79 @@ describe("TreeCanvas", () => {
       option: undefined
     });
     expect(graph.nodes.find((node) => node.id === "history-node-child")?.label).toBe("具体场景");
+  });
+
+  it("marks the previous question stage as complete after a direction is selected", () => {
+    const seedNode: TreeNode = {
+      ...currentNode,
+      id: "node-seed",
+      parentId: null,
+      parentOptionId: null,
+      roundIndex: 1,
+      roundIntent: "生成第一组选项",
+      selectedOptionId: "a",
+      foldedOptions: currentNode.options.filter((option) => option.id !== "a")
+    };
+    const childNode: TreeNode = {
+      ...currentNode,
+      id: "node-child",
+      parentId: "node-seed",
+      parentOptionId: "a",
+      roundIndex: 2,
+      roundIntent: "按具体场景继续",
+      selectedOptionId: null,
+      foldedOptions: []
+    };
+
+    const graph = createForceTreeGraph({
+      currentNode: childNode,
+      layout: getOptionBranchLayout(1200),
+      selectedPath: [seedNode, childNode],
+      treeNodes: [seedNode, childNode]
+    });
+
+    expect(graph.nodes.find((node) => node.id === "history-node-seed")).toMatchObject({
+      isStageComplete: true
+    });
+    expect(graph.nodes.find((node) => node.id === "history-node-child")?.isStageComplete).not.toBe(true);
+  });
+
+  it("does not render internal stage-complete copy on completed question nodes", () => {
+    const seedNode: TreeNode = {
+      ...currentNode,
+      id: "node-seed",
+      parentId: null,
+      parentOptionId: null,
+      roundIndex: 1,
+      roundIntent: "生成第一组选项",
+      selectedOptionId: "a",
+      foldedOptions: currentNode.options.filter((option) => option.id !== "a")
+    };
+    const childNode: TreeNode = {
+      ...currentNode,
+      id: "node-child",
+      parentId: "node-seed",
+      parentOptionId: "a",
+      roundIndex: 2,
+      roundIntent: "按具体场景继续",
+      selectedOptionId: null,
+      foldedOptions: []
+    };
+
+    const { container } = render(
+      <TreeCanvas
+        currentNode={childNode}
+        isBusy={false}
+        onChoose={vi.fn()}
+        pendingChoice={null}
+        selectedPath={[seedNode, childNode]}
+        treeNodes={[seedNode, childNode]}
+      />
+    );
+
+    expect(container.querySelector(".tree-node--stage-complete")).toBeInTheDocument();
+    expect(container.querySelector(".tree-node__stage-complete-badge")).not.toBeInTheDocument();
+    expect(container).not.toHaveTextContent("阶段完成");
   });
 
   it("renders the seed artifact node with its black root class", () => {
@@ -1398,7 +1485,7 @@ describe("TreeCanvas", () => {
     expect(foldedNodes.every((node) => node.isArtifactFocused !== true)).toBe(true);
   });
 
-  it("renders the focused artifact node with a breathing halo and artifact badge", () => {
+  it("marks the focused artifact node with a breathing halo without internal copy", () => {
     const { container } = render(
       <TreeCanvas
         currentNode={currentNode}
@@ -1414,7 +1501,8 @@ describe("TreeCanvas", () => {
 
     expect(focusedNode).toBeInTheDocument();
     expect(focusedNode?.querySelector(".tree-node__artifact-halo")).toBeInTheDocument();
-    expect(focusedNode?.querySelector(".tree-node__artifact-badge")).toHaveTextContent("作品");
+    expect(focusedNode?.querySelector(".tree-node__artifact-badge")).not.toBeInTheDocument();
+    expect(container).not.toHaveTextContent("作品");
   });
 
   it("views a historical node without activating its branch", () => {
@@ -1631,7 +1719,7 @@ describe("TreeCanvas", () => {
     expect(changedNode?.querySelector(".tree-node__changed-badge")).toHaveTextContent("已编辑");
   });
 
-  it("stacks focused artifact status badges while options are generating", () => {
+  it("stacks only user-facing status badges while options are generating", () => {
     const { container } = render(
       <TreeCanvas
         changedArtifactNodeIds={["node-selected"]}
@@ -1646,12 +1734,15 @@ describe("TreeCanvas", () => {
     );
 
     const focusedNode = container.querySelector(".tree-node--artifact-focused.tree-node--artifact-changed");
-    const badgeDys = [".tree-node__artifact-badge", ".tree-node__generation-badge", ".tree-node__changed-badge"].map((selector) =>
-      focusedNode?.querySelector(selector)?.getAttribute("dy")
-    );
+    const badgeDys = [
+      ".tree-node__artifact-badge",
+      ".tree-node__stage-complete-badge",
+      ".tree-node__generation-badge",
+      ".tree-node__changed-badge"
+    ].map((selector) => focusedNode?.querySelector(selector)?.getAttribute("dy"));
 
     expect(focusedNode).toBeInTheDocument();
-    expect(badgeDys).toEqual(["-18", "-32", "-46"]);
+    expect(badgeDys).toEqual([undefined, undefined, "-18", "-32"]);
   });
 
   it("keeps inactive historical routes grey while the active route stays colorful", () => {

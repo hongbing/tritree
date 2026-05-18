@@ -23,6 +23,19 @@ describe("director artifact schemas", () => {
     }).artifact?.type).toBe("social-post");
 
     expect(DirectorNextStepOutputSchema.parse({
+      action: "artifact",
+      roundIntent: "进入成稿"
+    }).action).toBe("artifact");
+
+    expect(() =>
+      DirectorNextStepOutputSchema.parse({
+        action: "artifact",
+        roundIntent: "进入成稿",
+        artifact: { type: "social-post", payload: { title: "T", body: "B", hashtags: [], imagePrompt: "" } }
+      })
+    ).toThrow();
+
+    expect(DirectorNextStepOutputSchema.parse({
       action: "complete",
       roundIntent: "这一步只判断",
       artifact: null

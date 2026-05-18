@@ -1940,6 +1940,106 @@ describe("tree director compatibility generators", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  it("exposes process data display as a non-final runtime tool before final options submit", async () => {
+    const runSkillCommand = {
+      id: "run_skill_command",
+      description: "Run an installed skill command.",
+      execute: vi.fn()
+    };
+    const displayedData = {
+      title: "参考材料",
+      sourceToolCallIds: ["tool-1"],
+      items: [{ title: "参考条目 A", subtitle: "方向 A" }]
+    };
+    const finalObject = {
+      roundIntent: "你想围绕哪个参考方向写？",
+      options: [
+        { id: "a", label: "方向 A", description: "围绕参考条目 A。", impact: "更容易形成具体切入。", kind: "explore" },
+        { id: "b", label: "方向 B", description: "围绕参考条目 B。", impact: "更适合观点输出。", kind: "deepen" },
+        { id: "c", label: "方向 C", description: "围绕参考条目 C。", impact: "更轻松。", kind: "reframe" }
+      ]
+    };
+    const stream = vi.fn(async () => ({
+      fullStream: async function* () {
+        yield {
+          type: "tool-call",
+          payload: {
+            toolCallId: "display-1",
+            toolName: "show_process_data",
+            args: displayedData
+          }
+        };
+        yield {
+          type: "tool-result",
+          payload: {
+            toolCallId: "display-1",
+            toolName: "show_process_data",
+            result: displayedData
+          }
+        };
+        yield {
+          type: "tool-call",
+          payload: {
+            toolCallId: "submit-1",
+            toolName: "submit_tree_options",
+            args: finalObject
+          }
+        };
+      },
+      object: Promise.resolve(undefined)
+    }));
+    mocks.createSkillRuntimeTools.mockResolvedValueOnce({
+      toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
+      tools: { run_skill_command: runSkillCommand }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate: vi.fn()
+      };
+    });
+    const progressEvents: Array<{ delta: string; accumulatedText: string }> = [];
+    const processDataEvents: unknown[] = [];
+
+    const output = await streamTreeOptions({
+      parts: directorParts,
+      env: { KIMI_API_KEY: "token" },
+      onProcessData: (data) => processDataEvents.push(data),
+      onReasoningText: (event) => progressEvents.push(event)
+    });
+
+    const constructedOptions = mocks.agentConstructor.mock.calls[0]?.[0] as {
+      instructions?: string;
+      tools?: Record<string, unknown>;
+    };
+    expect(output).toMatchObject(finalObject);
+    expect(constructedOptions.tools).toEqual(
+      expect.objectContaining({
+        run_skill_command: runSkillCommand,
+        show_process_data: expect.anything(),
+        submit_tree_options: expect.anything()
+      })
+    );
+    expect(constructedOptions.instructions).toContain("show_process_data");
+    expect(processDataEvents).toEqual([displayedData]);
+    expect(progressEvents.map((event) => event.accumulatedText).join("\n")).not.toContain("show_process_data");
+    expect(output.agentMessages).toContainEqual({
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "display-1",
+          toolName: "show_process_data",
+          output: {
+            type: "json",
+            value: displayedData
+          }
+        }
+      ]
+    });
+  });
+
   it("accepts runtime options when the final submit provides three user-facing choices", async () => {
     const finalObject = {
       roundIntent: "选择差异化角度",
@@ -2092,6 +2192,86 @@ describe("tree director compatibility generators", () => {
     });
     expect(partials).toContainEqual(finalObject);
     expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("keeps subagent tools out of next-step routing runtime", async () => {
+    const runSkillCommand = {
+      id: "run_skill_command",
+      description: "Run an installed skill command.",
+      execute: vi.fn()
+    };
+    const runSubagentTemplate = {
+      id: "run_subagent_template",
+      description: "Run a predefined subagent.",
+      execute: vi.fn()
+    };
+    const runCustomSubagent = {
+      id: "run_custom_subagent",
+      description: "Run a custom subagent.",
+      execute: vi.fn()
+    };
+    const finalObject = {
+      action: "artifact",
+      roundIntent: "进入产物生成"
+    };
+    const stream = vi.fn(async () => ({
+      fullStream: async function* () {
+        yield {
+          type: "tool-call",
+          payload: {
+            toolCallId: "submit-1",
+            toolName: "submit_tree_next_step",
+            args: finalObject
+          }
+        };
+      },
+      object: Promise.resolve(undefined)
+    }));
+    mocks.createSkillRuntimeTools.mockResolvedValueOnce({
+      toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
+      tools: { run_skill_command: runSkillCommand }
+    });
+    mocks.createSubagentRuntimeTools.mockReturnValueOnce({
+      subagentTemplateSummaries: ["material-search｜搜索资料：围绕给定主题快速寻找可用素材。"],
+      toolSummaries: [
+        "run_subagent_template：运行预定义 subagent。",
+        "run_custom_subagent：运行自定义 subagent。"
+      ],
+      tools: {
+        run_subagent_template: runSubagentTemplate,
+        run_custom_subagent: runCustomSubagent
+      }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate: vi.fn()
+      };
+    });
+
+    await expect(
+      streamTreeNextStep({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" }
+      })
+    ).resolves.toMatchObject(finalObject);
+
+    const constructedOptions = mocks.agentConstructor.mock.calls[0]?.[0] as {
+      instructions?: string;
+      tools?: Record<string, unknown>;
+    };
+    expect(mocks.createSubagentRuntimeTools).not.toHaveBeenCalled();
+    expect(constructedOptions.tools).toEqual(
+      expect.objectContaining({
+        run_skill_command: runSkillCommand,
+        submit_tree_next_step: expect.anything()
+      })
+    );
+    expect(constructedOptions.tools).not.toHaveProperty("run_subagent_template");
+    expect(constructedOptions.tools).not.toHaveProperty("run_custom_subagent");
+    expect(constructedOptions.instructions).not.toContain("# 可用 Subagent 模板");
+    expect(constructedOptions.instructions).not.toContain("run_custom_subagent");
   });
 
   it("logs raw runtime stream diagnostics when next-step parsing fails without a final output", async () => {

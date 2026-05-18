@@ -100,7 +100,7 @@ describe("subagent runtime tools", () => {
     expect(calls[0]).toMatchObject({
       context: expect.stringContaining("最新正文"),
       env: { KIMI_API_KEY: "test-token" },
-      expectedOutput: "资料清单：每条包含来源、要点、可用角度和可信度提示。",
+      expectedOutput: "资料清单：每条包含来源、要点、可用角度、可信度提示，以及建议如何转交给主 agent 使用。",
       task: "找三条资料",
       template: expect.objectContaining({ id: "material-search", title: "搜索资料" }),
       title: "搜索资料",

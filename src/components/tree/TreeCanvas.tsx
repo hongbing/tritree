@@ -98,6 +98,7 @@ export type ForceTreeNode = {
   isInactiveRoute?: boolean;
   inactiveRouteSide?: RouteSide;
   isSeedRoot?: boolean;
+  isStageComplete?: boolean;
   isTerminal?: boolean;
   kind: ForceTreeNodeKind;
   label: string;
@@ -248,11 +249,10 @@ function canRepresentArtifact(node: ForceTreeNode) {
   return node.kind === "history";
 }
 
-type NodeBadgeKind = "artifact" | "generation" | "compare" | "changed";
+type NodeBadgeKind = "generation" | "compare" | "changed";
 
 function nodeBadgeOrder(datum: ForceTreeNode) {
   const badges: NodeBadgeKind[] = [];
-  if (datum.isArtifactFocused) badges.push("artifact");
   if (datum.generationStage) badges.push("generation");
   if (datum.comparisonRole) badges.push("compare");
   if (datum.isArtifactChanged) badges.push("changed");
@@ -486,6 +486,7 @@ export function createForceTreeGraph({
       isInactiveRoute: !isActive,
       inactiveRouteSide,
       isSeedRoot,
+      isStageComplete: Boolean(node.selectedOptionId),
       isTerminal: node.isTerminal === true,
       kind: "history",
       label: compactBranchLabel(isSeedRoot ? SEED_ROOT_LABEL : incomingOption?.label ?? node.roundIntent),
@@ -655,8 +656,7 @@ export function TreeCanvas({
   onChoose,
   onRegenerateOptions,
   onSelectComparisonNode,
-  onViewNode,
-  skills
+  onViewNode
 }: TreeCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const treeViewportRef = useRef<HTMLDivElement>(null);
@@ -1106,18 +1106,6 @@ export function TreeCanvas({
       .text((datum) => datum.label);
 
     node
-      .selectAll<SVGTextElement, ForceTreeNode>("text.tree-node__artifact-badge")
-      .data((datum) => (datum.isArtifactFocused === true ? [datum] : []))
-      .join(
-        (enter) => enter.append("text").attr("class", "tree-node__artifact-badge"),
-        (update) => update,
-        (exit) => exit.remove()
-      )
-      .attr("dy", (datum) => nodeBadgeDy(datum, "artifact"))
-      .attr("text-anchor", "middle")
-      .text("作品");
-
-    node
       .selectAll<SVGTextElement, ForceTreeNode>("text.tree-node__generation-badge")
       .data((datum) => (datum.generationStage ? [datum] : []))
       .join(
@@ -1127,7 +1115,7 @@ export function TreeCanvas({
       )
       .attr("dy", (datum) => nodeBadgeDy(datum, "generation"))
       .attr("text-anchor", "middle")
-      .text((datum) => (datum.generationStage === "artifact" ? "生成作品" : "生成选项"));
+      .text((datum) => (datum.generationStage === "artifact" ? "写稿中" : "想方向中"));
 
     node
       .selectAll<SVGTextElement, ForceTreeNode>("text.tree-node__compare-badge")
@@ -1246,7 +1234,6 @@ export function TreeCanvas({
           options={currentNode.options}
           pendingChoice={pendingChoice}
           question={currentNode.roundIntent}
-          skills={skills}
           visibleCount={effectiveVisibleOptionCount}
         />
       ) : null}
@@ -1324,7 +1311,6 @@ export function BranchOptionTray({
   options,
   pendingChoice,
   question,
-  skills = [],
   visibleCount = options.length
 }: {
   isBusy: boolean;
@@ -1375,7 +1361,7 @@ export function BranchOptionTray({
             onModeChange={setOptionMode}
             onRegenerateOptions={onRegenerateOptions}
           />
-          <MoreDirectionsCard disabled={isBusy} onAddCustomOption={onAddCustomOption} skills={skills} />
+          <MoreDirectionsCard disabled={isBusy} onAddCustomOption={onAddCustomOption} />
         </div>
       ) : null}
       {selectedOption && primaryAllVisible ? (
@@ -1700,12 +1686,10 @@ function BranchOptionComposer({
 
 function MoreDirectionsCard({
   disabled,
-  onAddCustomOption,
-  skills
+  onAddCustomOption
 }: {
   disabled: boolean;
   onAddCustomOption?: (option: BranchOption) => void;
-  skills: Skill[];
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [content, setContent] = useState("");
@@ -1759,30 +1743,6 @@ function MoreDirectionsCard({
           关闭
         </button>
       </div>
-      {skills.length > 0 ? (
-        <div className="more-directions__skills">
-          {skills.map((skill) => (
-            <button
-              aria-label={`使用技能 ${skill.title}`}
-              disabled={disabled}
-              key={skill.id}
-              onClick={() => {
-                onAddCustomOption?.({
-                  id: createCustomBranchOptionId(),
-                  label: deriveCustomOptionLabel(skill.title),
-                  description: `使用技能「${skill.title}」继续。`,
-                  impact: "按当前作品启用技能继续生成。",
-                  kind: "reframe"
-                });
-                closeCustomOption();
-              }}
-              type="button"
-            >
-              {skill.title}
-            </button>
-          ))}
-        </div>
-      ) : null}
       <label className="branch-card__field">
         <span>想让它怎么写？</span>
         <textarea
@@ -1829,6 +1789,7 @@ function nodeClassName(
     datum.comparisonRole === "from" && "tree-node--compare-from",
     datum.comparisonRole === "to" && "tree-node--compare-to",
     datum.isArtifactChanged && "tree-node--artifact-changed",
+    datum.isStageComplete && "tree-node--stage-complete",
     datum.isArtifactFocused && "tree-node--artifact-focused"
   );
 }

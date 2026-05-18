@@ -16,7 +16,7 @@ const SUBMIT_TREE_OPTIONS_TOOL_NAME = "submit_tree_options";
 
 export function buildSharedAgentContext(input: SharedAgentContextInput) {
   return [
-    "# 已启用 Skills",
+    "# 可用 Skills",
     formatSkillUsageInstructions(),
     input.enabledSkills.length > 0 ? formatEnabledSkills(input.enabledSkills) : "暂无已启用 Skills。",
     input.availableSkillSummaries?.length
@@ -36,7 +36,7 @@ export function buildTreeArtifactInstructions(input: SharedAgentContextInput) {
     "# ReAct Agent",
     formatGenericReactAgentRole(),
     buildSharedAgentContext(input),
-    actualWorkExecutionProtocol(),
+    actualWorkExecutionProtocol(input),
     "# 本轮固定目标",
     "本轮固定目标：提交 artifact 结果。",
     "根据输入上下文、已启用 Skills 和可用工具完成目标；具体领域判断由 Skills 提供。",
@@ -60,7 +60,7 @@ export function buildTreeOptionsInstructions(input: SharedAgentContextInput) {
     "# ReAct Agent",
     formatGenericReactAgentRole(),
     buildSharedAgentContext(input),
-    actualWorkExecutionProtocol(),
+    actualWorkExecutionProtocol(input),
     threeChoiceProtocol(),
     "# 本轮固定目标",
     "本轮固定目标：提交 options 结果。",
@@ -84,17 +84,24 @@ export function buildTreeNextStepInstructions(input: SharedAgentContextInput) {
     "# ReAct Agent",
     formatGenericReactAgentRole(),
     buildSharedAgentContext(input),
-    actualWorkExecutionProtocol(),
+    actualWorkExecutionProtocol(input),
     threeChoiceProtocol(),
     "# 本轮固定目标",
     "本轮固定目标：提交 next-step 路由结果。",
     "根据输入上下文、已启用 Skills 和可用工具决定 action；具体领域判断由 Skills 提供。",
+    "# next-step 路由准则",
+    "流程和阶段标签用于帮助理解本轮任务所处位置；它们是交互提示，不是单向状态机。用户可以在任意时刻回到任一已启用 Skill 能处理的任务。",
+    "先判断本轮任务产出了什么、用户接下来是否需要选择，再选择 action。",
+    "action=options 表示需要用户在同一个新问题下选择下一步方向；适合资料、搜索、参考、素材收集、分析、审稿或比较之后，把结果转成可执行取舍。",
+    "action=artifact 表示下一步已经明确，可以直接生成或更新作品。",
+    "action=complete 表示当前请求已经可以收束，适合用户明确要求结束、发布、交付、停止继续澄清，或当前目标已经没有可行动下一步。",
+    "当工具结果会影响用户选择或理解，且本轮可用过程数据展示工具时，先展示整理后的材料摘要，再提交 next-step 结果。",
     ...finalSubmitExecutionRules(input, "next-step"),
     "# 输出契约",
     "只返回结构化结果。",
     "action 只能是 options、artifact 或 complete。",
     "当 action=options 时，roundIntent 必须是一个新问题，并必须返回 options[].label、options[].description 和 options[].impact；不需要输出 id 或 kind，系统会自动把三个答案映射为 a、b、c。",
-    "当 action=artifact 时，不返回 options；只返回 roundIntent，可以返回 artifact 或 artifact=null。",
+    "当 action=artifact 时，只返回 action 和 roundIntent；后续 artifact 阶段负责生成作品内容。",
     "当 action=complete 时，不返回 options；只返回 roundIntent，可以返回 artifact=null。",
     "所有面向用户的字段默认使用简体中文；用户原文、专有名词、代码、品牌名和已启用 Skills 明确要求的非中文文本除外。"
   ]
@@ -110,16 +117,35 @@ function formatGenericReactAgentRole() {
   ].join("\n");
 }
 
-function actualWorkExecutionProtocol() {
-  return [
+function actualWorkExecutionProtocol(input: SharedAgentContextInput) {
+  const hasSubagentTools = input.toolSummaries?.some(
+    (summary) => summary.includes("run_subagent_template") || summary.includes("run_custom_subagent")
+  );
+  const lines = [
     "# ReAct 执行协议",
-    "先判断本轮最有价值的实际工作，并优先由主 agent 自己处理；能直接完成判断、整理、改写或提交时，不要调用 subagent。",
-    "确实需要独立上下文、并且任务适合委托时，优先使用 run_subagent_template；只有没有匹配的预创建模板，且任务边界很窄、期望输出很明确时，才使用 run_custom_subagent。",
-    "subagent 作为工具使用，其返回值不是最终判断。调用任何工具或 subagent 后，必须检查工具返回值是否具体、相关、可信、足以支持本轮目标。",
+    "开始实际工作前，先判断本轮应加载哪些 Skill；选择后按被选中 Skill 的职责和标准执行。",
+    "当本轮目标明确要求查找、核查、补充证据、找来源或确认外部信息时，优先使用可用工具获取或核验材料；只有输入上下文已经提供足够具体且可追溯的材料时，才直接整理。",
+    "先判断本轮最有价值的实际工作，并优先由主 agent 负责推进；能直接完成判断、整理、改写或提交时，直接完成。"
+  ];
+
+  if (hasSubagentTools) {
+    lines.push(
+      "确实需要独立上下文、并且任务适合委托时，优先使用 run_subagent_template；只有没有匹配的预创建模板，且任务边界很窄、期望输出很明确时，才使用 run_custom_subagent。",
+      "subagent 作为工具使用，其返回值不是最终判断。调用任何工具或 subagent 后，必须检查工具返回值是否具体、相关、可信、足以支持本轮目标。"
+    );
+  } else {
+    lines.push("调用任何工具后，必须检查工具返回值是否具体、相关、可信、足以支持本轮目标。");
+  }
+
+  lines.push(
     "如果工具返回值空泛、偏题、缺少依据或不足以推进，主 agent 要自己补足、改写任务后重试合适工具，或提交需要用户选择的 options。",
-    "完成工具结果检查后，由主 agent 把可用信息整合成目标要求的最终结构化结果；不要把“已调用工具或 subagent”当作本轮完成。",
-    "调用 subagent 时给出短任务、期望输出和必要约束；运行时会为 subagent 提供当前上下文视图。"
-  ].join("\n");
+    hasSubagentTools
+      ? "完成工具结果检查后，由主 agent 把可用信息整合成目标要求的最终结构化结果；不要把“已调用工具或 subagent”当作本轮完成。"
+      : "完成工具结果检查后，由主 agent 把可用信息整合成目标要求的最终结构化结果。",
+    ...(hasSubagentTools ? ["调用 subagent 时给出短任务、期望输出和必要约束；运行时会为 subagent 提供当前上下文视图。"] : [])
+  );
+
+  return lines.join("\n");
 }
 
 function threeChoiceProtocol() {
@@ -152,9 +178,10 @@ function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "arti
 
 function formatSkillUsageInstructions() {
   return [
-    "以下 Skills 已加载为 active instructions。",
-    "每个 Skill 的说明用于理解适用目的；每个 Skill 的要求都必须遵守。",
-    "根据 Skill 的适用目标和本轮任务相关性应用要求。",
+    "以下 Skills 是本作品可用能力库，不代表本轮全部同时执行。",
+    "主 agent 每轮先判断本轮目标应加载哪个或哪些 Skill：通常选择一个主要角色或步骤 Skill，再按需叠加约束、风格或平台类 Skill。",
+    "被本轮选中的 Skill 的要求作为 active instructions；未选中的 Skill 只作为可选能力提示。",
+    "如果选中的是已安装 Skill 且需要未展开的子文档细节，先使用 load_skill_document 加载对应文档。",
     "如果 Skill 之间出现冲突，优先遵守用户本轮明确要求；仍冲突时，选择对当前任务更具体、更直接的要求。"
   ].join("\n");
 }

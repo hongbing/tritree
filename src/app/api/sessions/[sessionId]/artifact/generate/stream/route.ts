@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireArtifactPlugin } from "@/artifacts/registry";
+import { getArtifactPlugin, requireArtifactPlugin } from "@/artifacts/registry";
 import { streamDirectorArtifact, streamDirectorNextStep } from "@/lib/ai/director-stream";
 import { badRequestResponse, isAbortError, isBadRequestError, publicServerErrorMessage } from "@/lib/api/errors";
 import { focusSessionStateForNode, summarizeSessionForDirector } from "@/lib/app-state";
@@ -28,6 +28,7 @@ const ArtifactGenerateBodySchema = z.object({
 type ArtifactStreamEvent =
   | { type: "artifact.replace"; artifact: Artifact }
   | { type: "thinking"; nodeId?: string | null; stage?: "artifact" | "options"; text: string }
+  | { type: "process_data"; nodeId?: string | null; data: unknown }
   | { type: "options"; nodeId: string; options: BranchOption[]; roundIntent?: string | null }
   | { type: "done"; state: SessionState }
   | { type: "error"; error: string };
@@ -101,6 +102,9 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
           onReasoningText(event) {
             send({ type: "thinking", nodeId: targetNode.id, stage: "options", text: event.accumulatedText });
           },
+          onProcessData(data) {
+            send({ type: "process_data", nodeId: targetNode.id, data });
+          },
           onText(event) {
             if (event.partialOptions) {
               send({
@@ -148,16 +152,28 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
           return;
         }
 
-        const output =
-          nextStep.artifact !== undefined
-            ? nextStep
-            : await streamDirectorArtifact(directorParts, {
-                memory,
-                signal: request.signal,
-                onReasoningText(event) {
-                  send({ type: "thinking", nodeId: targetNode.id, stage: "artifact", text: event.accumulatedText });
-                }
-              });
+        const output = await streamDirectorArtifact(directorParts, {
+          memory,
+          signal: request.signal,
+          onText(event) {
+            const previewArtifact = event.partialArtifact
+              ? streamingArtifactForPartial({
+                  parentState,
+                  partialArtifact: event.partialArtifact,
+                  targetNode
+                })
+              : null;
+            if (previewArtifact) {
+              send({ type: "artifact.replace", artifact: previewArtifact });
+            }
+          },
+          onReasoningText(event) {
+            send({ type: "thinking", nodeId: targetNode.id, stage: "artifact", text: event.accumulatedText });
+          },
+          onProcessData(data) {
+            send({ type: "process_data", nodeId: targetNode.id, data });
+          }
+        });
 
         const agentMessages = agentMessagesArgument(nextStep.agentMessages, output.agentMessages);
         const latestState = repository.getSessionState(user.id, sessionId);
@@ -238,6 +254,57 @@ function validateGeneratedArtifact(artifact: GeneratedArtifact) {
     payload: plugin.payloadSchema.parse(artifact.payload),
     sourceArtifactIds: artifact.sourceArtifactIds ?? []
   };
+}
+
+function streamingArtifactForPartial({
+  parentState,
+  partialArtifact,
+  targetNode
+}: {
+  parentState: SessionState;
+  partialArtifact: { type: string; payload: Record<string, unknown> };
+  targetNode: TreeNode;
+}): Artifact | null {
+  const plugin = getArtifactPlugin(partialArtifact.type);
+  if (!plugin) return null;
+  const sourceArtifact = sourceArtifactForStreaming(parentState, targetNode, plugin.id);
+  const payload = mergeStreamingPayload(sourceArtifact, partialArtifact.payload);
+  const parsedPayload = plugin.payloadSchema.safeParse(payload);
+  if (!parsedPayload.success) return null;
+
+  const timestamp = new Date().toISOString();
+  return {
+    id: `streaming-${targetNode.id}`,
+    type: plugin.id,
+    version: sourceArtifact ? sourceArtifact.version + 1 : 1,
+    payload: parsedPayload.data,
+    sourceArtifactIds: sourceArtifact ? [sourceArtifact.id] : [],
+    createdByNodeId: targetNode.id,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+}
+
+function mergeStreamingPayload(sourceArtifact: Artifact | null, partialPayload: Record<string, unknown>) {
+  if (sourceArtifact && isRecord(sourceArtifact.payload)) {
+    return { ...sourceArtifact.payload, ...partialPayload };
+  }
+
+  return partialPayload;
+}
+
+function sourceArtifactForStreaming(parentState: SessionState, targetNode: TreeNode, artifactType: string) {
+  const candidates = [
+    ...targetNode.sourceArtifactIds.map((artifactId) => parentState.artifacts.find((artifact) => artifact.id === artifactId) ?? null),
+    parentState.currentArtifact,
+    targetNode.parentId ? artifactForNode(parentState, targetNode.parentId) : null
+  ];
+
+  return candidates.find((artifact): artifact is Artifact => Boolean(artifact && artifact.type === artifactType)) ?? null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function artifactForNode(state: SessionState, nodeId: string) {

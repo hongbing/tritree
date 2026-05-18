@@ -203,7 +203,7 @@ export const DirectorOptionsOutputSchema = z.object({
 const DirectorNextStepArtifactSchema = z.object({
   action: z.literal("artifact"),
   roundIntent: z.string().min(1),
-  artifact: GeneratedArtifactSchema.nullable().optional()
+  artifact: z.null().optional()
 }).strict();
 
 const DirectorNextStepCompleteSchema = z.object({

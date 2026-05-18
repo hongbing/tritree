@@ -7,7 +7,8 @@ import {
   streamTreeNextStep,
   streamTreeOptions,
   type DirectorAgentTrace,
-  type MemoryScope
+  type MemoryScope,
+  type ProcessDataDisplay
 } from "./mastra-executor";
 import type { DirectorInputParts } from "./prompts";
 
@@ -23,6 +24,7 @@ type DirectorArtifactStreamOptions = {
     accumulatedText: string;
     partialArtifact: { type: string; payload: Record<string, unknown> } | null;
   }) => void;
+  onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: { delta: string; accumulatedText: string }) => void;
   signal?: AbortSignal;
 };
@@ -36,6 +38,7 @@ type DirectorOptionsStreamOptions = {
     partialOptions: BranchOption[] | null;
     partialRoundIntent: string | null;
   }) => void;
+  onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: { delta: string; accumulatedText: string }) => void;
   signal?: AbortSignal;
 };
@@ -49,6 +52,7 @@ type DirectorNextStepOptions = {
     partialOptions: BranchOption[] | null;
     partialRoundIntent: string | null;
   }) => void;
+  onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: { delta: string; accumulatedText: string }) => void;
   signal?: AbortSignal;
 };
@@ -114,6 +118,7 @@ export async function streamDirectorNextStep(
     memory: options.memory,
     signal: options.signal,
     onPartialObject: emit,
+    onProcessData: options.onProcessData,
     onReasoningText: options.onReasoningText
   });
   logTritreeAiDebug("director-stream", "next-step-stream-output", {
@@ -159,6 +164,7 @@ export async function streamDirectorArtifact(
     memory: options.memory,
     signal: options.signal,
     onPartialObject: emit,
+    onProcessData: options.onProcessData,
     onReasoningText: options.onReasoningText
   });
   const output = DirectorArtifactOutputSchema.parse(withoutAgentTrace(outputWithTrace));
@@ -208,6 +214,7 @@ export async function streamDirectorOptions(
     memory: options.memory,
     signal: options.signal,
     onPartialObject: emit,
+    onProcessData: options.onProcessData,
     onReasoningText: options.onReasoningText
   });
   logTritreeAiDebug("director-stream", "options-output", {

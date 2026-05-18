@@ -72,12 +72,15 @@ const shellInput = {
 } satisfies SharedAgentContextInput;
 
 describe("buildSharedAgentContext", () => {
-  it("loads enabled skill prompts as active instructions without injecting session data", () => {
+  it("presents enabled skills as a selectable skill library without injecting session data", () => {
     const context = buildSharedAgentContext(input);
 
-    expect(context).toContain("# 已启用 Skills");
-    expect(context).toContain("以下 Skills 已加载为 active instructions");
-    expect(context).toContain("每个 Skill 的要求都必须遵守");
+    expect(context).toContain("# 可用 Skills");
+    expect(context).toContain("以下 Skills 是本作品可用能力库");
+    expect(context).toContain("主 agent 每轮先判断本轮目标应加载哪个或哪些 Skill");
+    expect(context).toContain("通常选择一个主要角色或步骤 Skill");
+    expect(context).toContain("被本轮选中的 Skill 的要求作为 active instructions");
+    expect(context).toContain("load_skill_document");
     expect(context).toContain("## Skill: 资料员");
     expect(context).toContain("适用目标：全程");
     expect(context).toContain("说明：负责判断资料缺口，并建议是否委托检索或核查。");
@@ -110,7 +113,11 @@ describe("agent instructions", () => {
 
     expect(instructions).toContain("你是通用 ReAct agent");
     expect(instructions).toContain("系统提示词只定义执行边界、工具协议和最终提交契约");
-    expect(instructions).toContain("优先由主 agent 自己处理");
+    expect(instructions).toContain("开始实际工作前，先判断本轮应加载哪些 Skill");
+    expect(instructions).toContain("被选中 Skill 的职责和标准");
+    expect(instructions).toContain("优先由主 agent 负责推进");
+    expect(instructions).toContain("当本轮目标明确要求查找、核查、补充证据、找来源或确认外部信息时");
+    expect(instructions).toContain("优先使用可用工具获取或核验材料");
     expect(instructions).toContain("优先使用 run_subagent_template");
     expect(instructions).toContain("才使用 run_custom_subagent");
     expect(instructions).toContain("调用 subagent 时给出短任务、期望输出和必要约束");
@@ -163,10 +170,17 @@ describe("agent instructions", () => {
     expect(nextStepInstructions.startsWith("# ReAct Agent")).toBe(true);
     expect(nextStepInstructions).toContain("本轮固定目标：提交 next-step 路由结果");
     expect(nextStepInstructions).toContain("action 只能是 options、artifact 或 complete");
+    expect(nextStepInstructions).toContain("流程和阶段标签用于帮助理解本轮任务所处位置");
+    expect(nextStepInstructions).toContain("不是单向状态机");
+    expect(nextStepInstructions).toContain("先判断本轮任务产出了什么、用户接下来是否需要选择");
+    expect(nextStepInstructions).toContain("资料、搜索、参考、素材收集、分析、审稿或比较之后");
+    expect(nextStepInstructions).toContain("后续 artifact 阶段负责生成作品内容");
+    expect(nextStepInstructions).not.toContain("刚完成的阶段");
+    expect(nextStepInstructions).not.toContain("中间阶段");
     expect(nextStepInstructions).toContain("submit_tree_next_step");
 
-    expect(artifactInstructions.indexOf("# 已启用 Skills")).toBeGreaterThan(artifactInstructions.indexOf("# ReAct Agent"));
-    expect(artifactInstructions.indexOf("# ReAct 执行协议")).toBeGreaterThan(artifactInstructions.indexOf("# 已启用 Skills"));
+    expect(artifactInstructions.indexOf("# 可用 Skills")).toBeGreaterThan(artifactInstructions.indexOf("# ReAct Agent"));
+    expect(artifactInstructions.indexOf("# ReAct 执行协议")).toBeGreaterThan(artifactInstructions.indexOf("# 可用 Skills"));
     expect(artifactInstructions.indexOf("# 本轮固定目标")).toBeGreaterThan(artifactInstructions.indexOf("# ReAct 执行协议"));
     expect(artifactInstructions.indexOf("# 输出契约")).toBeGreaterThan(artifactInstructions.indexOf("# 本轮固定目标"));
   });

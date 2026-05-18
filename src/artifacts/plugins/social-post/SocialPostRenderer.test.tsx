@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Artifact } from "@/lib/domain";
 import { SocialPostRenderer } from "./SocialPostRenderer";
 
-function createArtifact(payload: unknown): Artifact {
+function createArtifact(payload: unknown, overrides: Partial<Artifact> = {}): Artifact {
   return {
     id: "artifact-1",
     type: "social-post",
@@ -13,7 +13,8 @@ function createArtifact(payload: unknown): Artifact {
     sourceArtifactIds: [],
     createdByNodeId: "node-1",
     createdAt: "2026-04-27T00:00:00.000Z",
-    updatedAt: "2026-04-27T00:00:00.000Z"
+    updatedAt: "2026-04-27T00:00:00.000Z",
+    ...overrides
   };
 }
 
@@ -71,6 +72,23 @@ describe("SocialPostRenderer", () => {
     expect(screen.getByText("第二段").tagName.toLowerCase()).toBe("p");
     expect(screen.getByText("#AI")).toBeInTheDocument();
     expect(screen.getByText("图")).toBeInTheDocument();
+  });
+
+  it("shows inline diff tokens while a streamed draft is replacing a previous artifact", () => {
+    const previousArtifact = createArtifact(
+      { title: "旧标题", body: "第一段旧正文。", hashtags: ["#旧"], imagePrompt: "旧图" },
+      { id: "artifact-old" }
+    );
+    const streamingArtifact = createArtifact(
+      { title: "新标题", body: "第一段旧正文。新增一句。", hashtags: ["#旧", "#新"], imagePrompt: "新图" },
+      { id: "artifact-streaming", sourceArtifactIds: ["artifact-old"] }
+    );
+
+    render(<SocialPostRenderer artifact={streamingArtifact} isBusy={true} previousArtifact={previousArtifact} />);
+
+    expect(screen.getByTestId("social-post-inline-diff")).toBeInTheDocument();
+    expect(document.querySelectorAll(".work-diff-token--added").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll(".work-diff-token--removed").length).toBeGreaterThan(0);
   });
 
   it("saves edited social post payloads", async () => {

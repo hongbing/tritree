@@ -8,6 +8,7 @@ import {
   buildTreeArtifactInstructions,
   buildTreeNextStepInstructions,
   buildTreeOptionsInstructions,
+  buildTreeTurnInstructions,
   type SharedAgentContextInput
 } from "./mastra-context";
 
@@ -71,6 +72,22 @@ export function createTreeNextStepAgent(
     id: "treeable-tree-next-step-agent",
     name: "Treeable Tree Next Step Agent",
     instructions: buildTreeNextStepInstructions(context),
+    model: createTreeableAnthropicModel(env),
+    defaultOptions: { modelSettings: { maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS } },
+    inputProcessors: [new TokenLimiterProcessor({ limit: resolveModelContextBudget(env).inputBudgetTokens })],
+    ...(hasTools(tools) ? { tools } : {})
+  });
+}
+
+export function createTreeTurnAgent(
+  context: SharedAgentContextInput,
+  env: Record<string, string | undefined> = process.env,
+  tools?: ToolsInput
+) {
+  return new Agent({
+    id: "treeable-main-agent",
+    name: "Treeable Main ReAct Agent",
+    instructions: buildTreeTurnInstructions(context),
     model: createTreeableAnthropicModel(env),
     defaultOptions: { modelSettings: { maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS } },
     inputProcessors: [new TokenLimiterProcessor({ limit: resolveModelContextBudget(env).inputBudgetTokens })],

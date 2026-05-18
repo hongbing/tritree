@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { GitCompare, X } from "lucide-react";
 import type { Artifact, TreeNode } from "@/lib/domain";
 import { getArtifactClientManifest, getArtifactRenderer } from "@/artifacts/client-registry";
@@ -68,6 +68,7 @@ export function ArtifactWorkspace({
   const selectedArtifact = selectedArtifactId
     ? artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? null
     : null;
+  const processBodyRef = useRef<HTMLDivElement>(null);
   const previousArtifact = selectedArtifact ? previousArtifactForRenderer(selectedArtifact, artifacts, currentNode) : null;
   const selectedManifest = selectedArtifact ? getArtifactClientManifest(selectedArtifact.type) : null;
   const SelectedRenderer = selectedManifest ? getArtifactRenderer(selectedManifest.rendererKey) : null;
@@ -75,12 +76,22 @@ export function ArtifactWorkspace({
   const hasNoArtifactForCurrentNode = currentNode ? currentNode.producedArtifactId === null : false;
   const canUseComparison = canCompareArtifacts || isComparisonMode;
   const processMaterials = [...streamingProcessMaterials, ...processMaterialsForNode(currentNode)];
+  const isStreamingProcessMaterials = isBusy && streamingProcessMaterials.length > 0;
   const processTitle =
     generationStage === "artifact"
       ? "AI 正在思考下一版产物..."
       : generationStage === "options"
         ? "AI 正在生成下一步选项..."
         : "";
+
+  useEffect(() => {
+    if (!isBusy || !generationStage) return;
+
+    const processBody = processBodyRef.current;
+    if (!processBody) return;
+
+    processBody.scrollTop = processBody.scrollHeight;
+  }, [generationStage, isBusy, trimmedThinkingText]);
 
   return (
     <aside
@@ -121,13 +132,15 @@ export function ArtifactWorkspace({
               <span className="artifact-workspace__process-dot" aria-hidden="true" />
               <strong>{processTitle}</strong>
             </div>
-            <div className="artifact-workspace__process-body">
+            <div className="artifact-workspace__process-body" ref={processBodyRef}>
               {trimmedThinkingText ? trimmedThinkingText : generationStage === "artifact" ? "正在生成草稿内容。" : "正在生成可选择方向。"}
             </div>
           </div>
         ) : null}
 
-        {processMaterials.length > 0 ? <ProcessMaterials materials={processMaterials} /> : null}
+        {processMaterials.length > 0 ? (
+          <ProcessMaterials isStreaming={isStreamingProcessMaterials} materials={processMaterials} />
+        ) : null}
 
         {isComparisonMode ? (
           <ArtifactComparisonView
@@ -172,11 +185,14 @@ function previousArtifactForRenderer(selectedArtifact: Artifact, artifacts: Arti
   return null;
 }
 
-function ProcessMaterials({ materials }: { materials: ProcessMaterial[] }) {
+function ProcessMaterials({ isStreaming, materials }: { isStreaming: boolean; materials: ProcessMaterial[] }) {
   const totalItemCount = materials.reduce((count, material) => count + material.items.length, 0);
 
   return (
-    <section className="artifact-workspace__materials" aria-labelledby="artifact-workspace-materials-title">
+    <section
+      className={`artifact-workspace__materials${isStreaming ? " artifact-workspace__materials--streaming" : ""}`}
+      aria-labelledby="artifact-workspace-materials-title"
+    >
       <div className="artifact-workspace__materials-header">
         <h3 id="artifact-workspace-materials-title">过程材料</h3>
         <span>{totalItemCount > 0 ? `${totalItemCount} 条` : `${materials.length} 个工具结果`}</span>

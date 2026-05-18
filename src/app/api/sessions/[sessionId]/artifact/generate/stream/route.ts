@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getArtifactPlugin, requireArtifactPlugin } from "@/artifacts/registry";
-import { streamDirectorArtifact, streamDirectorNextStep } from "@/lib/ai/director-stream";
+import { streamDirectorTurn } from "@/lib/ai/director-stream";
 import { badRequestResponse, isAbortError, isBadRequestError, publicServerErrorMessage } from "@/lib/api/errors";
 import { focusSessionStateForNode, summarizeSessionForDirector } from "@/lib/app-state";
 import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
 import { getRepository } from "@/lib/db/repository";
 import {
   OptionGenerationModeSchema,
-  type AgentMessage,
   type Artifact,
   type BranchOption,
   type GeneratedArtifact,
@@ -95,12 +94,10 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
           body.note,
           selectedOption.mode ?? body.optionMode
         );
-        const memory = { resource: state.rootMemory.id, thread: sessionId };
-        const nextStep = await streamDirectorNextStep(directorParts, {
-          memory,
+        const output = await streamDirectorTurn(directorParts, {
           signal: request.signal,
           onReasoningText(event) {
-            send({ type: "thinking", nodeId: targetNode.id, stage: "options", text: event.accumulatedText });
+            send({ type: "thinking", nodeId: targetNode.id, text: event.accumulatedText });
           },
           onProcessData(data) {
             send({ type: "process_data", nodeId: targetNode.id, data });
@@ -114,48 +111,6 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
                 options: event.partialOptions
               });
             }
-          }
-        });
-
-        if (nextStep.action === "options") {
-          const nextState = repository.updateNodeOptions({
-            userId: user.id,
-            sessionId,
-            nodeId: targetNode.id,
-            output: {
-              roundIntent: nextStep.roundIntent,
-              options: nextStep.options
-            },
-            ...(nextStep.agentMessages?.length ? { agentMessages: nextStep.agentMessages } : {})
-          });
-          send({
-            type: "options",
-            nodeId: targetNode.id,
-            roundIntent: nextStep.roundIntent,
-            options: nextStep.options
-          });
-          send({ type: "done", state: nextState });
-          return;
-        }
-
-        if (nextStep.action === "complete") {
-          const nextState = repository.completeNode({
-            userId: user.id,
-            sessionId,
-            nodeId: targetNode.id,
-            output: {
-              roundIntent: nextStep.roundIntent
-            },
-            ...(nextStep.agentMessages?.length ? { agentMessages: nextStep.agentMessages } : {})
-          });
-          send({ type: "done", state: nextState });
-          return;
-        }
-
-        const output = await streamDirectorArtifact(directorParts, {
-          memory,
-          signal: request.signal,
-          onText(event) {
             const previewArtifact = event.partialArtifact
               ? streamingArtifactForPartial({
                   parentState,
@@ -166,16 +121,44 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
             if (previewArtifact) {
               send({ type: "artifact.replace", artifact: previewArtifact });
             }
-          },
-          onReasoningText(event) {
-            send({ type: "thinking", nodeId: targetNode.id, stage: "artifact", text: event.accumulatedText });
-          },
-          onProcessData(data) {
-            send({ type: "process_data", nodeId: targetNode.id, data });
           }
         });
 
-        const agentMessages = agentMessagesArgument(nextStep.agentMessages, output.agentMessages);
+        if (output.action === "options") {
+          const nextState = repository.updateNodeOptions({
+            userId: user.id,
+            sessionId,
+            nodeId: targetNode.id,
+            output: {
+              roundIntent: output.roundIntent,
+              options: output.options
+            },
+            ...(output.agentMessages?.length ? { agentMessages: output.agentMessages } : {})
+          });
+          send({
+            type: "options",
+            nodeId: targetNode.id,
+            roundIntent: output.roundIntent,
+            options: output.options
+          });
+          send({ type: "done", state: nextState });
+          return;
+        }
+
+        if (output.action === "complete") {
+          const nextState = repository.completeNode({
+            userId: user.id,
+            sessionId,
+            nodeId: targetNode.id,
+            output: {
+              roundIntent: output.roundIntent
+            },
+            ...(output.agentMessages?.length ? { agentMessages: output.agentMessages } : {})
+          });
+          send({ type: "done", state: nextState });
+          return;
+        }
+
         const latestState = repository.getSessionState(user.id, sessionId);
         if (!latestState) {
           throw new Error("Session disappeared before generated artifact could be saved.");
@@ -194,7 +177,7 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
             output: {
               roundIntent: output.roundIntent
             },
-            ...agentMessages
+            ...(output.agentMessages?.length ? { agentMessages: output.agentMessages } : {})
           });
           send({ type: "done", state: nextState });
           return;
@@ -207,7 +190,7 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
           nodeId: targetNode.id,
           roundIntent: output.roundIntent,
           artifact,
-          ...agentMessages
+          ...(output.agentMessages?.length ? { agentMessages: output.agentMessages } : {})
         });
         const savedArtifact = artifactForNode(nextState, targetNode.id);
         if (!savedArtifact) {
@@ -240,11 +223,6 @@ function parentStateForArtifactNode(state: SessionState, node: TreeNode) {
 function selectedOptionForArtifactNode(state: SessionState | null, node: TreeNode): BranchOption | null {
   if (!state || !node.parentOptionId) return null;
   return state.currentNode?.options.find((option) => option.id === node.parentOptionId) ?? null;
-}
-
-function agentMessagesArgument(...messageGroups: Array<AgentMessage[] | undefined>) {
-  const agentMessages = messageGroups.flatMap((messages) => messages ?? []);
-  return agentMessages.length > 0 ? { agentMessages } : {};
 }
 
 function validateGeneratedArtifact(artifact: GeneratedArtifact) {

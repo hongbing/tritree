@@ -76,7 +76,7 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previou
   const previousDisplayTitle = previousSocialPayload
     ? resolveSocialPostTitle(previousSocialPayload.title, previousSocialPayload.body)
     : "";
-  const shouldShowInlineDiff = Boolean(isBusy && previousSocialPayload && previousArtifact?.id !== artifact.id);
+  const shouldShowInlineDiff = Boolean(previousSocialPayload && previousArtifact?.id !== artifact.id);
   const bodyParagraphs = splitBodyParagraphsWithOffsets(payloadBody);
   const canUseSelectionRewrite = Boolean(onAction);
 

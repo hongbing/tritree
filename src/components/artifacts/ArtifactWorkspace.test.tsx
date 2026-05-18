@@ -192,6 +192,23 @@ describe("ArtifactWorkspace", () => {
     expect(pressedRule).toContain("background: #dcfce7");
   });
 
+  it("caps process materials so the draft keeps more vertical room", () => {
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    const materialsRule = css.match(/\.artifact-workspace__materials\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const streamingMaterialsRule =
+      css.match(/\.artifact-workspace__materials--streaming\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const materialsListRule =
+      css.match(/\.artifact-workspace__materials-list\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+    const socialPostPanelRule =
+      css.match(/\.social-post-panel\s*\{\s*flex: 1 1 auto;(?<body>[^}]+)\}/)?.groups?.body ?? "";
+
+    expect(materialsRule).toContain("max-height: min(280px, 36dvh)");
+    expect(materialsRule).toContain("overflow: hidden");
+    expect(streamingMaterialsRule).toContain("max-height: min(340px, 44dvh)");
+    expect(materialsListRule).toContain("overflow: auto");
+    expect(socialPostPanelRule).toContain("min-height: 380px");
+  });
+
   it("renders the selected artifact without artifact tabs", () => {
     const social = socialPostArtifact();
     const prd = prdArtifact();
@@ -262,6 +279,37 @@ describe("ArtifactWorkspace", () => {
     expect(screen.getByRole("status")).toHaveTextContent("[工具] 准备调用 search");
     expect(screen.getByRole("status")).toHaveTextContent("[工具] search 完成");
     expect(screen.getByTestId("social-post-renderer")).toHaveTextContent("A short social post body.");
+  });
+
+  it("scrolls the progress body to the latest thinking record", () => {
+    const social = socialPostArtifact();
+    const baseProps = {
+      artifacts: [social],
+      currentNode: artifactNode(social.id),
+      generationStage: "options" as const,
+      isBusy: true,
+      isGenerating: true,
+      onAction: vi.fn(),
+      onSave: vi.fn(),
+      selectedArtifactId: social.id
+    };
+    const { rerender } = render(<ArtifactWorkspace {...baseProps} thinkingText="[工具] 准备调用 search" />);
+    const progressBody = screen
+      .getByText("[工具] 准备调用 search")
+      .closest(".artifact-workspace__process-body") as HTMLDivElement | null;
+
+    expect(progressBody).not.toBeNull();
+    Object.defineProperty(progressBody, "scrollHeight", { configurable: true, value: 640 });
+    progressBody!.scrollTop = 0;
+
+    rerender(
+      <ArtifactWorkspace
+        {...baseProps}
+        thinkingText={"[工具] 准备调用 search\n[工具] search 完成\n[工具] 汇总最新记录"}
+      />
+    );
+
+    expect(progressBody!.scrollTop).toBe(640);
   });
 
   it("does not format ordinary tool results as process materials", () => {
@@ -359,6 +407,9 @@ describe("ArtifactWorkspace", () => {
     renderWorkspace({
       artifacts: [social],
       currentNode: artifactNode(social.id),
+      generationStage: "options",
+      isBusy: true,
+      isGenerating: true,
       selectedArtifactId: social.id,
       streamingProcessMaterials: [
         {
@@ -371,6 +422,9 @@ describe("ArtifactWorkspace", () => {
     });
 
     expect(screen.getByRole("heading", { name: "过程材料" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "过程材料" }).closest(".artifact-workspace__materials")).toHaveClass(
+      "artifact-workspace__materials--streaming"
+    );
     expect(screen.getByRole("heading", { name: "参考材料" })).toBeInTheDocument();
     expect(screen.getByText("参考条目 A")).toBeInTheDocument();
     expect(screen.getByText("适合作为内容切入")).toBeInTheDocument();

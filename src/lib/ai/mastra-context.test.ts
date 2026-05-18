@@ -184,4 +184,14 @@ describe("agent instructions", () => {
     expect(artifactInstructions.indexOf("# 本轮固定目标")).toBeGreaterThan(artifactInstructions.indexOf("# ReAct 执行协议"));
     expect(artifactInstructions.indexOf("# 输出契约")).toBeGreaterThan(artifactInstructions.indexOf("# 本轮固定目标"));
   });
+
+  it("keeps displayed process material aligned with the same three-choice question", () => {
+    const instructions = [
+      buildTreeOptionsInstructions(shellInput),
+      buildTreeNextStepInstructions(shellInput)
+    ].join("\n\n");
+
+    expect(instructions).toContain("过程材料只能支撑同一个 roundIntent 和三个 options");
+    expect(instructions).toContain("不要把过程材料写成另一组 A/B/C 选项、候选题或选择清单");
+  });
 });

@@ -260,6 +260,35 @@ describe("tree director compatibility generators", () => {
     );
   });
 
+  it("does not pass Mastra memory because the tree provides the main agent history", async () => {
+    const finalObject = {
+      roundIntent: "选择下一步",
+      options: [
+        { id: "a", label: "补因果链", description: "第二段跳得太快。", impact: "让读者更容易理解。", kind: "deepen" },
+        { id: "b", label: "收紧标题", description: "标题承诺偏大。", impact: "让表达更可信。", kind: "reframe" },
+        { id: "c", label: "整理结尾", description: "结尾还没有收束。", impact: "让文章接近发布。", kind: "finish" }
+      ],
+    };
+    const fakeAgent = {
+      generate: vi.fn(),
+      stream: vi.fn(async () => ({
+        object: Promise.resolve(finalObject)
+      }))
+    };
+
+    await streamTreeOptions({
+      parts: directorParts,
+      treeOptionsAgent: fakeAgent
+    });
+
+    expect(fakeAgent.stream).toHaveBeenCalledWith(
+      directorParts.messages,
+      expect.not.objectContaining({
+        memory: expect.anything()
+      })
+    );
+  });
+
   it("lets the director route a selected choice to either options or artifact", async () => {
     const fakeAgent = {
       generate: vi.fn(async () => ({
@@ -277,7 +306,6 @@ describe("tree director compatibility generators", () => {
 
     const output = await generateTreeNextStep({
       parts: directorParts,
-      memory: { resource: "root", thread: "session-1" },
       treeNextStepAgent: fakeAgent
     });
 
@@ -288,7 +316,6 @@ describe("tree director compatibility generators", () => {
     expect(fakeAgent.generate).toHaveBeenCalledWith(
       directorParts.messages,
       expect.objectContaining({
-        memory: { resource: "root", thread: "session-1" },
         structuredOutput: expect.objectContaining({ schema: expect.anything() })
       })
     );
@@ -581,7 +608,6 @@ describe("tree director compatibility generators", () => {
       generateTreeArtifact({
         parts: directorParts,
         signal: new AbortController().signal,
-        memory: { resource: "root", thread: "session-1" },
         treeArtifactAgent: fakeAgent
       })
     ).resolves.toMatchObject({
@@ -592,7 +618,6 @@ describe("tree director compatibility generators", () => {
     expect(fakeAgent.generate).toHaveBeenCalledWith(
       directorParts.messages,
       expect.objectContaining({
-        memory: { resource: "root", thread: "session-1" },
         structuredOutput: expect.objectContaining({ schema: expect.anything() })
       })
     );
@@ -725,7 +750,6 @@ describe("tree director compatibility generators", () => {
     await expect(
       streamTreeArtifact({
         parts: directorParts,
-        memory: { resource: "root", thread: "session-1" },
         treeArtifactAgent: fakeAgent,
         onPartialObject: (partial) => partials.push(partial)
       })
@@ -734,7 +758,6 @@ describe("tree director compatibility generators", () => {
     expect(fakeAgent.stream).toHaveBeenCalledWith(
       directorParts.messages,
       expect.objectContaining({
-        memory: { resource: "root", thread: "session-1" },
         structuredOutput: expect.objectContaining({ schema: expect.anything() })
       })
     );
@@ -830,7 +853,6 @@ describe("tree director compatibility generators", () => {
     await expect(
       streamTreeOptions({
         parts: directorParts,
-        memory: { resource: "root", thread: "session-1" },
         treeOptionsAgent: fakeAgent
       })
     ).resolves.toMatchObject({
@@ -840,9 +862,7 @@ describe("tree director compatibility generators", () => {
 
     expect(fakeAgent.stream).toHaveBeenCalledWith(
       directorParts.messages,
-      expect.objectContaining({
-        memory: { resource: "root", thread: "session-1" }
-      })
+      expect.not.objectContaining({ memory: expect.anything() })
     );
   });
 
@@ -954,7 +974,6 @@ describe("tree director compatibility generators", () => {
     await expect(
       streamTreeOptions({
         parts: directorParts,
-        memory: { resource: "root", thread: "session-1" },
         treeOptionsAgent: fakeAgent,
         onPartialObject: (partial) => partials.push(partial)
       })
@@ -963,7 +982,6 @@ describe("tree director compatibility generators", () => {
     expect(fakeAgent.stream).toHaveBeenCalledWith(
       directorParts.messages,
       expect.objectContaining({
-        memory: { resource: "root", thread: "session-1" },
         structuredOutput: expect.objectContaining({ schema: expect.anything() })
       })
     );
@@ -2022,6 +2040,8 @@ describe("tree director compatibility generators", () => {
       })
     );
     expect(constructedOptions.instructions).toContain("show_process_data");
+    expect(constructedOptions.instructions).toContain("只展示本轮新调用工具后整理出的材料");
+    expect(constructedOptions.instructions).toContain("不要把最终 options 重复或改写成过程材料");
     expect(processDataEvents).toEqual([displayedData]);
     expect(progressEvents.map((event) => event.accumulatedText).join("\n")).not.toContain("show_process_data");
     expect(output.agentMessages).toContainEqual({
@@ -2038,6 +2058,101 @@ describe("tree director compatibility generators", () => {
         }
       ]
     });
+  });
+
+  it("streams process data display while show_process_data arguments arrive in deltas", async () => {
+    const runSkillCommand = {
+      id: "run_skill_command",
+      description: "Run an installed skill command.",
+      execute: vi.fn()
+    };
+    const displayedData = {
+      title: "参考材料",
+      sourceToolCallIds: ["tool-1"],
+      items: [
+        { title: "参考条目 A", subtitle: "方向 A" },
+        { title: "参考条目 B", meta: "#2" }
+      ]
+    };
+    const finalObject = {
+      roundIntent: "你想围绕哪个参考方向写？",
+      options: [
+        { id: "a", label: "方向 A", description: "围绕参考条目 A。", impact: "更容易形成具体切入。", kind: "explore" },
+        { id: "b", label: "方向 B", description: "围绕参考条目 B。", impact: "更适合观点输出。", kind: "deepen" },
+        { id: "c", label: "方向 C", description: "围绕参考条目 C。", impact: "更轻松。", kind: "reframe" }
+      ]
+    };
+    const stream = vi.fn(async () => ({
+      fullStream: async function* () {
+        yield {
+          type: "tool-call-streaming-start",
+          payload: {
+            toolCallId: "display-1",
+            toolName: "show_process_data"
+          }
+        };
+        yield {
+          type: "tool-call-delta",
+          payload: {
+            toolCallId: "display-1",
+            toolName: "show_process_data",
+            argsTextDelta: '{"title":"参考材料","sourceToolCallIds":["tool-1"],"items":[{"title":"参考条目 A'
+          }
+        };
+        yield {
+          type: "tool-call-delta",
+          payload: {
+            toolCallId: "display-1",
+            toolName: "show_process_data",
+            argsTextDelta: '","subtitle":"方向 A"},{"title":"参考条目 B","meta":"#2"}]}'
+          }
+        };
+        yield {
+          type: "tool-result",
+          payload: {
+            toolCallId: "display-1",
+            toolName: "show_process_data",
+            result: displayedData
+          }
+        };
+        yield {
+          type: "tool-call",
+          payload: {
+            toolCallId: "submit-1",
+            toolName: "submit_tree_options",
+            args: finalObject
+          }
+        };
+      },
+      object: Promise.resolve(undefined)
+    }));
+    mocks.createSkillRuntimeTools.mockResolvedValueOnce({
+      toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
+      tools: { run_skill_command: runSkillCommand }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate: vi.fn()
+      };
+    });
+    const processDataEvents: unknown[] = [];
+
+    await streamTreeOptions({
+      parts: directorParts,
+      env: { KIMI_API_KEY: "token" },
+      onProcessData: (data) => processDataEvents.push(data)
+    });
+
+    expect(processDataEvents).toEqual([
+      {
+        title: "参考材料",
+        sourceToolCallIds: ["tool-1"],
+        items: [{ title: "参考条目 A" }]
+      },
+      displayedData
+    ]);
   });
 
   it("accepts runtime options when the final submit provides three user-facing choices", async () => {

@@ -273,7 +273,11 @@ describe("summarizeSessionForDirector", () => {
       createNode({
         id: "node-1",
         roundIndex: 1,
-        options: [],
+        options: [
+          option("a", "补真实场景"),
+          option("b", "压缩观点"),
+          option("c", "换一个切口")
+        ],
         selectedOptionId: null,
         agentMessages: [
           {
@@ -309,8 +313,11 @@ describe("summarizeSessionForDirector", () => {
 
     expect(workMessages).toContainEqual(expect.objectContaining({ role: "tool", content: expect.any(Array) }));
     expect(JSON.stringify(workMessages)).toContain("青岛三天两晚攻略");
+    expect(JSON.stringify(workMessages)).toContain("第 1 版已形成产物");
     expect(optionMessages).toContainEqual(expect.objectContaining({ role: "tool", content: expect.any(Array) }));
     expect(JSON.stringify(optionMessages)).toContain("青岛三天两晚攻略");
+    expect(JSON.stringify(optionMessages)).toContain("第 1 次澄清问题摘要");
+    expect(JSON.stringify(optionMessages)).toContain("答案标题：");
   });
 
   it("puts the direction range into editor conversation messages", () => {

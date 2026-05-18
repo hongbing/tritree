@@ -91,6 +91,23 @@ describe("SocialPostRenderer", () => {
     expect(document.querySelectorAll(".work-diff-token--removed").length).toBeGreaterThan(0);
   });
 
+  it("keeps inline diff visible after a generated draft finishes", () => {
+    const previousArtifact = createArtifact(
+      { title: "旧标题", body: "第一段旧正文。", hashtags: ["#旧"], imagePrompt: "旧图" },
+      { id: "artifact-old" }
+    );
+    const generatedArtifact = createArtifact(
+      { title: "新标题", body: "第一段旧正文。新增一句。", hashtags: ["#旧", "#新"], imagePrompt: "新图" },
+      { id: "artifact-generated", sourceArtifactIds: ["artifact-old"] }
+    );
+
+    render(<SocialPostRenderer artifact={generatedArtifact} isBusy={false} previousArtifact={previousArtifact} />);
+
+    expect(screen.getByTestId("social-post-inline-diff")).toBeInTheDocument();
+    expect(document.querySelectorAll(".work-diff-token--added").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll(".work-diff-token--removed").length).toBeGreaterThan(0);
+  });
+
   it("saves edited social post payloads", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(

@@ -3609,7 +3609,7 @@ button:disabled {
 .social-post-panel {
   flex: 1 1 auto;
   position: relative;
-  min-height: 300px;
+  min-height: 380px;
   height: 100%;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -3747,8 +3747,17 @@ button:disabled {
 
 .artifact-workspace__materials {
   display: grid;
+  grid-template-rows: auto auto;
   gap: 10px;
+  min-height: min(200px, 28dvh);
+  max-height: min(420px, 52dvh);
+  overflow: auto;
   background: #fff;
+}
+
+.artifact-workspace__materials--streaming {
+  min-height: min(200px, 30dvh);
+  max-height: min(600px, 72dvh);
 }
 
 .artifact-workspace__materials-header {
@@ -3775,6 +3784,7 @@ button:disabled {
 .artifact-workspace__materials-list {
   display: grid;
   gap: 8px;
+  padding-right: 4px;
 }
 
 .artifact-workspace__material {
@@ -5134,7 +5144,7 @@ button:disabled {
   }
 
   .social-post-panel {
-    min-height: 320px;
+    min-height: 380px;
     height: auto;
     max-height: none;
     grid-template-rows: auto auto;

@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
-const streamDirectorArtifactMock = vi.hoisted(() => vi.fn());
-const streamDirectorNextStepMock = vi.hoisted(() => vi.fn());
+const streamDirectorTurnMock = vi.hoisted(() => vi.fn());
 const getRepositoryMock = vi.hoisted(() => vi.fn());
 const requireCurrentUserMock = vi.hoisted(() => vi.fn());
 
@@ -17,8 +16,7 @@ const currentUser = {
 };
 
 vi.mock("@/lib/ai/director-stream", () => ({
-  streamDirectorArtifact: streamDirectorArtifactMock,
-  streamDirectorNextStep: streamDirectorNextStepMock
+  streamDirectorTurn: streamDirectorTurnMock
 }));
 
 vi.mock("server-only", () => ({}));
@@ -118,15 +116,10 @@ const state = {
 };
 
 beforeEach(() => {
-  streamDirectorArtifactMock.mockReset();
-  streamDirectorNextStepMock.mockReset();
+  streamDirectorTurnMock.mockReset();
   getRepositoryMock.mockReset();
   requireCurrentUserMock.mockReset();
   requireCurrentUserMock.mockResolvedValue(currentUser);
-  streamDirectorNextStepMock.mockResolvedValue({
-    action: "artifact",
-    roundIntent: "可以生成作品"
-  });
 });
 
 describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
@@ -156,9 +149,10 @@ describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
       getSessionState: vi.fn().mockReturnValue(state),
       updateNodeArtifact
     });
-    streamDirectorArtifactMock.mockImplementation(async (_parts, options) => {
+    streamDirectorTurnMock.mockImplementation(async (_parts, options) => {
       options.onReasoningText({ delta: "开始写。", accumulatedText: "开始写。" });
       return {
+        action: "artifact",
         roundIntent: "扩写",
         artifact: generatedArtifact,
         agentMessages: [{ role: "assistant", content: "ok" }]
@@ -184,7 +178,6 @@ describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
       agentMessages: [{ role: "assistant", content: "ok" }]
     });
     expect(text).toContain('"type":"thinking"');
-    expect(text).toContain('"stage":"artifact"');
     expect(text).toContain('"type":"artifact.replace"');
     expect(text).toContain('"id":"artifact-2"');
     expect(text).toContain('"type":"done"');
@@ -216,7 +209,7 @@ describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
       getSessionState: vi.fn().mockReturnValue(state),
       updateNodeArtifact: vi.fn().mockReturnValue(finalState)
     });
-    streamDirectorArtifactMock.mockImplementation(async (_parts, options) => {
+    streamDirectorTurnMock.mockImplementation(async (_parts, options) => {
       options.onText?.({
         accumulatedText: "",
         delta: "",
@@ -228,6 +221,7 @@ describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
         partialArtifact: { type: "social-post", payload: { title: "新", body: "新正文" } }
       });
       return {
+        action: "artifact",
         roundIntent: "扩写",
         artifact: generatedArtifact
       };
@@ -242,19 +236,67 @@ describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
     );
     const text = await response.text();
 
-    expect(streamDirectorArtifactMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ onText: expect.any(Function) }));
+    expect(streamDirectorTurnMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ onText: expect.any(Function) }));
     expect(text).toContain('"id":"streaming-node-2"');
     expect(text).toContain('"sourceArtifactIds":["artifact-1"]');
     expect(text.indexOf('"id":"streaming-node-2"')).toBeLessThan(text.indexOf('"id":"artifact-2"'));
     expect(text.match(/"type":"artifact\.replace"/g)).toHaveLength(3);
   });
 
-  it("does not let next-step inline artifacts bypass the streaming draft stage", async () => {
-    const inlineNextStepArtifact = {
-      type: "social-post",
-      payload: { title: "短路草稿", body: "这份草稿没有流式预览", hashtags: ["#旧"], imagePrompt: "" },
-      sourceArtifactIds: ["artifact-1"]
+  it("can finish the same main agent turn by submitting options", async () => {
+    const options = [
+      { id: "a", label: "补背景", description: "先补背景。", impact: "减少误解。", kind: "explore" },
+      { id: "b", label: "改结构", description: "换成对比结构。", impact: "更清楚。", kind: "deepen" },
+      { id: "c", label: "直接收束", description: "压到发布稿。", impact: "更快完成。", kind: "finish" }
+    ];
+    const finalState = {
+      ...state,
+      currentNode: { ...childNode, roundIntent: "下一步怎么处理？", options }
     };
+    const updateNodeOptions = vi.fn().mockReturnValue(finalState);
+    getRepositoryMock.mockReturnValue({
+      getSessionState: vi.fn().mockReturnValue(state),
+      updateNodeOptions
+    });
+    streamDirectorTurnMock.mockImplementation(async (_parts, turnOptions) => {
+      turnOptions.onText?.({
+        accumulatedText: "",
+        delta: "",
+        partialArtifact: null,
+        partialOptions: [options[0]],
+        partialRoundIntent: "下一步怎么处理？"
+      });
+      return {
+        action: "options",
+        roundIntent: "下一步怎么处理？",
+        options,
+        agentMessages: [{ role: "assistant", content: "checked context" }]
+      };
+    });
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/artifact/generate/stream", {
+        method: "POST",
+        body: JSON.stringify({ nodeId: "node-2" })
+      }),
+      { params: Promise.resolve({ sessionId: "session-1" }) }
+    );
+    const text = await response.text();
+
+    expect(updateNodeOptions).toHaveBeenCalledWith({
+      userId: "user-1",
+      sessionId: "session-1",
+      nodeId: "node-2",
+      output: { roundIntent: "下一步怎么处理？", options },
+      agentMessages: [{ role: "assistant", content: "checked context" }]
+    });
+    expect(text).toContain('"type":"options"');
+    expect(text).toContain('"label":"补背景"');
+    expect(text).not.toContain('"type":"artifact.replace"');
+    expect(text).toContain('"type":"done"');
+  });
+
+  it("runs one main agent turn and streams draft previews from that turn", async () => {
     const generatedArtifact = {
       type: "social-post",
       payload: { title: "流式草稿", body: "流式正文", hashtags: ["#新"], imagePrompt: "新图" },
@@ -280,18 +322,14 @@ describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
       getSessionState: vi.fn().mockReturnValue(state),
       updateNodeArtifact
     });
-    streamDirectorNextStepMock.mockResolvedValue({
-      action: "artifact",
-      roundIntent: "进入成稿",
-      artifact: inlineNextStepArtifact
-    });
-    streamDirectorArtifactMock.mockImplementation(async (_parts, options) => {
+    streamDirectorTurnMock.mockImplementation(async (_parts, options) => {
       options.onText?.({
         accumulatedText: "",
         delta: "",
         partialArtifact: { type: "social-post", payload: { title: "流式草稿" } }
       });
       return {
+        action: "artifact",
         roundIntent: "生成流式草稿",
         artifact: generatedArtifact
       };
@@ -306,11 +344,10 @@ describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
     );
     const text = await response.text();
 
-    expect(streamDirectorArtifactMock).toHaveBeenCalledTimes(1);
+    expect(streamDirectorTurnMock).toHaveBeenCalledTimes(1);
     expect(updateNodeArtifact).toHaveBeenCalledWith(expect.objectContaining({ artifact: generatedArtifact }));
     expect(text).toContain('"id":"streaming-node-2"');
     expect(text).toContain("流式草稿");
-    expect(text).not.toContain("短路草稿");
   });
 
   it("ignores incomplete artifact type deltas until a registered plugin id is available", async () => {
@@ -338,7 +375,7 @@ describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
       getSessionState: vi.fn().mockReturnValue(state),
       updateNodeArtifact: vi.fn().mockReturnValue(finalState)
     });
-    streamDirectorArtifactMock.mockImplementation(async (_parts, options) => {
+    streamDirectorTurnMock.mockImplementation(async (_parts, options) => {
       options.onText?.({
         accumulatedText: "",
         delta: "",
@@ -350,6 +387,7 @@ describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
         partialArtifact: { type: "social-post", payload: { title: "完整草稿" } }
       });
       return {
+        action: "artifact",
         roundIntent: "扩写",
         artifact: generatedArtifact
       };
@@ -381,7 +419,8 @@ describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
       getSessionState: vi.fn().mockReturnValue(state),
       completeNode
     });
-    streamDirectorArtifactMock.mockResolvedValue({
+    streamDirectorTurnMock.mockResolvedValue({
+      action: "artifact",
       roundIntent: "当前只完成分析",
       artifact: null
     });
@@ -434,7 +473,8 @@ describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
       getSessionState,
       updateNodeArtifact
     });
-    streamDirectorArtifactMock.mockResolvedValue({
+    streamDirectorTurnMock.mockResolvedValue({
+      action: "artifact",
       roundIntent: "扩写",
       artifact: generatedArtifact
     });

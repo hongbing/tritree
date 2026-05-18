@@ -109,6 +109,28 @@ export function buildTreeNextStepInstructions(input: SharedAgentContextInput) {
     .join("\n\n");
 }
 
+export function buildTreeTurnInstructions(input: SharedAgentContextInput) {
+  return [
+    "# ReAct Agent",
+    formatGenericReactAgentRole(),
+    buildSharedAgentContext(input),
+    actualWorkExecutionProtocol(input),
+    threeChoiceProtocol(),
+    "# 本轮固定目标",
+    "本轮固定目标：在一次主 agent ReAct 循环中推进当前用户请求，并通过一个最终提交工具结束。",
+    "如果本轮已经可以形成或更新作品，调用 submit_tree_artifact 提交 artifact 卡片；如果用户需要先从三个可执行答案中选择，调用 submit_tree_options 提交 3 选 1；如果本轮只需要收束且没有新作品，调用 submit_tree_artifact 并让 artifact=null。",
+    "不要先提交路由判断再开启另一个主 agent 循环；工具调用、subagent 调用、thinking、过程材料、options 和 artifact 都属于同一个主 agent turn。",
+    ...finalSubmitExecutionRules(input, "turn"),
+    "# 输出契约",
+    "这里的输出要求指最终提交工具参数里的字段，不是额外自然语言消息。",
+    "submit_tree_artifact 的用户可见字段包括：roundIntent、artifact.type、artifact.payload 和 artifact.sourceArtifactIds；artifact 可以是 null。",
+    "submit_tree_options 的用户可见字段包括：roundIntent、options[].label、options[].description 和 options[].impact，并必须正好三个 options。",
+    "所有面向用户的字段默认使用简体中文；用户原文、专有名词、代码、品牌名和已启用 Skills 明确要求的非中文文本除外。"
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 function formatGenericReactAgentRole() {
   return [
     "你是通用 ReAct agent。",
@@ -153,11 +175,26 @@ function threeChoiceProtocol() {
     "# 三选一交互协议",
     "三选一是用户交互和显示协议：当本轮需要用户从三个可执行答案中选择时，先形成 decisionRationale，再把需要用户决定的问题写成 roundIntent。",
     "三个 option 都必须回答同一个 roundIntent，不能变成三个彼此无关的新问题。",
-    "三个 option 要足够具体，让用户能直接比较选择后的影响。"
+    "三个 option 要足够具体，让用户能直接比较选择后的影响。",
+    "如果同时展示过程材料，过程材料只能支撑同一个 roundIntent 和三个 options；不要把过程材料写成另一组 A/B/C 选项、候选题或选择清单。"
   ].join("\n");
 }
 
-function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "artifact" | "next-step" | "options") {
+function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "artifact" | "next-step" | "options" | "turn") {
+  if (target === "turn") {
+    const hasArtifactSubmitTool = input.toolSummaries?.some(
+      (summary) => summary.includes(`${SUBMIT_TREE_ARTIFACT_TOOL_NAME}：`) || summary.includes(`${SUBMIT_TREE_ARTIFACT_TOOL_NAME}:`)
+    );
+    const hasOptionsSubmitTool = input.toolSummaries?.some(
+      (summary) => summary.includes(`${SUBMIT_TREE_OPTIONS_TOOL_NAME}：`) || summary.includes(`${SUBMIT_TREE_OPTIONS_TOOL_NAME}:`)
+    );
+    if (!hasArtifactSubmitTool && !hasOptionsSubmitTool) return [];
+    return [
+      `本轮可用工具里包含 ${SUBMIT_TREE_ARTIFACT_TOOL_NAME} 或 ${SUBMIT_TREE_OPTIONS_TOOL_NAME} 时，最终目标就是调用其中一个工具完成本轮任务；不要把最终结果写成普通文本。`,
+      `调用最终提交工具前可以按需调用其他工具收集信息；一旦结果足够，直接把结构化字段作为最终提交工具参数提交。`
+    ];
+  }
+
   const toolName =
     target === "artifact"
       ? SUBMIT_TREE_ARTIFACT_TOOL_NAME

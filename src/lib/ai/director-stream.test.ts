@@ -4,14 +4,16 @@ const mastraMocks = vi.hoisted(() => ({
   generateTreeNextStep: vi.fn(),
   streamTreeArtifact: vi.fn(),
   streamTreeNextStep: vi.fn(),
-  streamTreeOptions: vi.fn()
+  streamTreeOptions: vi.fn(),
+  streamTreeTurn: vi.fn()
 }));
 
 vi.mock("./mastra-executor", () => ({
   generateTreeNextStep: mastraMocks.generateTreeNextStep,
   streamTreeArtifact: mastraMocks.streamTreeArtifact,
   streamTreeNextStep: mastraMocks.streamTreeNextStep,
-  streamTreeOptions: mastraMocks.streamTreeOptions
+  streamTreeOptions: mastraMocks.streamTreeOptions,
+  streamTreeTurn: mastraMocks.streamTreeTurn
 }));
 
 import {
@@ -19,7 +21,8 @@ import {
   extractPartialDirectorOptions,
   streamDirectorArtifact,
   streamDirectorNextStep,
-  streamDirectorOptions
+  streamDirectorOptions,
+  streamDirectorTurn
 } from "./director-stream";
 
 const directorInput = {
@@ -39,6 +42,7 @@ beforeEach(() => {
   mastraMocks.streamTreeArtifact.mockReset();
   mastraMocks.streamTreeNextStep.mockReset();
   mastraMocks.streamTreeOptions.mockReset();
+  mastraMocks.streamTreeTurn.mockReset();
 });
 
 describe("extractPartialDirectorArtifact", () => {
@@ -254,15 +258,13 @@ describe("streamDirectorNextStep", () => {
 
     await expect(
       streamDirectorNextStep(directorInput, {
-        memory: { resource: "root", thread: "session-1" },
         onText
       })
     ).resolves.toEqual(output);
 
     expect(mastraMocks.streamTreeNextStep).toHaveBeenCalledWith(
       expect.objectContaining({
-        parts: directorInput,
-        memory: { resource: "root", thread: "session-1" }
+        parts: directorInput
       })
     );
     expect(onText).toHaveBeenNthCalledWith(
@@ -310,7 +312,6 @@ describe("streamDirectorArtifact", () => {
     await expect(
       streamDirectorArtifact(directorInput, {
         signal,
-        memory: { resource: "root", thread: "session-1" },
         onText
       })
     ).resolves.toEqual(output);
@@ -318,8 +319,7 @@ describe("streamDirectorArtifact", () => {
     expect(mastraMocks.streamTreeArtifact).toHaveBeenCalledWith(
       expect.objectContaining({
         parts: directorInput,
-        signal,
-        memory: { resource: "root", thread: "session-1" }
+        signal
       })
     );
     expect(onText).toHaveBeenCalledTimes(3);
@@ -365,6 +365,39 @@ describe("streamDirectorArtifact", () => {
   });
 });
 
+describe("streamDirectorTurn", () => {
+  it("uses one Mastra tree turn and emits artifact or option partials", async () => {
+    const output = {
+      action: "artifact",
+      roundIntent: "扩写",
+      artifact: {
+        type: "social-post",
+        payload: { title: "新标题", body: "新正文", hashtags: ["#AI"], imagePrompt: "新图" },
+        sourceArtifactIds: []
+      }
+    };
+    mastraMocks.streamTreeTurn.mockImplementation(async ({ onPartialObject }) => {
+      onPartialObject({ roundIntent: "扩写", artifact: { type: "social-post", payload: { title: "新标题" } } });
+      return output;
+    });
+    const onText = vi.fn();
+
+    await expect(streamDirectorTurn(directorInput, { onText })).resolves.toEqual(output);
+
+    expect(mastraMocks.streamTreeTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parts: directorInput
+      })
+    );
+    expect(onText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        partialArtifact: { type: "social-post", payload: { title: "新标题" } },
+        partialOptions: null
+      })
+    );
+  });
+});
+
 describe("streamDirectorOptions", () => {
   it("uses the Mastra tree options stream", async () => {
     const output = {
@@ -390,15 +423,13 @@ describe("streamDirectorOptions", () => {
 
     await expect(
       streamDirectorOptions(directorInput, {
-        memory: { resource: "root", thread: "session-1" },
         onText
       })
     ).resolves.toEqual(output);
 
     expect(mastraMocks.streamTreeOptions).toHaveBeenCalledWith(
       expect.objectContaining({
-        parts: directorInput,
-        memory: { resource: "root", thread: "session-1" }
+        parts: directorInput
       })
     );
     expect(onText).toHaveBeenCalledTimes(3);

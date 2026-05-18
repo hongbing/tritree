@@ -4,7 +4,6 @@ import { skillsForTarget, type Skill } from "@/lib/domain";
 import { parseDirectorJsonObject } from "@/lib/ai/director";
 import { logTritreeAiResponse, logTritreeAiStream } from "@/lib/ai/debug-log";
 import { createTreeableAnthropicModel } from "@/lib/ai/mastra-agents";
-import type { MemoryScope } from "@/lib/ai/mastra-executor";
 import { formatEnabledSkills, type DirectorMessage } from "@/lib/ai/prompts";
 import type { SocialPostPayload } from "./schema";
 
@@ -29,7 +28,6 @@ export type SocialPostSelectionRewriteOutput = z.infer<typeof SocialPostSelectio
 
 type RewriteSelectedSocialPostTextOptions = {
   env?: Record<string, string | undefined>;
-  memory?: MemoryScope;
   onText?: (event: { accumulatedText: string; delta: string; partialReplacementText: string }) => void;
   selectionRewriteAgent?: SocialPostSelectionRewriteAgentLike;
   signal?: AbortSignal;
@@ -41,7 +39,6 @@ type SocialPostSelectionRewriteAgentLike = {
     messages: DirectorMessage[],
     options: {
       abortSignal?: AbortSignal;
-      memory: MemoryScope;
       structuredOutput: { schema: typeof SocialPostSelectionRewriteOutputSchema };
     }
   ) => Promise<{ object?: unknown; output?: unknown }>;
@@ -49,7 +46,6 @@ type SocialPostSelectionRewriteAgentLike = {
     messages: DirectorMessage[],
     options: {
       abortSignal?: AbortSignal;
-      memory: MemoryScope;
       structuredOutput: { schema: typeof SocialPostSelectionRewriteOutputSchema };
     }
   ) => Promise<StructuredObjectStreamResult>;
@@ -133,7 +129,6 @@ export async function rewriteSelectedSocialPostText(
     (createSocialPostSelectionRewriteAgent(options.env) as unknown as SocialPostSelectionRewriteAgentLike);
   const result = await agent.generate(selectionRewriteMessages(input), {
     abortSignal: options.signal,
-    memory: options.memory ?? memoryScopeForSelectionRewrite(input),
     structuredOutput: { schema: SocialPostSelectionRewriteOutputSchema }
   });
 
@@ -152,7 +147,6 @@ export async function streamSelectedSocialPostText(
     options.selectionRewriteAgent ??
     (createSocialPostSelectionRewriteAgent(options.env) as unknown as SocialPostSelectionRewriteAgentLike);
   const messages = selectionRewriteMessages(input);
-  const memory = options.memory ?? memoryScopeForSelectionRewrite(input);
   let lastPartialReplacementText = "";
   const emitPartial = (partial: unknown) => {
     if (!isRecord(partial) || typeof partial.replacementText !== "string" || !partial.replacementText) {
@@ -178,7 +172,6 @@ export async function streamSelectedSocialPostText(
   const stream = agent.stream
     ? await agent.stream(messages, {
         abortSignal: options.signal,
-        memory,
         structuredOutput: { schema: SocialPostSelectionRewriteOutputSchema }
       })
     : null;
@@ -186,7 +179,6 @@ export async function streamSelectedSocialPostText(
   if (!stream) {
     const output = await rewriteSelectedSocialPostText(input, {
       ...options,
-      memory,
       selectionRewriteAgent: agent,
       suppressResponseLog: true
     });
@@ -244,14 +236,6 @@ function logSocialPostSelectionRewriteStream(event: "partial", value: unknown) {
 
 function selectionRewriteMessages(input: SocialPostSelectionRewriteInput): DirectorMessage[] {
   return [{ role: "user", content: buildSocialPostSelectionRewritePrompt(input) }];
-}
-
-function memoryScopeForSelectionRewrite(input: SocialPostSelectionRewriteInput): MemoryScope {
-  const basis = input.pathSummary || input.currentPayload.body || input.rootSummary || "social-post-selection-rewrite";
-  return {
-    resource: "treeable-social-post-selection-rewrite",
-    thread: encodeURIComponent(basis).slice(0, 128) || "social-post-selection-rewrite"
-  };
 }
 
 async function resolveStructuredStreamOutput(stream: StructuredObjectStreamResult, latestPartial: unknown) {

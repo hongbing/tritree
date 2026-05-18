@@ -264,6 +264,29 @@ export const DirectorArtifactOutputSchema = z.object({
   artifact: GeneratedArtifactSchema.nullable().optional()
 }).strict();
 
+const DirectorTurnArtifactSchema = z.object({
+  action: z.literal("artifact").optional(),
+  roundIntent: z.string().min(1),
+  artifact: GeneratedArtifactSchema.nullable().optional()
+}).strict().transform((output) => ({
+  ...output,
+  action: "artifact" as const
+}));
+
+export const DirectorTurnOutputSchema = z.union([
+  DirectorTurnArtifactSchema,
+  DirectorNextStepCompleteSchema,
+  DirectorNextStepOptionsSchema
+]).superRefine((output, context) => {
+  if (output.action === "options" && !includesDirectorOptionIdsOnce(output.options)) {
+    context.addIssue({
+      code: "custom",
+      path: ["options"],
+      message: DIRECTOR_OPTION_IDS_ERROR
+    });
+  }
+});
+
 export const SessionStatusSchema = z.enum(["active", "finished"]);
 
 export const TreeNodeSchema = z.object({
@@ -364,6 +387,7 @@ export type DirectorOutput = z.infer<typeof DirectorOutputSchema>;
 export type DirectorOptionsOutput = z.infer<typeof DirectorOptionsOutputSchema>;
 export type DirectorArtifactOutput = z.infer<typeof DirectorArtifactOutputSchema>;
 export type DirectorNextStepOutput = z.infer<typeof DirectorNextStepOutputSchema>;
+export type DirectorTurnOutput = z.infer<typeof DirectorTurnOutputSchema>;
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 export type TreeNode = z.infer<typeof TreeNodeSchema>;
 export type FoldedBranch = z.infer<typeof FoldedBranchSchema>;

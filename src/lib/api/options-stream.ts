@@ -36,7 +36,6 @@ export async function streamOptionsForNode({
   });
 
   const output = await streamDirectorOptions(summarizeCurrentArtifactOptionsForDirector(state, optionMode), {
-    memory: { resource: rootMemoryId, thread: sessionId },
     signal,
     onReasoningText(event) {
       send({ type: "thinking", nodeId, text: event.accumulatedText });

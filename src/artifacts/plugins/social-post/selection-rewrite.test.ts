@@ -120,7 +120,6 @@ describe("extractPartialSocialPostSelectionRewriteText", () => {
 describe("rewriteSelectedSocialPostText", () => {
   it("returns the parsed replacement from the Mastra structured agent", async () => {
     const signal = new AbortController().signal;
-    const memory = { resource: "root", thread: "session-1" };
     const fakeAgent = {
       generate: vi.fn(async () => ({
         object: { replacementText: "第二句加入了排期会上的真实追问。" }
@@ -129,7 +128,6 @@ describe("rewriteSelectedSocialPostText", () => {
 
     await expect(
       rewriteSelectedSocialPostText(input, {
-        memory,
         selectionRewriteAgent: fakeAgent,
         signal
       })
@@ -139,7 +137,6 @@ describe("rewriteSelectedSocialPostText", () => {
       [{ role: "user", content: expect.stringContaining("补一个真实工作细节") }],
       expect.objectContaining({
         abortSignal: signal,
-        memory,
         structuredOutput: expect.objectContaining({ schema: expect.anything() })
       })
     );
@@ -188,7 +185,6 @@ describe("streamSelectedSocialPostText", () => {
     expect(fakeAgent.stream).toHaveBeenCalledWith(
       [{ role: "user", content: expect.stringContaining("补一个真实工作细节") }],
       expect.objectContaining({
-        memory: expect.objectContaining({ resource: "treeable-social-post-selection-rewrite" }),
         structuredOutput: expect.objectContaining({ schema: expect.anything() })
       })
     );

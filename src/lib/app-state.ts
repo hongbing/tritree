@@ -212,9 +212,9 @@ function buildArtifactConversationMessages(state: SessionState, finalUserRequest
   state.selectedPath.forEach((node, index) => {
     if (node.agentMessages.length > 0) {
       messages.push(...node.agentMessages);
-    } else {
-      messages.push({ role: "assistant", content: formatArtifactHistoryRoundForWriter(state, node, index === lastPathIndex) });
     }
+
+    messages.push({ role: "assistant", content: formatArtifactHistoryRoundForWriter(state, node, index === lastPathIndex) });
 
     const selectedOption = node.selectedOptionId
       ? node.options.find((option) => option.id === node.selectedOptionId)
@@ -252,7 +252,9 @@ function buildEditorMessages(state: SessionState, currentArtifact: Artifact | nu
   state.selectedPath.forEach((node, index) => {
     if (node.agentMessages.length > 0) {
       messages.push(...node.agentMessages);
-    } else if (node.options.length > 0) {
+    }
+
+    if (node.options.length > 0) {
       messages.push({ role: "assistant", content: formatEditorSuggestionRound(node) });
     }
 

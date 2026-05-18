@@ -1,4 +1,4 @@
-import type { BranchOption, DirectorNextStepOutput, DirectorOptionsOutput } from "@/lib/domain";
+import type { BranchOption, DirectorNextStepOutput, DirectorOptionsOutput, DirectorTurnOutput } from "@/lib/domain";
 import { DirectorArtifactOutputSchema, type DirectorArtifactOutput } from "./director";
 import { logTritreeAiDebug } from "./debug-log";
 import {
@@ -6,8 +6,8 @@ import {
   streamTreeArtifact,
   streamTreeNextStep,
   streamTreeOptions,
+  streamTreeTurn,
   type DirectorAgentTrace,
-  type MemoryScope,
   type ProcessDataDisplay
 } from "./mastra-executor";
 import type { DirectorInputParts } from "./prompts";
@@ -15,10 +15,10 @@ import type { DirectorInputParts } from "./prompts";
 export type DirectorNextStepStreamResult = DirectorNextStepOutput & DirectorAgentTrace;
 export type DirectorArtifactStreamResult = DirectorArtifactOutput & DirectorAgentTrace;
 export type DirectorOptionsStreamResult = DirectorOptionsOutput & DirectorAgentTrace;
+export type DirectorTurnStreamResult = DirectorTurnOutput & DirectorAgentTrace;
 
 type DirectorArtifactStreamOptions = {
   env?: Record<string, string | undefined>;
-  memory?: MemoryScope;
   onText?: (event: {
     delta: string;
     accumulatedText: string;
@@ -31,7 +31,6 @@ type DirectorArtifactStreamOptions = {
 
 type DirectorOptionsStreamOptions = {
   env?: Record<string, string | undefined>;
-  memory?: MemoryScope;
   onText?: (event: {
     delta: string;
     accumulatedText: string;
@@ -45,10 +44,23 @@ type DirectorOptionsStreamOptions = {
 
 type DirectorNextStepOptions = {
   env?: Record<string, string | undefined>;
-  memory?: MemoryScope;
   onText?: (event: {
     delta: string;
     accumulatedText: string;
+    partialOptions: BranchOption[] | null;
+    partialRoundIntent: string | null;
+  }) => void;
+  onProcessData?: (data: ProcessDataDisplay) => void;
+  onReasoningText?: (event: { delta: string; accumulatedText: string }) => void;
+  signal?: AbortSignal;
+};
+
+type DirectorTurnStreamOptions = {
+  env?: Record<string, string | undefined>;
+  onText?: (event: {
+    delta: string;
+    accumulatedText: string;
+    partialArtifact: { type: string; payload: Record<string, unknown> } | null;
     partialOptions: BranchOption[] | null;
     partialRoundIntent: string | null;
   }) => void;
@@ -69,7 +81,6 @@ export async function decideDirectorNextStep(
   const output = await generateTreeNextStep({
     parts,
     env: options.env,
-    memory: options.memory,
     signal: options.signal
   });
     logTritreeAiDebug("director-stream", "next-step-output", {
@@ -115,7 +126,6 @@ export async function streamDirectorNextStep(
   const output = await streamTreeNextStep({
     parts,
     env: options.env,
-    memory: options.memory,
     signal: options.signal,
     onPartialObject: emit,
     onProcessData: options.onProcessData,
@@ -125,6 +135,59 @@ export async function streamDirectorNextStep(
     action: output.action,
     roundIntent: output.roundIntent,
     optionCount: output.action === "options" ? output.options.length : 0
+  });
+  emit(withoutAgentTrace(output));
+  return output;
+}
+
+export async function streamDirectorTurn(
+  parts: DirectorInputParts,
+  options: DirectorTurnStreamOptions = {}
+): Promise<DirectorTurnStreamResult> {
+  let accumulatedText = "";
+  const emit = (value: unknown) => {
+    const text = JSON.stringify(value);
+    if (!text || text === accumulatedText) return;
+    accumulatedText = text;
+    const partialArtifact = extractPartialDirectorArtifact(accumulatedText);
+    const partialOptions = extractPartialDirectorOptions(accumulatedText);
+    const partialRoundIntent = extractStringField(accumulatedText, "roundIntent") || null;
+    logTritreeAiDebug("director-stream", "turn-emit", {
+      action: isRecord(value) ? value.action : undefined,
+      chars: accumulatedText.length,
+      hasPartialArtifact: Boolean(partialArtifact),
+      hasPartialOptions: Boolean(partialOptions),
+      hasPartialRoundIntent: Boolean(partialRoundIntent),
+      optionCount: partialOptions?.length ?? 0,
+      optionLabels: partialOptions?.map((option) => option.label) ?? []
+    });
+    options.onText?.({
+      delta: text,
+      accumulatedText,
+      partialArtifact,
+      partialOptions,
+      partialRoundIntent
+    });
+  };
+
+  logTritreeAiDebug("director-stream", "turn-start", {
+    rootChars: parts.rootSummary.length,
+    currentArtifactChars: parts.currentArtifact.length,
+    messageCount: parts.messages.length
+  });
+  const output = await streamTreeTurn({
+    parts,
+    env: options.env,
+    signal: options.signal,
+    onPartialObject: emit,
+    onProcessData: options.onProcessData,
+    onReasoningText: options.onReasoningText
+  });
+  logTritreeAiDebug("director-stream", "turn-output", {
+    action: output.action,
+    roundIntent: output.roundIntent,
+    optionCount: output.action === "options" ? output.options.length : 0,
+    hasArtifact: output.action === "artifact" ? Boolean(output.artifact) : false
   });
   emit(withoutAgentTrace(output));
   return output;
@@ -161,7 +224,6 @@ export async function streamDirectorArtifact(
   const outputWithTrace = await streamTreeArtifact({
     parts,
     env: options.env,
-    memory: options.memory,
     signal: options.signal,
     onPartialObject: emit,
     onProcessData: options.onProcessData,
@@ -211,7 +273,6 @@ export async function streamDirectorOptions(
   const output = await streamTreeOptions({
     parts,
     env: options.env,
-    memory: options.memory,
     signal: options.signal,
     onPartialObject: emit,
     onProcessData: options.onProcessData,

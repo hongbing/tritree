@@ -1057,7 +1057,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     let receivedOptions = false;
     let receivedThinking = false;
     let receivedProcessData = false;
-    let receivedDone = false;
     let streamError: string | null = null;
     const completeOptionPreviewNodeIds = new Set<string>();
     const decoder = new TextDecoder();
@@ -1110,9 +1109,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
         if (completedArtifact) {
           setStreamingArtifact({ nodeId, artifact: completedArtifact });
         }
-        receivedDone = true;
         setStreamingThinking(null);
-        setStreamingProcessMaterials(null);
         return;
       }
 
@@ -1121,12 +1118,11 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       }
     });
     const maybeAllowArtifactRender = async () => {
-      const shouldAllowArtifactRender = (receivedArtifact || receivedOptions || receivedThinking || receivedProcessData) && !receivedDone;
+      const shouldAllowArtifactRender = receivedArtifact || receivedOptions || receivedThinking || receivedProcessData;
       receivedArtifact = false;
       receivedOptions = false;
       receivedThinking = false;
       receivedProcessData = false;
-      receivedDone = false;
       if (shouldAllowArtifactRender) await allowArtifactRender();
     };
 
@@ -1187,7 +1183,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     let receivedOptions = false;
     let receivedThinking = false;
     let receivedProcessData = false;
-    let receivedDone = false;
     const completeOptionPreviewNodeIds = new Set<string>();
     const decoder = new TextDecoder();
     const reader = response.body.getReader();
@@ -1218,11 +1213,9 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
 
       if (value.type === "done") {
         doneState = value.state;
-        receivedDone = true;
         setGenerationStage(null);
         setStreamingOptions(null);
         setStreamingThinking(null);
-        setStreamingProcessMaterials(null);
         return;
       }
 
@@ -1231,11 +1224,10 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       }
     });
     const maybeAllowOptionsRender = async () => {
-      const shouldAllowOptionsRender = (receivedOptions || receivedThinking || receivedProcessData) && !receivedDone;
+      const shouldAllowOptionsRender = receivedOptions || receivedThinking || receivedProcessData;
       receivedOptions = false;
       receivedThinking = false;
       receivedProcessData = false;
-      receivedDone = false;
       if (shouldAllowOptionsRender) await allowArtifactRender();
     };
 

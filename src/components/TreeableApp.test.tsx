@@ -470,6 +470,10 @@ function controlledNdjsonResponse() {
       if (!controller) throw new Error("stream controller is not ready");
       controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
     },
+    pushChunk(...values: unknown[]) {
+      if (!controller) throw new Error("stream controller is not ready");
+      controller.enqueue(encoder.encode(values.map((value) => JSON.stringify(value)).join("\n") + "\n"));
+    },
     close() {
       controller?.close();
     }
@@ -3210,6 +3214,82 @@ describe("TreeableApp", () => {
     act(() => {
       artifactStream.push({ type: "options", nodeId: "node-2", roundIntent: "你想怎么使用这些参考？", options: finalOptions });
       artifactStream.push({ type: "done", state: optionsState });
+      artifactStream.close();
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId("canvas-generation-stage")).toHaveTextContent("idle");
+    });
+  });
+
+  it("paints process data even when the stream batches it with done", async () => {
+    const childNode = {
+      ...activeState.currentNode,
+      id: "node-2",
+      parentId: "node-1",
+      parentOptionId: "a" as const,
+      kind: "analysis" as const,
+      producedArtifactId: null,
+      sourceArtifactIds: ["artifact-1"],
+      roundIndex: 2,
+      roundIntent: "A",
+      options: []
+    };
+    const nodeOnlyState = {
+      ...activeState,
+      session: { ...activeState.session, currentNodeId: "node-2" },
+      currentNode: childNode,
+      currentArtifact: null,
+      artifacts: [activeState.currentArtifact],
+      selectedPath: [activeState.currentNode, childNode],
+      treeNodes: [activeState.currentNode, childNode]
+    };
+    const optionsState = {
+      ...nodeOnlyState,
+      currentNode: {
+        ...nodeOnlyState.currentNode,
+        roundIntent: "你想怎么使用这些参考？",
+        options: [
+          { id: "a", label: "用参考做开头", description: "A", impact: "A", kind: "explore" },
+          { id: "b", label: "做资料整理", description: "B", impact: "B", kind: "deepen" },
+          { id: "c", label: "直接改稿", description: "C", impact: "C", kind: "finish" }
+        ]
+      }
+    };
+    const artifactStream = controlledNdjsonResponse();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: activeState }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: nodeOnlyState }) })
+      .mockResolvedValueOnce(artifactStream.response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "choose displayed option" }));
+
+    act(() => {
+      artifactStream.pushChunk(
+        {
+          type: "process_data",
+          nodeId: "node-2",
+          data: {
+            title: "参考材料",
+            sourceToolCallIds: ["tool-1"],
+            items: [{ title: "参考条目 A", subtitle: "内容参考" }]
+          }
+        },
+        { type: "done", state: optionsState }
+      );
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId("live-process-materials")).toHaveTextContent("参考条目 A");
+    });
+
+    act(() => {
       artifactStream.close();
     });
 

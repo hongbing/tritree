@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DirectorNextStepOutputSchema, DirectorOptionsOutputSchema, type Skill } from "@/lib/domain";
+import type { Skill } from "@/lib/domain";
 import { createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-agents";
 import {
-  generateTreeDraft,
+  generateTreeArtifact,
   generateTreeNextStep,
-  streamTreeDraft,
+  streamTreeArtifact,
   streamTreeNextStep,
   streamTreeOptions
 } from "./mastra-executor";
@@ -47,7 +47,7 @@ const enabledSkills: Skill[] = [
     id: "writer-skill",
     title: "自然短句",
     category: "风格",
-    description: "草稿更自然。",
+    description: "作品更自然。",
     prompt: "句子短一点。",
     appliesTo: "writer",
     isSystem: false,
@@ -91,18 +91,12 @@ beforeEach(() => {
   modelFactory.mockClear();
   mocks.createAnthropic.mockReturnValue(modelFactory);
   mocks.createSkillRuntimeTools.mockResolvedValue({ toolSummaries: [], tools: {} });
+  mocks.createMcpRuntimeTools.mockResolvedValue({ disconnect: vi.fn(), toolSummaries: [], tools: {} });
   mocks.createSubagentRuntimeTools.mockReturnValue({
     subagentTemplateSummaries: ["material-search｜搜索资料：围绕给定主题快速寻找可用素材。"],
-    toolSummaries: [
-      "run_subagent_template：运行预创建子代理模板。",
-      "run_custom_subagent：运行自定义子代理。"
-    ],
-    tools: {
-      run_subagent_template: { id: "run_subagent_template", description: "Run template", execute: vi.fn() },
-      run_custom_subagent: { id: "run_custom_subagent", description: "Run custom", execute: vi.fn() }
-    }
+    toolSummaries: [],
+    tools: {}
   });
-  mocks.createMcpRuntimeTools.mockResolvedValue({ disconnect: vi.fn(), toolSummaries: [], tools: {} });
   mocks.agentConstructor.mockImplementation(function Agent(options) {
     return {
       options,
@@ -185,9 +179,10 @@ describe("createTreeOptionsAgent", () => {
 
 describe("tree director compatibility generators", () => {
   const directorParts: DirectorInputParts = {
+    artifactContext: "",
     rootSummary: "Seed：写一篇解释为什么要写作的文章",
     learnedSummary: "用户喜欢具体表达。",
-    currentDraft: "标题：写作为什么重要\n正文：写作让我想清楚事情。",
+    currentArtifact: "标题：写作为什么重要\n正文：写作让我想清楚事情。",
     pathSummary: "第 1 轮：选择起始方式",
     foldedSummary: "暂无未选方向。",
     selectedOptionLabel: "A 继续完善",
@@ -199,37 +194,33 @@ describe("tree director compatibility generators", () => {
     ]
   };
 
-  it("passes all enabled skills to the draft agent", async () => {
+  it("passes all enabled skills to the artifact agent", async () => {
     const fakeAgent = {
       generate: vi.fn(async () => ({
         object: {
           roundIntent: "继续完善",
-          draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+          artifact: { type: "social-post", payload: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" } },
         }
       }))
     };
 
-    await generateTreeDraft({
+    await generateTreeArtifact({
       parts: directorParts,
-      treeDraftAgent: fakeAgent
+      treeArtifactAgent: fakeAgent
     });
 
     expect(fakeAgent.generate).toHaveBeenCalled();
     expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "[treeable:mastra-prompt:draft]",
+      "[treeable:mastra-prompt:artifact]",
       expect.stringContaining("自然短句")
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "[treeable:mastra-prompt:draft]",
+      "[treeable:mastra-prompt:artifact]",
       expect.stringContaining("标题不要夸张")
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "[treeable:mastra-prompt:draft]",
+      "[treeable:mastra-prompt:artifact]",
       expect.stringContaining("逻辑链审查")
-    );
-    expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "[treeable:mastra-prompt:draft]",
-      expect.not.stringContaining("# 内容工作流阶段")
     );
   });
 
@@ -267,13 +258,9 @@ describe("tree director compatibility generators", () => {
       "[treeable:mastra-prompt:options]",
       expect.stringContaining("自然短句")
     );
-    expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "[treeable:mastra-prompt:options]",
-      expect.not.stringContaining("# 内容工作流阶段")
-    );
   });
 
-  it("lets the director route a selected choice to either options or draft", async () => {
+  it("lets the director route a selected choice to either options or artifact", async () => {
     const fakeAgent = {
       generate: vi.fn(async () => ({
         object: {
@@ -282,7 +269,7 @@ describe("tree director compatibility generators", () => {
           options: [
             { id: "a", label: "补系统范围", description: "先确认哪些模块要改。", impact: "避免 PRD 编造范围。", kind: "deepen" },
             { id: "b", label: "补目标风格", description: "先确认要改成什么风格。", impact: "让需求更明确。", kind: "reframe" },
-            { id: "c", label: "补验收标准", description: "先确认怎么算改好。", impact: "让后续草稿可执行。", kind: "finish" }
+            { id: "c", label: "补验收标准", description: "先确认怎么算改好。", impact: "让后续作品可执行。", kind: "finish" }
           ],
         }
       }))
@@ -319,70 +306,8 @@ describe("tree director compatibility generators", () => {
     );
   });
 
-  it("parses decision rationale on options and next-step option outputs", () => {
-    const optionsOutput = DirectorOptionsOutputSchema.parse({
-      decisionRationale: "当前没有足够素材，需要让用户选择一个明确方向。",
-      roundIntent: "选择下一步",
-      options: [
-        { id: "a", label: "补具体场景", description: "加入真实场景。", impact: "让文章更具体。", kind: "explore" },
-        { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
-        { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
-      ]
-    });
-    const nextStepOutput = DirectorNextStepOutputSchema.parse({
-      action: "options",
-      decisionRationale: "需要用户先确认切入角度。",
-      roundIntent: "先澄清背景",
-      options: [
-        { label: "补系统范围", description: "先确认哪些模块要改。", impact: "避免 PRD 编造范围。" },
-        { label: "补目标风格", description: "先确认要改成什么风格。", impact: "让需求更明确。" },
-        { label: "补验收标准", description: "先确认怎么算改好。", impact: "让后续草稿可执行。" }
-      ]
-    });
-
-    expect(optionsOutput.decisionRationale).toBe("当前没有足够素材，需要让用户选择一个明确方向。");
-    expect(nextStepOutput).toMatchObject({
-      action: "options",
-      decisionRationale: "需要用户先确认切入角度。",
-      options: [
-        { id: "a", label: "补系统范围", kind: "explore" },
-        { id: "b", label: "补目标风格", kind: "deepen" },
-        { id: "c", label: "补验收标准", kind: "reframe" }
-      ]
-    });
-  });
-
-  it("carries subagent template summaries from context overrides", async () => {
-    const fakeAgent = {
-      generate: vi.fn(async () => ({
-        object: {
-          roundIntent: "继续完善",
-          draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
-        }
-      }))
-    };
-
-    await generateTreeDraft({
-      parts: directorParts,
-      context: {
-        subagentTemplateSummaries: ["资料核查模板：核查一个事实，返回结论和来源。"]
-      },
-      treeDraftAgent: fakeAgent
-    });
-
-    expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "[treeable:mastra-prompt:draft]",
-      expect.stringContaining("# 可用 Subagent 模板")
-    );
-    expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "[treeable:mastra-prompt:draft]",
-      expect.stringContaining("资料核查模板：核查一个事实，返回结论和来源。")
-    );
-  });
-
   it("uses progressive skill context returned by the runtime", async () => {
     const generatedObject = {
-      decisionRationale: "已经由渐进式 Skill 上下文判断出需要给用户三个清晰方向。",
       roundIntent: "选择下一步",
       options: [
         { id: "a", label: "补因果链", description: "第二段跳得太快。", impact: "让读者更容易理解。", kind: "deepen" },
@@ -424,58 +349,7 @@ describe("tree director compatibility generators", () => {
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:options]",
-      expect.stringContaining("material-search")
-    );
-    expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "[treeable:mastra-prompt:options]",
-      expect.stringContaining("run_subagent_template")
-    );
-    expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "[treeable:mastra-prompt:options]",
       expect.not.stringContaining("标题和正文都要克制。")
-    );
-  });
-
-  it("passes director parts to subagent runtime tools as projection source", async () => {
-    const finalObject = {
-      decisionRationale: "需要让用户选择下一步。",
-      roundIntent: "选择下一步",
-      options: [
-        { id: "a", label: "A", description: "A desc", impact: "A impact", kind: "explore" },
-        { id: "b", label: "B", description: "B desc", impact: "B impact", kind: "deepen" },
-        { id: "c", label: "C", description: "C desc", impact: "C impact", kind: "reframe" }
-      ]
-    };
-    const stream = vi.fn(async () => ({
-      fullStream: async function* () {
-        yield {
-          type: "tool-call",
-          payload: {
-            toolName: "submit_tree_options",
-            args: finalObject
-          }
-        };
-      },
-      object: Promise.resolve(undefined)
-    }));
-    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
-      return {
-        options,
-        stream,
-        generate: vi.fn()
-      };
-    });
-
-    await streamTreeOptions({
-      parts: directorParts,
-      env: { KIMI_API_KEY: "token" }
-    });
-
-    expect(mocks.createSubagentRuntimeTools).toHaveBeenCalledWith(
-      expect.objectContaining({
-        contextSource: directorParts,
-        env: { KIMI_API_KEY: "token" }
-      })
     );
   });
 
@@ -485,23 +359,12 @@ describe("tree director compatibility generators", () => {
       description: "Run an installed skill command.",
       execute: vi.fn()
     };
-    const runSubagentTemplate = {
-      id: "run_subagent_template",
-      description: "Run a template subagent.",
-      execute: vi.fn()
-    };
-    const runCustomSubagent = {
-      id: "run_custom_subagent",
-      description: "Run a custom subagent.",
-      execute: vi.fn()
-    };
     const readFile = {
       id: "filesystem_read_file",
       description: "Read a configured file.",
       execute: vi.fn()
     };
     const finalObject = {
-      decisionRationale: "已合并运行时工具上下文，需要让用户选择下一步角度。",
       roundIntent: "选择下一步",
       options: [
         { id: "a", label: "补具体场景", description: "加入真实场景。", impact: "让文章更具体。", kind: "explore" },
@@ -515,17 +378,6 @@ describe("tree director compatibility generators", () => {
       enabledSkills,
       toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
       tools: { run_skill_command: runSkillCommand }
-    });
-    mocks.createSubagentRuntimeTools.mockReturnValueOnce({
-      subagentTemplateSummaries: ["material-search｜搜索资料：围绕给定主题快速寻找可用素材。"],
-      toolSummaries: [
-        "run_subagent_template：运行预创建子代理模板。",
-        "run_custom_subagent：运行自定义子代理。"
-      ],
-      tools: {
-        run_subagent_template: runSubagentTemplate,
-        run_custom_subagent: runCustomSubagent
-      }
     });
     mocks.createMcpRuntimeTools.mockResolvedValueOnce({
       disconnect: vi.fn(),
@@ -547,34 +399,18 @@ describe("tree director compatibility generators", () => {
       env: { KIMI_API_KEY: "token" }
     });
 
-    expect(mocks.createSubagentRuntimeTools).toHaveBeenCalledWith(
-      expect.objectContaining({
-        contextSource: directorParts,
-        env: { KIMI_API_KEY: "token" }
-      })
-    );
     expect(mocks.createMcpRuntimeTools).toHaveBeenCalledWith(
       expect.objectContaining({
-        existingTools: {
-          run_skill_command: runSkillCommand,
-          run_subagent_template: runSubagentTemplate,
-          run_custom_subagent: runCustomSubagent
-        }
+        existingTools: { run_skill_command: runSkillCommand }
       })
     );
     expect(mocks.agentConstructor).toHaveBeenCalledWith(
       expect.objectContaining({
         tools: expect.objectContaining({
           run_skill_command: runSkillCommand,
-          run_subagent_template: runSubagentTemplate,
-          run_custom_subagent: runCustomSubagent,
           filesystem_read_file: readFile
         })
       })
-    );
-    expect(consoleInfoSpy).toHaveBeenCalledWith(
-      "[treeable:mastra-prompt:options]",
-      expect.stringContaining("material-search")
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "[treeable:mastra-prompt:options]",
@@ -586,7 +422,7 @@ describe("tree director compatibility generators", () => {
     const disconnect = vi.fn(async () => undefined);
     const finalObject = {
       roundIntent: "继续完善",
-      draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+      artifact: { type: "social-post", payload: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" }, sourceArtifactIds: [] },
     };
 
     mocks.createMcpRuntimeTools.mockResolvedValueOnce({
@@ -604,7 +440,7 @@ describe("tree director compatibility generators", () => {
       };
     });
 
-    await generateTreeDraft({
+    await generateTreeArtifact({
       parts: directorParts,
       env: { KIMI_API_KEY: "token" }
     });
@@ -632,7 +468,7 @@ describe("tree director compatibility generators", () => {
     });
 
     await expect(
-      generateTreeDraft({
+      generateTreeArtifact({
         parts: directorParts,
         env: { KIMI_API_KEY: "token" }
       })
@@ -649,7 +485,7 @@ describe("tree director compatibility generators", () => {
     });
     const finalObject = {
       roundIntent: "继续完善",
-      draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+      artifact: { type: "social-post", payload: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" }, sourceArtifactIds: [] },
     };
 
     mocks.createMcpRuntimeTools.mockResolvedValueOnce({
@@ -668,7 +504,7 @@ describe("tree director compatibility generators", () => {
     });
 
     await expect(
-      generateTreeDraft({
+      generateTreeArtifact({
         parts: directorParts,
         env: { KIMI_API_KEY: "token" }
       })
@@ -690,14 +526,14 @@ describe("tree director compatibility generators", () => {
       generate: vi.fn(async () => ({
         object: {
           roundIntent: "继续完善",
-          draft: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" },
+          artifact: { type: "social-post", payload: { title: "标题", body: "正文", hashtags: [], imagePrompt: "" } },
         }
       }))
     };
 
-    await generateTreeDraft({
+    await generateTreeArtifact({
       parts: directorParts,
-      treeDraftAgent: fakeAgent
+      treeArtifactAgent: fakeAgent
     });
 
     expect(mocks.createMcpRuntimeTools).not.toHaveBeenCalled();
@@ -710,7 +546,7 @@ describe("tree director compatibility generators", () => {
       options: [
         { id: "a", label: "补系统范围", description: "先确认哪些模块要改。", impact: "避免 PRD 编造范围。", kind: "deepen" },
         { id: "b", label: "补目标风格", description: "先确认要改成什么风格。", impact: "让需求更明确。", kind: "reframe" },
-        { id: "c", label: "补验收标准", description: "先确认怎么算改好。", impact: "让后续草稿可执行。", kind: "finish" }
+        { id: "c", label: "补验收标准", description: "先确认怎么算改好。", impact: "让后续作品可执行。", kind: "finish" }
       ],
     };
     const fakeAgent = {
@@ -728,26 +564,29 @@ describe("tree director compatibility generators", () => {
     expect(mocks.createMcpRuntimeTools).not.toHaveBeenCalled();
   });
 
-  it("generates old UI draft output through a Mastra-compatible structured agent", async () => {
+  it("generates artifact output through a Mastra-compatible structured agent", async () => {
     const fakeAgent = {
       generate: vi.fn(async () => ({
         object: {
           roundIntent: "继续完善",
-          draft: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" },
+          artifact: {
+            type: "social-post",
+            payload: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" }
+          },
         }
       }))
     };
 
     await expect(
-      generateTreeDraft({
+      generateTreeArtifact({
         parts: directorParts,
         signal: new AbortController().signal,
         memory: { resource: "root", thread: "session-1" },
-        treeDraftAgent: fakeAgent
+        treeArtifactAgent: fakeAgent
       })
     ).resolves.toMatchObject({
       roundIntent: "继续完善",
-      draft: { title: "写作为什么重要" }
+      artifact: { type: "social-post", payload: { title: "写作为什么重要" } }
     });
 
     expect(fakeAgent.generate).toHaveBeenCalledWith(
@@ -759,10 +598,32 @@ describe("tree director compatibility generators", () => {
     );
   });
 
-  it("compacts oversized historical agent messages before passing them to the draft agent", async () => {
+  it("rejects work-shaped output from artifact generation", async () => {
+    const fakeAgent = {
+      generate: vi.fn(async () => ({
+        object: {
+          roundIntent: "继续完善",
+          work: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" }
+        }
+      }))
+    };
+
+    await expect(
+      generateTreeArtifact({
+        parts: directorParts,
+        treeArtifactAgent: fakeAgent
+      })
+    ).rejects.toThrow();
+  });
+
+  it("compacts oversized historical agent messages before passing them to the artifact agent", async () => {
     const finalObject = {
       roundIntent: "继续完善",
-      draft: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" },
+      artifact: {
+        type: "social-post",
+        payload: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" },
+        sourceArtifactIds: []
+      },
     };
     const fakeAgent = {
       generate: vi.fn(async () => ({ object: finalObject }))
@@ -787,19 +648,19 @@ describe("tree director compatibility generators", () => {
             }
           ]
         },
-        { role: "user", content: "最终请求：请生成下一版草稿。" }
+        { role: "user", content: "最终请求：请生成下一版作品。" }
       ]
     };
 
     await expect(
-      generateTreeDraft({
+      generateTreeArtifact({
         parts: partsWithLargeHistory,
         env: {
           TRITREE_CONTEXT_SAFETY_TOKENS: "128",
           TRITREE_MAX_OUTPUT_TOKENS: "128",
           TRITREE_MODEL_CONTEXT_TOKENS: "900"
         },
-        treeDraftAgent: fakeAgent
+        treeArtifactAgent: fakeAgent
       })
     ).resolves.toEqual(finalObject);
 
@@ -812,41 +673,48 @@ describe("tree director compatibility generators", () => {
     expect(serialized).not.toContain("RAW_TIMELINE_SHOULD_NOT_BE_REPLAYED");
   });
 
-  it("logs the full generated draft response once by default", async () => {
+  it("logs the full generated artifact response once by default", async () => {
     const finalObject = {
       roundIntent: "继续完善",
-      draft: {
-        title: "写作为什么重要",
-        body: "写作让我想清楚事情。\n\n这一段需要原样出现在日志里。",
-        hashtags: ["#写作"],
-        imagePrompt: "桌面上的笔记"
+      artifact: {
+        type: "social-post",
+        payload: {
+          title: "写作为什么重要",
+          body: "写作让我想清楚事情。\n\n这一段需要原样出现在日志里。",
+          hashtags: ["#写作"],
+          imagePrompt: "桌面上的笔记"
+        }
       },
     };
     const fakeAgent = {
       generate: vi.fn(async () => ({ object: finalObject }))
     };
 
-    await generateTreeDraft({
+    await generateTreeArtifact({
       parts: directorParts,
-      treeDraftAgent: fakeAgent
+      treeArtifactAgent: fakeAgent
     });
 
-    const responseLogs = consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-response:draft]");
+    const responseLogs = consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-response:artifact]");
     expect(responseLogs).toHaveLength(1);
     expect(responseLogs[0]?.[1]).toContain('"mode": "generate"');
     expect(responseLogs[0]?.[1]).toContain("这一段需要原样出现在日志里。");
   });
 
-  it("streams partial old UI draft objects before returning the final object", async () => {
+  it("streams partial artifact objects before returning the final object", async () => {
     const finalObject = {
       roundIntent: "继续完善",
-      draft: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" },
+      artifact: {
+        type: "social-post",
+        payload: { title: "写作为什么重要", body: "写作让我想清楚事情。", hashtags: ["#写作"], imagePrompt: "桌面上的笔记" },
+        sourceArtifactIds: []
+      },
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({
         objectStream: async function* () {
-          yield { roundIntent: "继续完善", draft: { title: "写作为什么重要" } };
-          yield { roundIntent: "继续完善", draft: { title: "写作为什么重要", body: "写作让我想清楚事情。" } };
+          yield { roundIntent: "继续完善", artifact: { type: "social-post", payload: { title: "写作为什么重要" } } };
+          yield { roundIntent: "继续完善", artifact: { type: "social-post", payload: { title: "写作为什么重要", body: "写作让我想清楚事情。" } } };
         },
         object: Promise.resolve(finalObject)
       })),
@@ -855,10 +723,10 @@ describe("tree director compatibility generators", () => {
     const partials: unknown[] = [];
 
     await expect(
-      streamTreeDraft({
+      streamTreeArtifact({
         parts: directorParts,
         memory: { resource: "root", thread: "session-1" },
-        treeDraftAgent: fakeAgent,
+        treeArtifactAgent: fakeAgent,
         onPartialObject: (partial) => partials.push(partial)
       })
     ).resolves.toEqual(finalObject);
@@ -872,8 +740,8 @@ describe("tree director compatibility generators", () => {
     );
     expect(fakeAgent.generate).not.toHaveBeenCalled();
     expect(partials).toEqual([
-      { roundIntent: "继续完善", draft: { title: "写作为什么重要" } },
-      { roundIntent: "继续完善", draft: { title: "写作为什么重要", body: "写作让我想清楚事情。" } }
+      { roundIntent: "继续完善", artifact: { type: "social-post", payload: { title: "写作为什么重要" } } },
+      { roundIntent: "继续完善", artifact: { type: "social-post", payload: { title: "写作为什么重要", body: "写作让我想清楚事情。" } } }
     ]);
   });
 
@@ -1379,7 +1247,6 @@ describe("tree director compatibility generators", () => {
       execute: vi.fn()
     };
     const finalObject = {
-      decisionRationale: "已经通过工具结果判断下一步选择范围，需要用三选项让用户确认。",
       roundIntent: "选择下一步",
       options: [
         { id: "a", label: "补具体场景", description: "加入真实场景。", impact: "让文章更具体。", kind: "explore" },
@@ -1456,7 +1323,7 @@ describe("tree director compatibility generators", () => {
     expect(progressEvents.map((event) => event.accumulatedText).join("\n")).not.toContain("```json");
   });
 
-  it("retries runtime draft JSON text until the final submit tool is called", async () => {
+  it("retries runtime artifact JSON text until the final submit tool is called", async () => {
     const runSkillCommand = {
       id: "run_skill_command",
       description: "Run an installed skill command.",
@@ -1464,11 +1331,14 @@ describe("tree director compatibility generators", () => {
     };
     const finalObject = {
       roundIntent: "继续成稿",
-      draft: {
-        title: "青岛反攻略",
-        body: "第一段继续写完整。",
-        hashtags: ["#青岛"],
-        imagePrompt: "青岛老城街道"
+      artifact: {
+        type: "social-post",
+        payload: {
+          title: "青岛反攻略",
+          body: "第一段继续写完整。",
+          hashtags: ["#青岛"],
+          imagePrompt: "青岛老城街道"
+        }
       },
     };
     const stream = vi
@@ -1497,7 +1367,7 @@ describe("tree director compatibility generators", () => {
             type: "tool-call",
             payload: {
               toolCallId: "submit-1",
-              toolName: "submit_tree_draft",
+              toolName: "submit_tree_artifact",
               args: finalObject
             }
           };
@@ -1519,19 +1389,19 @@ describe("tree director compatibility generators", () => {
     const progressEvents: Array<{ delta: string; accumulatedText: string }> = [];
 
     await expect(
-      streamTreeDraft({
+      streamTreeArtifact({
         parts: directorParts,
         env: { KIMI_API_KEY: "token" },
         onReasoningText: (event) => progressEvents.push(event)
       })
     ).resolves.toMatchObject({
       roundIntent: finalObject.roundIntent,
-      draft: finalObject.draft
+      artifact: finalObject.artifact
     });
 
     expect(stream).toHaveBeenCalledTimes(2);
     const retryMessages = stream.mock.calls[1]?.[0] as Array<{ content: string; role: string }>;
-    expect(retryMessages.at(-1)?.content).toContain("必须调用 submit_tree_draft");
+    expect(retryMessages.at(-1)?.content).toContain("必须调用 submit_tree_artifact");
     expect(generate).not.toHaveBeenCalled();
     const visibleProgress = progressEvents.map((event) => event.accumulatedText).join("\n");
     expect(visibleProgress).not.toContain("roundIntent");
@@ -2057,7 +1927,7 @@ describe("tree director compatibility generators", () => {
     );
     expect(mocks.agentConstructor).toHaveBeenCalledWith(
       expect.objectContaining({
-        instructions: expect.stringContaining("最终目标就是调用 submit_tree_options 完成本轮 options 任务")
+        instructions: expect.stringContaining("最终目标就是调用 submit_tree_options 完成本轮澄清选项任务")
       })
     );
     const streamOptions = (stream.mock.calls as unknown as Array<[unknown, Record<string, unknown>]>)[0]?.[1];
@@ -2092,6 +1962,10 @@ describe("tree director compatibility generators", () => {
       },
       object: Promise.resolve(undefined)
     }));
+    mocks.createSkillRuntimeTools.mockResolvedValueOnce({
+      toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
+      tools: { run_skill_command: { id: "run_skill_command", description: "Run command.", execute: vi.fn() } }
+    });
     mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
       return {
         options,
@@ -2108,313 +1982,6 @@ describe("tree director compatibility generators", () => {
     ).resolves.toMatchObject(finalObject);
 
     expect(stream).toHaveBeenCalledTimes(1);
-  });
-
-  it("accepts runtime options without decision rationale after non-final subagent tool activity", async () => {
-    const finalObject = {
-      roundIntent: "选择差异化角度",
-      options: [
-        { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略，聚焦低幼家庭。", impact: "目标读者更明确。", kind: "explore" },
-        { id: "b", label: "做反攻略", description: "把热门打卡点改成避坑判断。", impact: "和保姆级攻略拉开距离。", kind: "reframe" },
-        { id: "c", label: "做实时决策表", description: "根据天气和拥挤度组织内容。", impact: "更像工具而不是普通长文。", kind: "deepen" }
-      ]
-    };
-    const stream = vi.fn(async () => ({
-      fullStream: async function* () {
-        yield {
-          type: "tool-result",
-          payload: {
-            toolCallId: "tool-1",
-            toolName: "run_subagent_template",
-            result: {
-              ok: true,
-              output: "已分析可选方向。"
-            }
-          }
-        };
-        yield {
-          type: "tool-call",
-          payload: {
-            toolCallId: "submit-1",
-            toolName: "submit_tree_options",
-            args: finalObject
-          }
-        };
-      },
-      object: Promise.resolve(undefined)
-    }));
-    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
-      return {
-        options,
-        stream,
-        generate: vi.fn()
-      };
-    });
-
-    await expect(
-      streamTreeOptions({
-        parts: directorParts,
-        env: { KIMI_API_KEY: "token" }
-      })
-    ).resolves.toMatchObject(finalObject);
-
-    expect(stream).toHaveBeenCalledTimes(1);
-  });
-
-  it("streams subagent tool activity with template title, task, and completion status", async () => {
-    const finalObject = {
-      roundIntent: "选择差异化角度",
-      options: [
-        { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略。", impact: "目标读者更明确。", kind: "explore" },
-        { id: "b", label: "做反攻略", description: "写成避坑判断。", impact: "角度更鲜明。", kind: "reframe" },
-        { id: "c", label: "做实时决策表", description: "按天气组织内容。", impact: "更像工具。", kind: "deepen" }
-      ]
-    };
-    const stream = vi.fn(async () => ({
-      fullStream: async function* () {
-        yield {
-          type: "tool-call",
-          payload: {
-            toolCallId: "subagent-1",
-            toolName: "run_subagent_template",
-            args: {
-              templateId: "material-search",
-              task: "找三条低幼家庭可用素材"
-            }
-          }
-        };
-        yield {
-          type: "tool-result",
-          payload: {
-            toolCallId: "subagent-1",
-            toolName: "run_subagent_template",
-            result: {
-              ok: true,
-              result: "三条素材",
-              templateId: "material-search",
-              title: "搜索资料"
-            }
-          }
-        };
-        yield {
-          type: "tool-call",
-          payload: {
-            toolCallId: "submit-1",
-            toolName: "submit_tree_options",
-            args: {
-              decisionRationale: "子代理素材已检查，可以给用户三个角度。",
-              ...finalObject
-            }
-          }
-        };
-      },
-      object: Promise.resolve(undefined)
-    }));
-    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
-      return {
-        options,
-        stream,
-        generate: vi.fn()
-      };
-    });
-    const progressEvents: Array<{ accumulatedText: string; delta: string }> = [];
-
-    await expect(
-      streamTreeOptions({
-        parts: directorParts,
-        env: { KIMI_API_KEY: "token" },
-        onReasoningText: (event) => progressEvents.push(event)
-      })
-    ).resolves.toMatchObject(finalObject);
-
-    expect(progressEvents.at(-1)?.accumulatedText).toContain("[子代理] 运行 搜索资料");
-    expect(progressEvents.at(-1)?.accumulatedText).toContain("找三条低幼家庭可用素材");
-    expect(progressEvents.at(-1)?.accumulatedText).toContain("[子代理] 搜索资料 完成，主 agent 正在检查返回值");
-    expect(progressEvents.at(-1)?.accumulatedText).not.toContain("run_subagent_template");
-  });
-
-  it("does not expose partial custom subagent arguments while streaming tool input", async () => {
-    const finalObject = {
-      roundIntent: "选择差异化角度",
-      options: [
-        { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略。", impact: "目标读者更明确。", kind: "explore" },
-        { id: "b", label: "做反攻略", description: "写成避坑判断。", impact: "角度更鲜明。", kind: "reframe" },
-        { id: "c", label: "做实时决策表", description: "按天气组织内容。", impact: "更像工具。", kind: "deepen" }
-      ]
-    };
-    const stream = vi.fn(async () => ({
-      fullStream: async function* () {
-        yield {
-          type: "tool-call-streaming-start",
-          payload: {
-            toolCallId: "custom-subagent-1",
-            toolName: "run_custom_subagent"
-          }
-        };
-        yield {
-          type: "tool-call-delta",
-          payload: {
-            toolCallId: "custom-subagent-1",
-            toolName: "run_custom_subagent",
-            argsTextDelta: '{"title":"社'
-          }
-        };
-        yield {
-          type: "tool-call-delta",
-          payload: {
-            toolCallId: "custom-subagent-1",
-            toolName: "run_custom_subagent",
-            argsTextDelta: '媒写手","task":"把这个方案写成一篇完整草稿","expectedOutput":"返回一版草稿"}'
-          }
-        };
-        yield {
-          type: "tool-call",
-          payload: {
-            toolCallId: "submit-1",
-            toolName: "submit_tree_options",
-            args: finalObject
-          }
-        };
-      },
-      object: Promise.resolve(undefined)
-    }));
-    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
-      return {
-        options,
-        stream,
-        generate: vi.fn()
-      };
-    });
-    const progressEvents: Array<{ accumulatedText: string; delta: string }> = [];
-
-    await expect(
-      streamTreeOptions({
-        parts: directorParts,
-        env: { KIMI_API_KEY: "token" },
-        onReasoningText: (event) => progressEvents.push(event)
-      })
-    ).resolves.toMatchObject(finalObject);
-
-    const visibleProgress = progressEvents.map((event) => event.accumulatedText).join("\n");
-    expect(visibleProgress).toContain("[子代理] 准备运行 自定义子代理");
-    expect(visibleProgress).not.toContain("run_custom_subagent");
-    expect(visibleProgress).not.toContain("社媒写手");
-    expect(visibleProgress).not.toContain("把这个方案写成一篇完整草稿");
-  });
-
-  it("accepts runtime options without decision rationale after nested non-final subagent tool activity", async () => {
-    const finalObject = {
-      roundIntent: "选择差异化角度",
-      options: [
-        { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略，聚焦低幼家庭。", impact: "目标读者更明确。", kind: "explore" },
-        { id: "b", label: "做反攻略", description: "把热门打卡点改成避坑判断。", impact: "和保姆级攻略拉开距离。", kind: "reframe" },
-        { id: "c", label: "做实时决策表", description: "根据天气和拥挤度组织内容。", impact: "更像工具而不是普通长文。", kind: "deepen" }
-      ]
-    };
-    const stream = vi.fn(async () => ({
-      fullStream: async function* () {
-        yield {
-          type: "agent-execution-event-tool-result",
-          payload: {
-            type: "tool-result",
-            payload: {
-              toolCallId: "tool-1",
-              toolName: "run_subagent_template",
-              result: {
-                ok: true,
-                output: "已分析可选方向。"
-              }
-            }
-          }
-        };
-        yield {
-          type: "tool-call",
-          payload: {
-            toolCallId: "submit-1",
-            toolName: "submit_tree_options",
-            args: finalObject
-          }
-        };
-      },
-      object: Promise.resolve(undefined)
-    }));
-    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
-      return {
-        options,
-        stream,
-        generate: vi.fn()
-      };
-    });
-
-    await expect(
-      streamTreeOptions({
-        parts: directorParts,
-        env: { KIMI_API_KEY: "token" }
-      })
-    ).resolves.toMatchObject(finalObject);
-
-    expect(stream).toHaveBeenCalledTimes(1);
-  });
-
-  it("accepts runtime next-step draft and complete actions without decision rationale", async () => {
-    const draftObject = {
-      action: "draft",
-      roundIntent: "当前信息足够，继续写草稿。"
-    };
-    const completeObject = {
-      action: "complete",
-      roundIntent: "当前发布包已完成。"
-    };
-    const stream = vi
-      .fn()
-      .mockResolvedValueOnce({
-        fullStream: async function* () {
-          yield {
-            type: "tool-call",
-            payload: {
-              toolCallId: "submit-1",
-              toolName: "submit_tree_next_step",
-              args: draftObject
-            }
-          };
-        },
-        object: Promise.resolve(undefined)
-      })
-      .mockResolvedValueOnce({
-        fullStream: async function* () {
-          yield {
-            type: "tool-call",
-            payload: {
-              toolCallId: "submit-2",
-              toolName: "submit_tree_next_step",
-              args: completeObject
-            }
-          };
-        },
-        object: Promise.resolve(undefined)
-      });
-    mocks.agentConstructor.mockImplementation(function Agent(options) {
-      return {
-        options,
-        stream,
-        generate: vi.fn()
-      };
-    });
-
-    await expect(
-      streamTreeNextStep({
-        parts: directorParts,
-        env: { KIMI_API_KEY: "token" }
-      })
-    ).resolves.toMatchObject(draftObject);
-    await expect(
-      streamTreeNextStep({
-        parts: directorParts,
-        env: { KIMI_API_KEY: "token" }
-      })
-    ).resolves.toMatchObject(completeObject);
-
-    expect(stream).toHaveBeenCalledTimes(2);
   });
 
   it("accepts runtime final next-step decisions only through the submit_tree_next_step tool", async () => {
@@ -2643,7 +2210,7 @@ describe("tree director compatibility generators", () => {
     });
 
     await expect(
-      streamTreeDraft({
+      streamTreeArtifact({
         parts: directorParts,
         env: { KIMI_API_KEY: "token" },
         signal: abortController.signal
@@ -2652,11 +2219,11 @@ describe("tree director compatibility generators", () => {
 
     expect(stream).toHaveBeenCalledTimes(1);
     expect(
-      consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-response:draft:stream-parse-failed-details]")
+      consoleInfoSpy.mock.calls.filter(([label]) => label === "[tritree:ai-response:artifact:stream-parse-failed-details]")
     ).toEqual([]);
     expect(
       consoleInfoSpy.mock.calls.filter(
-        ([label, payload]) => label === "[tritree:ai-response:draft]" && String(payload).includes("stream-parse-failed")
+        ([label, payload]) => label === "[tritree:ai-response:artifact]" && String(payload).includes("stream-parse-failed")
       )
     ).toEqual([]);
   });
@@ -2668,7 +2235,6 @@ describe("tree director compatibility generators", () => {
       execute: vi.fn()
     };
     const finalObject = {
-      decisionRationale: "此测试关注提交后停止消费，因此用明确理由表示当前只需要用户选择。",
       roundIntent: "选择差异化角度",
       options: [
         { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略，聚焦低幼家庭。", impact: "目标读者更明确。", kind: "explore" },
@@ -2728,7 +2294,6 @@ describe("tree director compatibility generators", () => {
       execute: vi.fn()
     };
     const finalObject = {
-      decisionRationale: "此测试关注 submit 参数增量，因此用明确理由表示当前只需要用户选择。",
       roundIntent: "选择差异化角度",
       options: [
         { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略，聚焦低幼家庭。", impact: "目标读者更明确。", kind: "explore" },
@@ -2794,7 +2359,6 @@ describe("tree director compatibility generators", () => {
       execute: vi.fn()
     };
     const finalObject = {
-      decisionRationale: "此测试关注提交后停止消费，因此用明确理由表示当前只需要用户选择。",
       roundIntent: "选择差异化角度",
       options: [
         { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略，聚焦低幼家庭。", impact: "目标读者更明确。", kind: "explore" },
@@ -2853,7 +2417,6 @@ describe("tree director compatibility generators", () => {
       execute: vi.fn()
     };
     const finalObject = {
-      decisionRationale: "此测试关注 submit 参数增量，因此用明确理由表示当前只需要用户选择。",
       roundIntent: "选择差异化角度",
       options: [
         { id: "a", label: "面向低幼家庭", description: "避开泛泛攻略，聚焦低幼家庭。", impact: "目标读者更明确。", kind: "explore" },
@@ -2931,7 +2494,7 @@ describe("tree director compatibility generators", () => {
     expect(partials).toContainEqual(finalObject);
   });
 
-  it("streams submit_tree_draft argument deltas as partial draft objects instead of progress text", async () => {
+  it("streams submit_tree_artifact argument deltas as partial artifact objects instead of progress text", async () => {
     const runSkillCommand = {
       id: "run_skill_command",
       description: "Run an installed skill command.",
@@ -2939,11 +2502,14 @@ describe("tree director compatibility generators", () => {
     };
     const finalObject = {
       roundIntent: "继续成稿",
-      draft: {
-        title: "青岛反攻略",
-        body: "第一段继续写完整。",
-        hashtags: ["#青岛"],
-        imagePrompt: "青岛老城街道"
+      artifact: {
+        type: "social-post",
+        payload: {
+          title: "青岛反攻略",
+          body: "第一段继续写完整。",
+          hashtags: ["#青岛"],
+          imagePrompt: "青岛老城街道"
+        }
       },
     };
     const stream = vi.fn(async () => ({
@@ -2952,30 +2518,30 @@ describe("tree director compatibility generators", () => {
           type: "tool-call-streaming-start",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft"
+            toolName: "submit_tree_artifact"
           }
         };
         yield {
           type: "tool-call-delta",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft",
-            argsTextDelta: '{"roundIntent":"继续成稿","draft":{"title":"青岛反攻略","body":"第一段'
+            toolName: "submit_tree_artifact",
+            argsTextDelta: '{"roundIntent":"继续成稿","artifact":{"type":"social-post","payload":{"title":"青岛反攻略","body":"第一段'
           }
         };
         yield {
           type: "tool-call-delta",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft",
-            argsTextDelta: '继续写完整。","hashtags":["#青岛"],"imagePrompt":"青岛老城街道"}'
+            toolName: "submit_tree_artifact",
+            argsTextDelta: '继续写完整。","hashtags":["#青岛"],"imagePrompt":"青岛老城街道"}}'
           }
         };
         yield {
           type: "tool-call",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft",
+            toolName: "submit_tree_artifact",
             args: finalObject
           }
         };
@@ -2997,7 +2563,7 @@ describe("tree director compatibility generators", () => {
     const progressEvents: Array<{ delta: string; accumulatedText: string }> = [];
 
     await expect(
-      streamTreeDraft({
+      streamTreeArtifact({
         parts: directorParts,
         env: { KIMI_API_KEY: "token" },
         onPartialObject: (partial) => partials.push(partial),
@@ -3005,23 +2571,23 @@ describe("tree director compatibility generators", () => {
       })
     ).resolves.toMatchObject({
       roundIntent: finalObject.roundIntent,
-      draft: finalObject.draft
+      artifact: finalObject.artifact
     });
 
     expect(progressEvents).toEqual([]);
     expect(mocks.agentConstructor).toHaveBeenCalledWith(
       expect.objectContaining({
-        instructions: expect.stringContaining("最终目标就是调用 submit_tree_draft 完成本轮 draft 任务")
+        instructions: expect.stringContaining("submit_tree_artifact")
       })
     );
     expect(partials[0]).toMatchObject({
       roundIntent: "继续成稿",
-      draft: { title: "青岛反攻略", body: "第一段" }
+      artifact: { type: "social-post", payload: { title: "青岛反攻略", body: "第一段" } }
     });
     expect(partials).toContainEqual(finalObject);
   });
 
-  it("does not expose incomplete escaped newlines from submit_tree_draft argument deltas", async () => {
+  it("does not expose incomplete escaped newlines from submit_tree_artifact argument deltas", async () => {
     const runSkillCommand = {
       id: "run_skill_command",
       description: "Run an installed skill command.",
@@ -3029,11 +2595,14 @@ describe("tree director compatibility generators", () => {
     };
     const finalObject = {
       roundIntent: "继续成稿",
-      draft: {
-        title: "青岛反攻略",
-        body: "第一段。\n\n第二段。",
-        hashtags: ["#青岛"],
-        imagePrompt: "青岛老城街道"
+      artifact: {
+        type: "social-post",
+        payload: {
+          title: "青岛反攻略",
+          body: "第一段。\n\n第二段。",
+          hashtags: ["#青岛"],
+          imagePrompt: "青岛老城街道"
+        }
       },
     };
     const stream = vi.fn(async () => ({
@@ -3042,30 +2611,30 @@ describe("tree director compatibility generators", () => {
           type: "tool-call-streaming-start",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft"
+            toolName: "submit_tree_artifact"
           }
         };
         yield {
           type: "tool-call-delta",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft",
-            argsTextDelta: '{"roundIntent":"继续成稿","draft":{"title":"青岛反攻略","body":"第一段。\\'
+            toolName: "submit_tree_artifact",
+            argsTextDelta: '{"roundIntent":"继续成稿","artifact":{"type":"social-post","payload":{"title":"青岛反攻略","body":"第一段。\\'
           }
         };
         yield {
           type: "tool-call-delta",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft",
-            argsTextDelta: 'n\\n第二段。","hashtags":["#青岛"],"imagePrompt":"青岛老城街道"}'
+            toolName: "submit_tree_artifact",
+            argsTextDelta: 'n\\n第二段。","hashtags":["#青岛"],"imagePrompt":"青岛老城街道"}}'
           }
         };
         yield {
           type: "tool-call",
           payload: {
             toolCallId: "submit-1",
-            toolName: "submit_tree_draft",
+            toolName: "submit_tree_artifact",
             args: finalObject
           }
         };
@@ -3086,22 +2655,22 @@ describe("tree director compatibility generators", () => {
     const partials: unknown[] = [];
 
     await expect(
-      streamTreeDraft({
+      streamTreeArtifact({
         parts: directorParts,
         env: { KIMI_API_KEY: "token" },
         onPartialObject: (partial) => partials.push(partial)
       })
     ).resolves.toMatchObject({
       roundIntent: finalObject.roundIntent,
-      draft: finalObject.draft
+      artifact: finalObject.artifact
     });
 
     expect(partials[0]).toMatchObject({
       roundIntent: "继续成稿",
-      draft: { title: "青岛反攻略", body: "第一段。" }
+      artifact: { type: "social-post", payload: { title: "青岛反攻略", body: "第一段。" } }
     });
     expect(partials[0]).not.toMatchObject({
-      draft: { body: expect.stringContaining("\\") }
+      artifact: { payload: { body: expect.stringContaining("\\") } }
     });
     expect(partials).toContainEqual(finalObject);
   });
@@ -3187,10 +2756,10 @@ describe("tree director compatibility generators", () => {
     ]);
   });
 
-  it("uses JSON prompt injection for structured draft streams", async () => {
+  it("uses JSON prompt injection for structured artifact streams", async () => {
     const finalObject = {
       roundIntent: "继续完善",
-      draft: { title: "测试", body: "测试正文", hashtags: [], imagePrompt: "" },
+      artifact: { type: "social-post", payload: { title: "测试", body: "测试正文", hashtags: [], imagePrompt: "" }, sourceArtifactIds: [] },
     };
     const fakeAgent = {
       stream: vi.fn(async () => ({ object: Promise.resolve(finalObject) })),
@@ -3198,9 +2767,9 @@ describe("tree director compatibility generators", () => {
     };
 
     await expect(
-      streamTreeDraft({
+      streamTreeArtifact({
         parts: directorParts,
-        treeDraftAgent: fakeAgent
+        treeArtifactAgent: fakeAgent
       })
     ).resolves.toEqual(finalObject);
 

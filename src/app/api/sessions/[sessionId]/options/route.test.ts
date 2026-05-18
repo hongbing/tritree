@@ -65,21 +65,20 @@ const state = {
   },
   session: {
     id: "session-1",
-    title: "Draft",
+    title: "Work",
     status: "active",
     currentNodeId: "node-1",
     createdAt: "2026-04-27T00:00:00.000Z",
     updatedAt: "2026-04-27T00:00:00.000Z"
   },
   currentNode: node,
-  currentDraft: { title: "Draft", body: "Draft body", hashtags: ["#draft"], imagePrompt: "draft image" },
-  nodeDrafts: [{ nodeId: "node-1", draft: { title: "Draft", body: "Draft body", hashtags: ["#draft"], imagePrompt: "draft image" } }],
+  currentArtifact: { title: "Work", body: "Work body", hashtags: ["#work"], imagePrompt: "work image" },
+  nodeArtifacts: [{ nodeId: "node-1", artifact: { title: "Work", body: "Work body", hashtags: ["#work"], imagePrompt: "work image" } }],
   selectedPath: [node],
   treeNodes: [node],
   enabledSkillIds: [],
   enabledSkills: [],
   foldedBranches: [],
-  publishPackage: null
 };
 
 const existingOptions = [
@@ -161,7 +160,7 @@ describe("POST /api/sessions/:sessionId/options", () => {
       updateNodeOptions
     });
     streamDirectorOptionsMock.mockImplementation(async (_parts, options) => {
-      options.onReasoningText({ delta: "先看当前草稿。", accumulatedText: "先看当前草稿。" });
+      options.onReasoningText({ delta: "先看当前作品。", accumulatedText: "先看当前作品。" });
       options.onText({
         delta: "补场景",
         accumulatedText: "",
@@ -183,7 +182,7 @@ describe("POST /api/sessions/:sessionId/options", () => {
 
     expect(response.headers.get("Content-Type")).toContain("application/x-ndjson");
     expect(text).toContain('"type":"thinking"');
-    expect(text).toContain('"text":"先看当前草稿。"');
+    expect(text).toContain('"text":"先看当前作品。"');
     expect(text).toContain('"type":"options"');
     expect(text).toContain('"label":"补场景"');
     expect(text).not.toContain('"label":"生成中"');
@@ -202,7 +201,7 @@ describe("POST /api/sessions/:sessionId/options", () => {
     });
   });
 
-  it("passes option mode into current-draft option generation", async () => {
+  it("passes option mode into current-work option generation", async () => {
     const output = {
       roundIntent: "下一步",
       options: [

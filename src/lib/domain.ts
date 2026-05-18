@@ -123,18 +123,38 @@ function includesDirectorOptionIdsOnce(options: Array<{ id: string }>) {
     .join("") === "abc";
 }
 
-export const DraftSchema = z.object({
-  title: z.string(),
-  body: z.string(),
-  hashtags: z.array(z.string()),
-  imagePrompt: z.string()
-});
+export const WorkflowNodeKindSchema = z.enum(["decision", "artifact", "analysis", "action"]);
 
-export const PublishPackageSchema = DraftSchema;
+function requireArtifactPayload(value: { payload?: unknown }, context: z.RefinementCtx) {
+  if (!Object.prototype.hasOwnProperty.call(value, "payload") || value.payload === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["payload"],
+      message: "Artifact payload is required."
+    });
+  }
+}
 
-export const NodeDraftSchema = z.object({
-  nodeId: z.string(),
-  draft: DraftSchema
+export const ArtifactSchema = z.object({
+  id: z.string().min(1),
+  type: z.string().min(1),
+  version: z.number().int().positive(),
+  payload: z.unknown(),
+  sourceArtifactIds: z.array(z.string().min(1)).default([]),
+  createdByNodeId: z.string().min(1),
+  createdAt: z.string(),
+  updatedAt: z.string()
+}).superRefine(requireArtifactPayload);
+
+export const GeneratedArtifactSchema = z.object({
+  type: z.string().min(1),
+  payload: z.unknown(),
+  sourceArtifactIds: z.array(z.string().min(1)).default([])
+}).strict().superRefine(requireArtifactPayload);
+
+export const NodeArtifactSchema = z.object({
+  nodeId: z.string().min(1),
+  artifact: ArtifactSchema
 });
 
 const AgentMessageContentSchema = z.union([
@@ -154,10 +174,9 @@ export const AgentMessageSchema = z.object({
 export const DirectorOutputSchema = z.object({
   roundIntent: z.string().min(1),
   options: z.array(BranchOptionSchema).length(3, "AI suggestions must include exactly three items."),
-  draft: DraftSchema,
+  artifact: GeneratedArtifactSchema.nullable().optional(),
   finishAvailable: z.boolean().optional(),
-  publishPackage: PublishPackageSchema.nullable().optional()
-}).superRefine((output, context) => {
+}).strict().superRefine((output, context) => {
   if (!includesDirectorOptionIdsOnce(output.options)) {
     context.addIssue({
       code: "custom",
@@ -171,7 +190,7 @@ export const DirectorOptionsOutputSchema = z.object({
   decisionRationale: z.string().min(1).optional(),
   roundIntent: z.string().min(1),
   options: z.array(BranchOptionSchema).length(3, "AI suggestions must include exactly three items.")
-}).superRefine((output, context) => {
+}).strict().superRefine((output, context) => {
   if (!includesDirectorOptionIdsOnce(output.options)) {
     context.addIssue({
       code: "custom",
@@ -181,20 +200,23 @@ export const DirectorOptionsOutputSchema = z.object({
   }
 });
 
-const DirectorNextStepDraftSchema = z.object({
-  action: z.literal("draft"),
-  roundIntent: z.string().min(1)
-});
+const DirectorNextStepArtifactSchema = z.object({
+  action: z.literal("artifact"),
+  roundIntent: z.string().min(1),
+  artifact: GeneratedArtifactSchema.nullable().optional()
+}).strict();
 
 const DirectorNextStepCompleteSchema = z.object({
   action: z.literal("complete"),
-  roundIntent: z.string().min(1)
-});
+  roundIntent: z.string().min(1),
+  artifact: z.null().optional()
+}).strict();
 
 const DirectorNextStepOptionsSchema = z.object({
   action: z.literal("options").default("options"),
   decisionRationale: z.string().min(1).optional(),
   roundIntent: z.string().min(1),
+  artifact: z.null().optional(),
   options: z
     .array(
       z.object({
@@ -207,7 +229,7 @@ const DirectorNextStepOptionsSchema = z.object({
       })
     )
     .length(3, "AI suggestions must include exactly three items.")
-}).transform((output) => {
+}).strict().transform((output) => {
   const options = output.options.map((option, index) => ({
     id: option.id ?? PRIMARY_BRANCH_OPTION_IDS[index],
     label: option.label,
@@ -224,7 +246,7 @@ const DirectorNextStepOptionsSchema = z.object({
 });
 
 export const DirectorNextStepOutputSchema = z.union([
-  DirectorNextStepDraftSchema,
+  DirectorNextStepArtifactSchema,
   DirectorNextStepCompleteSchema,
   DirectorNextStepOptionsSchema
 ]).superRefine((output, context) => {
@@ -237,10 +259,10 @@ export const DirectorNextStepOutputSchema = z.union([
   }
 });
 
-export const DirectorDraftOutputSchema = z.object({
+export const DirectorArtifactOutputSchema = z.object({
   roundIntent: z.string().min(1),
-  draft: DraftSchema
-});
+  artifact: GeneratedArtifactSchema.nullable().optional()
+}).strict();
 
 export const SessionStatusSchema = z.enum(["active", "finished"]);
 
@@ -249,6 +271,9 @@ export const TreeNodeSchema = z.object({
   sessionId: z.string(),
   parentId: z.string().nullable(),
   parentOptionId: BranchOptionSchema.shape.id.nullable().optional(),
+  kind: WorkflowNodeKindSchema.default("decision"),
+  producedArtifactId: z.string().min(1).nullable().default(null),
+  sourceArtifactIds: z.array(z.string().min(1)).default([]),
   roundIndex: z.number(),
   roundIntent: z.string(),
   options: z.array(BranchOptionSchema),
@@ -257,6 +282,22 @@ export const TreeNodeSchema = z.object({
   agentMessages: z.array(AgentMessageSchema),
   isTerminal: z.boolean().optional(),
   createdAt: z.string()
+}).superRefine((node, context) => {
+  if (node.kind === "artifact" && node.producedArtifactId === null) {
+    context.addIssue({
+      code: "custom",
+      path: ["producedArtifactId"],
+      message: "Artifact workflow nodes must declare a produced artifact."
+    });
+  }
+
+  if (node.kind !== "artifact" && node.producedArtifactId !== null) {
+    context.addIssue({
+      code: "custom",
+      path: ["producedArtifactId"],
+      message: "Only artifact workflow nodes can declare a produced artifact."
+    });
+  }
 });
 
 export const FoldedBranchSchema = z.object({
@@ -278,24 +319,24 @@ export const SessionStateSchema = z.object({
     updatedAt: z.string()
   }),
   currentNode: TreeNodeSchema.nullable(),
-  currentDraft: DraftSchema.nullable(),
-  nodeDrafts: z.array(NodeDraftSchema).default([]),
+  currentArtifact: ArtifactSchema.nullable(),
+  artifacts: z.array(ArtifactSchema).default([]),
+  nodeArtifacts: z.array(NodeArtifactSchema).default([]),
   selectedPath: z.array(TreeNodeSchema),
   treeNodes: z.array(TreeNodeSchema).optional(),
   enabledSkillIds: z.array(z.string().min(1)).default([]),
   enabledSkills: z.array(SkillSchema).default([]),
-  foldedBranches: z.array(FoldedBranchSchema),
-  publishPackage: PublishPackageSchema.nullable()
-});
+  foldedBranches: z.array(FoldedBranchSchema)
+}).strict();
 
-export const DraftSummarySchema = z.object({
+export const WorkSummarySchema = z.object({
   id: z.string(),
   title: z.string(),
   status: SessionStatusSchema,
   currentNodeId: z.string().nullable(),
   currentRoundIndex: z.number().int().nonnegative().nullable(),
-  bodyExcerpt: z.string(),
-  bodyLength: z.number().int().nonnegative(),
+  artifactExcerpt: z.string(),
+  artifactSummaryLength: z.number().int().nonnegative(),
   isArchived: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string()
@@ -313,22 +354,21 @@ export type SkillAppliesTo = z.infer<typeof SkillAppliesToSchema>;
 export type SkillTarget = Exclude<SkillAppliesTo, "both">;
 export type RootMemory = z.infer<typeof RootMemorySchema>;
 export type BranchOption = z.infer<typeof BranchOptionSchema>;
-export type Draft = z.infer<typeof DraftSchema>;
+export type Artifact = z.infer<typeof ArtifactSchema>;
+export type GeneratedArtifact = z.infer<typeof GeneratedArtifactSchema>;
+export type NodeArtifact = z.infer<typeof NodeArtifactSchema>;
+export type WorkflowNodeKind = z.infer<typeof WorkflowNodeKindSchema>;
 export type AgentMessage = z.infer<typeof AgentMessageSchema>;
-export type PublishPackage = z.infer<typeof PublishPackageSchema>;
-export type NodeDraft = z.infer<typeof NodeDraftSchema>;
 export type OptionGenerationMode = z.infer<typeof OptionGenerationModeSchema>;
 export type DirectorOutput = z.infer<typeof DirectorOutputSchema>;
 export type DirectorOptionsOutput = z.infer<typeof DirectorOptionsOutputSchema>;
-export type DirectorDraftOutput = z.infer<typeof DirectorDraftOutputSchema>;
+export type DirectorArtifactOutput = z.infer<typeof DirectorArtifactOutputSchema>;
 export type DirectorNextStepOutput = z.infer<typeof DirectorNextStepOutputSchema>;
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 export type TreeNode = z.infer<typeof TreeNodeSchema>;
 export type FoldedBranch = z.infer<typeof FoldedBranchSchema>;
-export type SessionState = z.input<typeof SessionStateSchema> & {
-  nodeDrafts: NodeDraft[];
-};
-export type DraftSummary = z.infer<typeof DraftSummarySchema>;
+export type SessionState = z.infer<typeof SessionStateSchema>;
+export type WorkSummary = z.infer<typeof WorkSummarySchema>;
 
 export function skillAppliesToTarget(skill: Pick<Skill, "appliesTo">, target: SkillTarget) {
   return skill.appliesTo === "both" || skill.appliesTo === target;

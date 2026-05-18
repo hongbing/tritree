@@ -14,25 +14,25 @@ Target: produce one roundIntent and exactly three options through the options ou
 Use active skills to decide what those options should mean for the current task.
 `.trim();
 
-export const DIRECTOR_DRAFT_SYSTEM_PROMPT = `
+export const DIRECTOR_ARTIFACT_SYSTEM_PROMPT = `
 ${DIRECTOR_BASE_SYSTEM_PROMPT}
 
-Target: produce one draft result through the draft output contract.
+Target: produce one artifact result through the artifact output contract.
 Use active skills to decide how the input should be transformed.
 `.trim();
 
 export type DirectorMessage = AgentMessage;
 
 export type DirectorInputParts = {
-  artifactContext?: string;
-  rootSummary: string;
-  learnedSummary: string;
-  currentDraft: string;
-  pathSummary: string;
-  foldedSummary: string;
-  selectedOptionLabel: string;
+  artifactContext: string;
+  currentArtifact: string;
   enabledSkills: Skill[];
-  messages?: DirectorMessage[];
+  foldedSummary: string;
+  learnedSummary: string;
+  messages: DirectorMessage[];
+  pathSummary: string;
+  rootSummary: string;
+  selectedOptionLabel: string;
 };
 
 const NO_SELECTED_DIRECTION_PROMPT = `
@@ -79,7 +79,7 @@ ${parts.learnedSummary || "暂无已学习偏好。"}
 ${parts.selectedOptionLabel || NO_SELECTED_DIRECTION_PROMPT}
 
 # Current Visible Result
-${parts.currentDraft || "暂无。"}
+${parts.currentArtifact || "暂无。"}
 
 # Active Skills
 ${formatEnabledSkills(parts.enabledSkills)}

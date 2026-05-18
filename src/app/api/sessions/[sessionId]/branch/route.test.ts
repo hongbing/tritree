@@ -71,21 +71,20 @@ const baseState = {
   },
   session: {
     id: "session-1",
-    title: "Draft",
+    title: "Work",
     status: "active",
     currentNodeId: "node-1",
     createdAt: "2026-04-27T00:00:00.000Z",
     updatedAt: "2026-04-27T00:00:00.000Z"
   },
   currentNode: baseNode,
-  currentDraft: { title: "Draft", body: "Draft body", hashtags: ["#draft"], imagePrompt: "draft image" },
-  nodeDrafts: [{ nodeId: "node-1", draft: { title: "Draft", body: "Draft body", hashtags: ["#draft"], imagePrompt: "draft image" } }],
+  currentArtifact: { title: "Work", body: "Work body", hashtags: ["#work"], imagePrompt: "work image" },
+  nodeArtifacts: [{ nodeId: "node-1", artifact: { title: "Work", body: "Work body", hashtags: ["#work"], imagePrompt: "work image" } }],
   selectedPath: [baseNode],
   treeNodes: [baseNode],
   enabledSkillIds: [],
   enabledSkills: [],
   foldedBranches: [],
-  publishPackage: null
 };
 
 beforeEach(() => {
@@ -123,16 +122,16 @@ describe("POST /api/sessions/:sessionId/branch", () => {
         roundIntent: "自定义方向",
         options: []
       },
-      currentDraft: null,
+      currentArtifact: null,
       selectedPath: [baseNode, { ...baseNode, id: "node-2", parentId: "node-1", parentOptionId: "custom-manual", options: [] }],
       treeNodes: [baseNode, { ...baseNode, id: "node-2", parentId: "node-1", parentOptionId: "custom-manual", options: [] }]
     };
     const activateHistoricalBranch = vi.fn().mockReturnValue(null);
-    const createHistoricalDraftChild = vi.fn().mockReturnValue(childState);
+    const createArtifactChild = vi.fn().mockReturnValue(childState);
     getRepositoryMock.mockReturnValue({
       getSessionState: vi.fn().mockReturnValue(baseState),
       activateHistoricalBranch,
-      createHistoricalDraftChild
+      createArtifactChild
     });
 
     const response = await POST(
@@ -151,7 +150,8 @@ describe("POST /api/sessions/:sessionId/branch", () => {
 
     expect(response.status).toBe(200);
     expect(activateHistoricalBranch).not.toHaveBeenCalled();
-    expect(createHistoricalDraftChild).toHaveBeenCalledWith({
+    expect(createArtifactChild).toHaveBeenCalledWith({
+      artifact: null,
       userId: "user-1",
       customOption,
       optionMode: "focused",

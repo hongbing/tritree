@@ -5,14 +5,13 @@ import { signOut } from "next-auth/react";
 import { ChevronDown, ChevronUp, FileText, GitBranch, LogOut, Plus, RotateCcw, UsersRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
+  ArtifactSchema,
   SessionStateSchema,
+  type Artifact,
   type BranchOption,
   type ArtifactTypeId,
   DEFAULT_ARTIFACT_TYPE_ID,
-  CUSTOM_OPTION_ID_PREFIX,
   type CreationRequestOption,
-  type CustomBranchOptionId,
-  type Draft,
   type Inspiration,
   InspirationSchema,
   type OptionGenerationMode,
@@ -27,7 +26,7 @@ import {
 } from "@/lib/domain";
 import { getArtifactType, listArtifactTypes, type ArtifactType } from "@/lib/artifacts";
 import type { UserRole } from "@/lib/auth/types";
-import { LiveDraft } from "@/components/draft/LiveDraft";
+import { ArtifactWorkspace } from "@/components/artifacts/ArtifactWorkspace";
 import { RootMemorySetup } from "@/components/root-memory/RootMemorySetup";
 import { SkillLibraryPanel } from "@/components/skills/SkillLibraryPanel";
 import { SkillPicker } from "@/components/skills/SkillPicker";
@@ -36,10 +35,8 @@ import { createNdjsonParser } from "@/lib/stream/ndjson";
 import { apiPath, appPath } from "@/lib/web-base-path";
 
 type LoadState = "loading" | "root" | "ready" | "error";
-type MobilePanel = "tree" | "draft";
-type DraftComparisonSelection = { fromNodeId: string | null; toNodeId: string | null };
-type DraftComparisonEntry = { nodeId: string; label: string; draft: Draft };
-type NodeGenerationStage = { nodeId: string; stage: "draft" | "options" };
+type MobilePanel = "tree" | "artifact";
+type NodeGenerationStage = { nodeId: string; stage: "artifact" | "options" };
 type RootSetupDefaults = {
   artifactTypeId: ArtifactTypeId;
   creationRequest?: string;
@@ -56,34 +53,26 @@ type CurrentUserView = {
 type TreeableAppProps = {
   currentUser?: CurrentUserView;
   initialSessionId?: string;
-  startNewDraft?: boolean;
+  startNewWork?: boolean;
 };
 
-type DraftStreamField = "title" | "body" | "hashtags" | "imagePrompt";
-type LiveDraftStreamingField = "body" | "imagePrompt";
-type StreamingDraftEntry = { nodeId: string; draft: Draft; previousDraft?: Draft | null; streamingField: DraftStreamField | null };
+type StreamingArtifactEntry = { artifact: Artifact; nodeId: string };
 type StreamingOptionsEntry = { nodeId: string; options: BranchOption[]; roundIntent?: string | null };
 type StreamingThinkingEntry = { nodeId: string | null; stage: NodeGenerationStage["stage"]; text: string };
-type DraftSelectionRewriteRequest = {
-  draft: Draft;
-  field: "body";
-  instruction: string;
-  selectedText: string;
-  selectionEnd: number;
-  selectionStart: number;
-};
-type DraftStreamEvent =
-  | { type: "draft"; draft: Draft; streamingField?: DraftStreamField | null }
+type ArtifactStreamEvent =
+  | { type: "artifact.replace"; artifact: Artifact }
+  | { type: "artifact.patch"; path: string; value: unknown }
   | { type: "options"; nodeId: string; options: BranchOption[]; roundIntent?: string | null }
   | { type: "thinking"; nodeId?: string | null; stage?: NodeGenerationStage["stage"]; text: string }
   | { type: "done"; state: SessionState }
-  | { type: "error"; error: string }
-  | { type: "text"; text: string };
+  | { type: "error"; error: string };
 type OptionsStreamEvent =
   | { type: "options"; nodeId: string; options: BranchOption[]; roundIntent?: string | null }
   | { type: "thinking"; nodeId?: string | null; text: string }
   | { type: "done"; state: SessionState }
   | { type: "error"; error: string };
+type ArtifactComparisonEntry = { artifact: Artifact; label: string; nodeId: string };
+type ArtifactComparisonSelection = { fromNodeId: string | null; toNodeId: string | null };
 
 const MOBILE_LAYOUT_QUERY = "(max-width: 980px)";
 
@@ -139,21 +128,6 @@ function apiKeyMessage(text: string) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-function isDraft(value: unknown): value is Draft {
-  return (
-    isRecord(value) &&
-    typeof value.title === "string" &&
-    typeof value.body === "string" &&
-    Array.isArray(value.hashtags) &&
-    value.hashtags.every((tag) => typeof tag === "string") &&
-    typeof value.imagePrompt === "string"
-  );
-}
-
-function isDraftStreamField(value: unknown): value is DraftStreamField {
-  return value === "title" || value === "body" || value === "hashtags" || value === "imagePrompt";
 }
 
 function isBranchOption(value: unknown): value is BranchOption {
@@ -222,12 +196,14 @@ function resolveRootSetupDefaults(
   };
 }
 
-function isDraftStreamEvent(value: unknown): value is DraftStreamEvent {
+function isArtifactStreamEvent(value: unknown): value is ArtifactStreamEvent {
   if (!isRecord(value) || typeof value.type !== "string") return false;
 
   switch (value.type) {
-    case "draft":
-      return isDraft(value.draft) && (value.streamingField == null || isDraftStreamField(value.streamingField));
+    case "artifact.replace":
+      return ArtifactSchema.safeParse(value.artifact).success;
+    case "artifact.patch":
+      return typeof value.path === "string";
     case "options":
       return (
         typeof value.nodeId === "string" &&
@@ -239,14 +215,12 @@ function isDraftStreamEvent(value: unknown): value is DraftStreamEvent {
       return (
         typeof value.text === "string" &&
         (value.nodeId == null || typeof value.nodeId === "string") &&
-        (value.stage == null || value.stage === "draft" || value.stage === "options")
+        (value.stage == null || value.stage === "artifact" || value.stage === "options")
       );
     case "done":
       return SessionStateSchema.safeParse(value.state).success;
     case "error":
       return typeof value.error === "string";
-    case "text":
-      return typeof value.text === "string";
     default:
       return false;
   }
@@ -274,50 +248,46 @@ function isOptionsStreamEvent(value: unknown): value is OptionsStreamEvent {
   }
 }
 
-function liveDraftStreamingFieldFor(field: DraftStreamField | null | undefined): LiveDraftStreamingField | null {
-  if (field === "imagePrompt") return "imagePrompt";
-  if (field === "hashtags") return null;
-  return "body";
-}
-
 function findTreeNode(state: SessionState, nodeId: string | null) {
   if (!nodeId) return null;
   if (state.currentNode?.id === nodeId) return state.currentNode;
   return state.selectedPath.find((node) => node.id === nodeId) ?? state.treeNodes?.find((node) => node.id === nodeId) ?? null;
 }
 
-function draftForNode(state: SessionState, nodeId: string | null) {
-  const directDraft = directDraftForNode(state, nodeId);
-  if (directDraft || !nodeId) return directDraft;
-
-  const node = findTreeNode(state, nodeId);
-  return nearestAncestorDraftForNode(state, node);
-}
-
-function directDraftForNode(state: SessionState, nodeId: string | null) {
+function artifactForNode(state: SessionState, nodeId: string | null) {
   if (!nodeId) return null;
-  return (
-    state.nodeDrafts.find((item) => item.nodeId === nodeId)?.draft ??
-    (state.currentNode?.id === nodeId ? state.currentDraft : null)
-  );
+  const artifacts = state.artifacts ?? [];
+  const nodeArtifact = state.nodeArtifacts?.find((item) => item.nodeId === nodeId)?.artifact ?? null;
+  if (nodeArtifact) return nodeArtifact;
+  if (state.currentNode?.id === nodeId && state.currentArtifact) return state.currentArtifact;
+
+  const producedArtifactId = findTreeNode(state, nodeId)?.producedArtifactId ?? null;
+  return producedArtifactId ? artifacts.find((artifact) => artifact.id === producedArtifactId) ?? null : null;
 }
 
-function nearestAncestorDraftForNode(state: SessionState, node: TreeNode | null) {
-  if (!node?.parentId) return null;
+function defaultSelectedArtifactId(state: SessionState, currentSelectedId: string | null) {
+  const artifacts = state.artifacts ?? [];
+  const currentNodeArtifact = artifactForNode(state, state.currentNode?.id ?? null);
+  if (currentNodeArtifact) return currentNodeArtifact.id;
 
-  const nodesById = new Map<string, TreeNode>();
-  [...(state.treeNodes ?? []), ...state.selectedPath, ...(state.currentNode ? [state.currentNode] : [])].forEach((item) => {
-    nodesById.set(item.id, item);
-  });
-
-  let cursor = nodesById.get(node.parentId) ?? null;
-  while (cursor) {
-    const draft = directDraftForNode(state, cursor.id);
-    if (draft) return draft;
-    cursor = cursor.parentId ? nodesById.get(cursor.parentId) ?? null : null;
+  if (state.currentArtifact && artifacts.some((artifact) => artifact.id === state.currentArtifact?.id)) {
+    return state.currentArtifact.id;
   }
 
-  return null;
+  if (currentSelectedId && artifacts.some((artifact) => artifact.id === currentSelectedId)) {
+    return currentSelectedId;
+  }
+
+  return artifacts.at(-1)?.id ?? null;
+}
+
+function selectedArtifactIdForDisplay(state: SessionState, currentSelectedId: string | null) {
+  const artifacts = state.artifacts ?? [];
+  if (currentSelectedId && artifacts.some((artifact) => artifact.id === currentSelectedId)) {
+    return currentSelectedId;
+  }
+
+  return defaultSelectedArtifactId(state, null);
 }
 
 function withCustomOption(node: TreeNode, customOption: BranchOption | null) {
@@ -349,110 +319,85 @@ function mergeSkills(current: Skill[], incoming: Skill[]) {
 
 function needsNodeOptions(state: SessionState, nodeId: string | null) {
   const node = findTreeNode(state, nodeId);
-  return Boolean(node && !node.isTerminal && directDraftForNode(state, nodeId) && node.options.length < 3);
+  return Boolean(node && !node.isTerminal && node.options.length < 3);
 }
 
-async function allowDraftRender() {
+async function allowArtifactRender() {
   await new Promise((resolve) => window.setTimeout(resolve, 0));
 }
 
-function buildDraftComparisonEntries(state: SessionState | null): DraftComparisonEntry[] {
-  if (!state) return [];
-
-  const nodes = [...(state.treeNodes ?? state.selectedPath)].sort((first, second) => {
-    if (first.roundIndex !== second.roundIndex) return first.roundIndex - second.roundIndex;
-    return first.createdAt.localeCompare(second.createdAt);
-  });
-  const nodesById = new Map(nodes.map((node) => [node.id, node]));
-  const draftByNodeId = new Map(state.nodeDrafts.map((item) => [item.nodeId, item.draft]));
-  const entries = nodes
-    .map((node) => {
-      const draft = draftByNodeId.get(node.id);
-      return draft ? { nodeId: node.id, label: formatComparisonNodeLabel(node, nodesById), draft } : null;
-    })
-    .filter((entry): entry is DraftComparisonEntry => Boolean(entry));
-  const seenNodeIds = new Set(entries.map((entry) => entry.nodeId));
-
-  return [
-    ...entries,
-    ...state.nodeDrafts
-      .filter((item) => !seenNodeIds.has(item.nodeId))
-      .map((item) => ({
-        nodeId: item.nodeId,
-        label: `节点 ${item.nodeId.slice(0, 6)}`,
-        draft: item.draft
-      }))
-  ];
-}
-
-function draftHasChanges(draft: Draft, previousDraft: Draft) {
-  return (
-    draft.title !== previousDraft.title ||
-    draft.body !== previousDraft.body ||
-    draft.imagePrompt !== previousDraft.imagePrompt ||
-    draft.hashtags.length !== previousDraft.hashtags.length ||
-    draft.hashtags.some((tag, index) => tag !== previousDraft.hashtags[index])
-  );
-}
-
-function changedDraftNodeIdsForState(state: SessionState | null) {
-  if (!state) return [];
-
+function nodesForArtifactState(state: SessionState) {
   const nodeById = new Map<string, TreeNode>();
   [...(state.treeNodes ?? []), ...state.selectedPath, ...(state.currentNode ? [state.currentNode] : [])].forEach((node) => {
     nodeById.set(node.id, node);
   });
 
-  return Array.from(nodeById.values())
+  return Array.from(nodeById.values()).sort((first, second) => {
+    if (first.roundIndex !== second.roundIndex) return first.roundIndex - second.roundIndex;
+    return first.createdAt.localeCompare(second.createdAt);
+  });
+}
+
+function buildArtifactComparisonEntries(state: SessionState | null): ArtifactComparisonEntry[] {
+  if (!state) return [];
+
+  const nodes = nodesForArtifactState(state);
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const entries = nodes
+    .map((node) => {
+      const artifact = artifactForNode(state, node.id);
+      return artifact ? { artifact, label: formatComparisonNodeLabel(node, nodesById), nodeId: node.id } : null;
+    })
+    .filter((entry): entry is ArtifactComparisonEntry => Boolean(entry));
+  const seenNodeIds = new Set(entries.map((entry) => entry.nodeId));
+
+  return [
+    ...entries,
+    ...(state.nodeArtifacts ?? [])
+      .filter((item) => !seenNodeIds.has(item.nodeId))
+      .map((item) => ({
+        artifact: item.artifact,
+        label: `节点 ${item.nodeId.slice(0, 6)}`,
+        nodeId: item.nodeId
+      }))
+  ];
+}
+
+function artifactHasChanges(artifact: Artifact, previousArtifact: Artifact) {
+  return artifact.type !== previousArtifact.type || artifactPayloadSignature(artifact.payload) !== artifactPayloadSignature(previousArtifact.payload);
+}
+
+function artifactPayloadSignature(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(artifactPayloadSignature).join(",")}]`;
+  if (isRecord(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${artifactPayloadSignature(value[key])}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value);
+}
+
+function changedArtifactNodeIdsForState(state: SessionState | null) {
+  if (!state) return [];
+
+  return nodesForArtifactState(state)
     .filter((node) => {
-      if (!node.parentId) return false;
-      const draft = draftForNode(state, node.id);
-      const parentDraft = draftForNode(state, node.parentId);
-      return Boolean(draft && parentDraft && draftHasChanges(draft, parentDraft));
+      if (!node.producedArtifactId) return false;
+      const artifact = artifactForNode(state, node.id);
+      const sourceArtifact =
+        node.sourceArtifactIds.map((artifactId) => state.artifacts.find((candidate) => candidate.id === artifactId) ?? null).find(Boolean) ??
+        artifactForNode(state, node.parentId);
+
+      return Boolean(artifact && sourceArtifact && artifactHasChanges(artifact, sourceArtifact));
     })
     .map((node) => node.id);
 }
 
-function previousComparisonNodeId(entries: DraftComparisonEntry[], toNodeId: string) {
+function previousComparisonNodeId(entries: ArtifactComparisonEntry[], toNodeId: string) {
   const toIndex = entries.findIndex((entry) => entry.nodeId === toNodeId);
   return toIndex > 0 ? entries[toIndex - 1].nodeId : null;
-}
-
-function createCustomBranchOptionId(prefix: string): CustomBranchOptionId {
-  const randomId =
-    typeof globalThis.crypto?.randomUUID === "function"
-      ? globalThis.crypto.randomUUID()
-      : Math.random().toString(36).slice(2);
-  return `${CUSTOM_OPTION_ID_PREFIX}${prefix}-${randomId}`;
-}
-
-function deriveCustomOptionLabel(content: string) {
-  const normalized = content.replace(/\s+/g, " ").trim();
-  const [firstSegment = normalized] = normalized.split(/[。！？!?，,；;：:\n]/);
-  const label = firstSegment.trim() || normalized;
-  return Array.from(label).slice(0, 15).join("");
-}
-
-function createSelectionReferenceOption(request: DraftSelectionRewriteRequest): BranchOption {
-  const instruction = request.instruction.trim();
-  const selectedText = request.selectedText.trim();
-  return {
-    id: createCustomBranchOptionId("reference"),
-    label: deriveCustomOptionLabel(instruction || selectedText || "引用选中文本"),
-    description: `用户引用文本：\n「${selectedText}」\n\n用户要求：${instruction}`,
-    impact: "按引用文本和用户要求改写这一段。",
-    kind: "reframe"
-  };
-}
-
-function isValidDraftSelectionRewriteRequest(request: DraftSelectionRewriteRequest) {
-  const { body } = request.draft;
-  return (
-    request.selectionStart >= 0 &&
-    request.selectionEnd >= request.selectionStart &&
-    request.selectionEnd <= body.length &&
-    body.slice(request.selectionStart, request.selectionEnd) === request.selectedText
-  );
 }
 
 function formatComparisonNodeLabel(node: TreeNode, nodesById: Map<string, TreeNode>) {
@@ -475,7 +420,7 @@ const emptyRootSetupDefaults: RootSetupDefaults = {
   seed: ""
 };
 
-export function TreeableApp({ currentUser, initialSessionId, startNewDraft = false }: TreeableAppProps = {}) {
+export function TreeableApp({ currentUser, initialSessionId, startNewWork = false }: TreeableAppProps = {}) {
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [rootMemory, setRootMemory] = useState<RootMemory | null>(null);
   const [sessionState, setSessionState] = useState<SessionState | null>(null);
@@ -494,28 +439,28 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   const [isSkillLibraryOpen, setIsSkillLibraryOpen] = useState(false);
   const [skillLibraryMessage, setSkillLibraryMessage] = useState("");
   const [isExternalStyleGenerationAvailable, setIsExternalStyleGenerationAvailable] = useState(false);
-  const [draftComparison, setDraftComparison] = useState<DraftComparisonSelection | null>(null);
   const [rootSetupDefaults, setRootSetupDefaults] = useState<RootSetupDefaults | null>(null);
-  const [streamingDraft, setStreamingDraft] = useState<StreamingDraftEntry | null>(null);
+  const [streamingArtifact, setStreamingArtifact] = useState<StreamingArtifactEntry | null>(null);
   const [streamingOptions, setStreamingOptions] = useState<StreamingOptionsEntry | null>(null);
   const [streamingThinking, setStreamingThinking] = useState<StreamingThinkingEntry | null>(null);
-  const [generatedDiffNodeId, setGeneratedDiffNodeId] = useState<string | null>(null);
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
+  const [artifactComparison, setArtifactComparison] = useState<ArtifactComparisonSelection | null>(null);
   const [isMobileTreeExpanded, setIsMobileTreeExpanded] = useState(false);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const loadRequestIdRef = useRef(0);
-  const mobileDraftRegionRef = useRef<HTMLDivElement>(null);
-  const wasMobileDraftGenerationActiveRef = useRef(false);
+  const mobileArtifactRegionRef = useRef<HTMLDivElement>(null);
+  const wasMobileArtifactGenerationActiveRef = useRef(false);
   const canImportSkills = currentUser?.isAdmin === true;
-  const isMobileDraftGenerationActive = Boolean(
-    isMobileLayout && generationStage?.nodeId && generationStage.stage === "draft"
+  const isMobileArtifactGenerationActive = Boolean(
+    isMobileLayout && generationStage?.nodeId && generationStage.stage === "artifact"
   );
 
   useEffect(() => {
     const requestId = loadRequestIdRef.current + 1;
     loadRequestIdRef.current = requestId;
     void loadRoot(requestId);
-  }, [initialSessionId, startNewDraft]);
+  }, [initialSessionId, startNewWork]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -556,24 +501,28 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     if (sessionState?.currentNode?.id) {
       setViewNodeId(sessionState.currentNode.id);
       setCustomOption(null);
-      setDraftComparison(null);
+      setArtifactComparison(null);
     }
   }, [sessionState?.currentNode?.id]);
 
   useEffect(() => {
-    if (!isMobileDraftGenerationActive) {
-      wasMobileDraftGenerationActiveRef.current = false;
+    setSelectedArtifactId((current) => (sessionState ? defaultSelectedArtifactId(sessionState, current) : null));
+  }, [sessionState]);
+
+  useEffect(() => {
+    if (!isMobileArtifactGenerationActive) {
+      wasMobileArtifactGenerationActiveRef.current = false;
       return;
     }
 
-    if (wasMobileDraftGenerationActiveRef.current) return;
+    if (wasMobileArtifactGenerationActiveRef.current) return;
 
-    wasMobileDraftGenerationActiveRef.current = true;
-    const draftRegion = mobileDraftRegionRef.current;
-    if (typeof draftRegion?.scrollIntoView === "function") {
-      draftRegion.scrollIntoView({ behavior: "smooth", block: "start" });
+    wasMobileArtifactGenerationActiveRef.current = true;
+    const artifactRegion = mobileArtifactRegionRef.current;
+    if (typeof artifactRegion?.scrollIntoView === "function") {
+      artifactRegion.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  }, [isMobileDraftGenerationActive]);
+  }, [isMobileArtifactGenerationActive]);
 
   function mobilePanelClassName(panel: MobilePanel, extraClassName?: string) {
     return `mobile-panel mobile-panel--${panel}${extraClassName ? ` ${extraClassName}` : ""}`;
@@ -611,7 +560,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       const data = (await response.json()) as { rootMemory: RootMemory | null };
       if (!isCurrentLoadRequest(requestId)) return;
       setRootMemory(data.rootMemory);
-      if (startNewDraft) {
+      if (startNewWork) {
         const nextRootSetupDefaults = resolveRootSetupDefaults(emptyRootSetupDefaults, nextArtifactTypes);
         const nextInspirations = await loadInspirationsForSetup(requestId, nextRootSetupDefaults.artifactTypeId);
         if (!isCurrentLoadRequest(requestId) || !nextInspirations) return;
@@ -627,7 +576,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           const sessionResponse = await fetch(apiPath(`/api/sessions/${encodeURIComponent(initialSessionId)}`));
           const sessionData = (await sessionResponse.json()) as { state?: SessionState | null; error?: string };
           if (!isCurrentLoadRequest(requestId)) return;
-          if (!sessionResponse.ok || !sessionData.state) throw new Error(sessionData.error ?? "草稿不存在或已归档。");
+          if (!sessionResponse.ok || !sessionData.state) throw new Error(sessionData.error ?? "作品不存在或已归档。");
           const requestedState = SessionStateSchema.parse(sessionData.state);
 
           setRootMemory(requestedState.rootMemory);
@@ -642,7 +591,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           setSessionState(null);
           setRootSetupDefaults(nextRootSetupDefaults);
           setInspirations(nextInspirations);
-          setMessage("草稿不存在或已归档。");
+          setMessage("作品不存在或已归档。");
           setLoadState("root");
           return;
         }
@@ -755,7 +704,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setViewNodeId(state.currentNode?.id ?? nodeId);
     setStreamingOptions(null);
     setStreamingThinking(null);
-    setGeneratedDiffNodeId(null);
     setIsSkillPanelOpen(false);
     setIsSkillLibraryOpen(false);
   }
@@ -877,9 +825,9 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     }
   }
 
-  function previewDraftGeneration(state: SessionState, nodeId: string | null) {
-    if (!nodeId || directDraftForNode(state, nodeId)) return;
-    setGenerationStage({ nodeId, stage: "draft" });
+  function previewArtifactGeneration(state: SessionState, nodeId: string | null) {
+    if (!nodeId || artifactForNode(state, nodeId)) return;
+    setGenerationStage({ nodeId, stage: "artifact" });
   }
 
   async function choose(
@@ -893,7 +841,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     const trimmedNote = note?.trim();
     const customOptionForChoice = isCustomBranchOptionId(optionId) ? customOptionOverride ?? customOption : null;
     setPendingChoice(optionId);
-    setGeneratedDiffNodeId(null);
     setIsBusy(true);
     setMessage("");
     try {
@@ -913,9 +860,9 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       const nextNodeId = data.state.currentNode?.id ?? null;
       setSessionState(data.state);
       setViewNodeId(nextNodeId);
-      previewDraftGeneration(data.state, nextNodeId);
+      previewArtifactGeneration(data.state, nextNodeId);
       setPendingChoice(null);
-      await allowDraftRender();
+      await allowArtifactRender();
       await finishNodeGeneration(data.state, nextNodeId, trimmedNote, optionMode);
     } catch (error) {
       const text = error instanceof Error ? error.message : "选择失败。";
@@ -923,7 +870,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     } finally {
       setPendingChoice(null);
       setGenerationStage(null);
-      setStreamingDraft(null);
+      setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
       setIsBusy(false);
@@ -942,7 +889,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     const trimmedNote = note?.trim();
     const customOptionForBranch = isCustomBranchOptionId(optionId) ? customOptionOverride ?? customOption : null;
     setPendingBranch({ nodeId, optionId });
-    setGeneratedDiffNodeId(null);
     setViewNodeId(nodeId);
     setIsBusy(true);
     setMessage("");
@@ -964,8 +910,8 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       setSessionState(data.state);
       setCustomOption(null);
       setViewNodeId(nextNodeId);
-      previewDraftGeneration(data.state, nextNodeId);
-      await allowDraftRender();
+      previewArtifactGeneration(data.state, nextNodeId);
+      await allowArtifactRender();
       await finishNodeGeneration(data.state, nextNodeId, trimmedNote, optionMode);
     } catch (error) {
       const text = error instanceof Error ? error.message : "切换分支失败。";
@@ -973,22 +919,22 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     } finally {
       setPendingBranch(null);
       setGenerationStage(null);
-      setStreamingDraft(null);
+      setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
       setIsBusy(false);
     }
   }
 
-  async function ensureNodeDraft(
+  async function ensureNodeArtifact(
     state: SessionState,
     nodeId: string | null,
     note?: string,
     optionMode: OptionGenerationMode = "balanced"
   ) {
-    if (!nodeId || directDraftForNode(state, nodeId)) return state;
+    if (!nodeId || artifactForNode(state, nodeId)) return state;
 
-    setGenerationStage({ nodeId, stage: "draft" });
+    setGenerationStage({ nodeId, stage: "artifact" });
     setStreamingThinking(null);
     const requestOptions = {
       method: "POST",
@@ -1000,15 +946,15 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       })
     };
 
-    const streamResponse = await fetch(apiPath(`/api/sessions/${state.session.id}/draft/generate/stream`), requestOptions);
+    const streamResponse = await fetch(apiPath(`/api/sessions/${state.session.id}/artifact/generate/stream`), requestOptions);
     if (!streamResponse.ok) {
       const data = (await streamResponse.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(data?.error ?? "生成下一版草稿失败。");
+      throw new Error(data?.error ?? "生成下一版作品失败。");
     }
-    if (!streamResponse.body) throw new Error("生成下一版草稿失败。");
+    if (!streamResponse.body) throw new Error("生成下一版作品失败。");
 
-    const streamedState = await readDraftStream(streamResponse, nodeId);
-    if (!streamedState) throw new Error("生成下一版草稿失败。");
+    const streamedState = await readArtifactStream(streamResponse, nodeId);
+    if (!streamedState) throw new Error("生成下一版作品失败。");
     return streamedState;
   }
 
@@ -1050,11 +996,11 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     return true;
   }
 
-  async function readDraftStream(response: Response, nodeId: string) {
+  async function readArtifactStream(response: Response, nodeId: string) {
     if (!response.body) return null;
 
     let doneState: SessionState | null = null;
-    let receivedDraft = false;
+    let receivedArtifact = false;
     let receivedOptions = false;
     let receivedThinking = false;
     let receivedDone = false;
@@ -1069,12 +1015,17 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       throw new Error(message);
     };
     const parser = createNdjsonParser((value) => {
-      if (!isDraftStreamEvent(value)) return;
+      if (!isArtifactStreamEvent(value)) return;
 
-      if (value.type === "draft") {
-        setGenerationStage({ nodeId, stage: "draft" });
-        setStreamingDraft({ nodeId, draft: value.draft, streamingField: value.streamingField ?? null });
-        receivedDraft = true;
+      if (value.type === "artifact.replace") {
+        setGenerationStage({ nodeId, stage: "artifact" });
+        setStreamingArtifact({ nodeId, artifact: value.artifact });
+        setSelectedArtifactId(value.artifact.id);
+        receivedArtifact = true;
+        return;
+      }
+
+      if (value.type === "artifact.patch") {
         return;
       }
 
@@ -1087,7 +1038,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
 
       if (value.type === "thinking") {
         const thinkingNodeId = value.nodeId ?? nodeId;
-        const thinkingStage = value.stage ?? "draft";
+        const thinkingStage = value.stage ?? "artifact";
         setGenerationStage({ nodeId: thinkingNodeId, stage: thinkingStage });
         setStreamingThinking({ nodeId: thinkingNodeId, stage: thinkingStage, text: value.text });
         receivedThinking = true;
@@ -1096,6 +1047,11 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
 
       if (value.type === "done") {
         doneState = value.state;
+        const completedArtifact = artifactForNode(value.state, nodeId);
+        if (completedArtifact) {
+          setStreamingArtifact({ nodeId, artifact: completedArtifact });
+          setSelectedArtifactId(completedArtifact.id);
+        }
         receivedDone = true;
         setStreamingThinking(null);
         return;
@@ -1105,13 +1061,13 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
         streamError = value.error;
       }
     });
-    const maybeAllowDraftRender = async () => {
-      const shouldAllowDraftRender = (receivedDraft || receivedOptions || receivedThinking) && !receivedDone;
-      receivedDraft = false;
+    const maybeAllowArtifactRender = async () => {
+      const shouldAllowArtifactRender = (receivedArtifact || receivedOptions || receivedThinking) && !receivedDone;
+      receivedArtifact = false;
       receivedOptions = false;
       receivedThinking = false;
       receivedDone = false;
-      if (shouldAllowDraftRender) await allowDraftRender();
+      if (shouldAllowArtifactRender) await allowArtifactRender();
     };
 
     while (true) {
@@ -1119,14 +1075,14 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       if (done) break;
       parser.push(decoder.decode(value, { stream: true }));
       throwStreamError();
-      await maybeAllowDraftRender();
+      await maybeAllowArtifactRender();
     }
 
     parser.push(decoder.decode());
     throwStreamError();
     parser.flush();
     throwStreamError();
-    await maybeAllowDraftRender();
+    await maybeAllowArtifactRender();
     return doneState;
   }
 
@@ -1210,7 +1166,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       receivedOptions = false;
       receivedThinking = false;
       receivedDone = false;
-      if (shouldAllowOptionsRender) await allowDraftRender();
+      if (shouldAllowOptionsRender) await allowArtifactRender();
     };
 
     while (true) {
@@ -1235,14 +1191,12 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     note?: string,
     optionMode: OptionGenerationMode = "balanced"
   ) {
-    let nextState = await ensureNodeDraft(state, nodeId, note, optionMode);
+    let nextState = await ensureNodeArtifact(state, nodeId, note, optionMode);
     if (nextState !== state) {
       const generatedNodeId = nextState.currentNode?.id ?? nodeId;
-      const hasGeneratedDraft = Boolean(directDraftForNode(nextState, generatedNodeId ?? null));
       setSessionState(nextState);
       setViewNodeId(generatedNodeId ?? null);
-      setGeneratedDiffNodeId(hasGeneratedDraft ? generatedNodeId ?? null : null);
-      await allowDraftRender();
+      await allowArtifactRender();
     }
 
     const optionsState = await ensureNodeOptions(nextState, nextState.currentNode?.id ?? nodeId, optionMode);
@@ -1260,10 +1214,9 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   async function viewNode(nodeId: string) {
     setViewNodeId(nodeId);
     setCustomOption(null);
-    setGeneratedDiffNodeId(null);
-    if (!sessionState || isBusy || !directDraftForNode(sessionState, nodeId) || !needsNodeOptions(sessionState, nodeId)) return;
+    if (!sessionState || isBusy || !needsNodeOptions(sessionState, nodeId)) return;
 
-    await allowDraftRender();
+    await allowArtifactRender();
     setIsBusy(true);
     setMessage("");
     try {
@@ -1277,7 +1230,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       setMessage(apiKeyMessage(text));
     } finally {
       setGenerationStage(null);
-      setStreamingDraft(null);
+      setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
       setIsBusy(false);
@@ -1290,7 +1243,6 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     if (nodeId !== sessionState.currentNode.id) return;
 
     setPendingChoice(null);
-    setGeneratedDiffNodeId(null);
     setIsBusy(true);
     setMessage("");
     try {
@@ -1304,7 +1256,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
       setMessage(apiKeyMessage(text));
     } finally {
       setGenerationStage(null);
-      setStreamingDraft(null);
+      setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
       setIsBusy(false);
@@ -1347,14 +1299,12 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setPendingChoice(null);
     setPendingBranch(null);
     setGenerationStage(null);
-    setStreamingDraft(null);
+    setStreamingArtifact(null);
     setStreamingOptions(null);
     setStreamingThinking(null);
-    setGeneratedDiffNodeId(null);
     setViewNodeId(null);
     setIsSkillPanelOpen(false);
     setIsSkillLibraryOpen(false);
-    setDraftComparison(null);
     setMessage("");
     void refreshInspirationsForSetup(nextRootSetupDefaults.artifactTypeId);
   }
@@ -1381,57 +1331,88 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     setMessage("");
   }
 
-  async function saveDraftForNode(draft: Draft, draftParentNodeId: string) {
-    const response = await fetch(apiPath(`/api/sessions/${sessionState!.session.id}/draft`), {
+  async function saveArtifactForNode(artifact: Artifact, artifactParentNodeId: string) {
+    const response = await fetch(apiPath(`/api/sessions/${sessionState!.session.id}/artifact`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nodeId: draftParentNodeId, draft })
+      body: JSON.stringify({
+        nodeId: artifactParentNodeId,
+        artifact: {
+          type: artifact.type,
+          payload: artifact.payload,
+          sourceArtifactIds: artifact.sourceArtifactIds
+        }
+      })
     });
     const data = (await response.json()) as { state?: SessionState; error?: string };
-    if (!response.ok || !data.state) throw new Error(data.error ?? "保存草稿失败。");
+    if (!response.ok || !data.state) throw new Error(data.error ?? "保存作品失败。");
     const nextNodeId = data.state.currentNode?.id ?? null;
     setSessionState(data.state);
     setViewNodeId(nextNodeId);
     setCustomOption(null);
-    setDraftComparison(null);
-    previewDraftGeneration(data.state, nextNodeId);
+    setSelectedArtifactId(data.state.currentArtifact?.id ?? artifact.id);
+    previewArtifactGeneration(data.state, nextNodeId);
     if (data.error) {
       setMessage(apiKeyMessage(data.error));
     }
-    await allowDraftRender();
+    await allowArtifactRender();
     await finishNodeGeneration(data.state, nextNodeId);
   }
 
-  async function saveDraft(draft: Draft) {
+  async function saveArtifact(artifact: Artifact) {
     if (isBusy) return;
     if (!sessionState?.currentNode) return;
-    const draftParentNodeId = viewNodeId ?? sessionState.currentNode.id;
-    setGeneratedDiffNodeId(null);
+    const artifactParentNodeId = artifact.createdByNodeId;
     setIsBusy(true);
     setMessage("");
     try {
-      await saveDraftForNode(draft, draftParentNodeId);
+      await saveArtifactForNode(artifact, artifactParentNodeId);
     } catch (error) {
-      const text = error instanceof Error ? error.message : "保存草稿失败。";
+      const text = error instanceof Error ? error.message : "保存作品失败。";
       setMessage(apiKeyMessage(text));
     } finally {
       setGenerationStage(null);
-      setStreamingDraft(null);
+      setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
       setIsBusy(false);
     }
   }
 
-  function rewriteDraftSelection(request: DraftSelectionRewriteRequest) {
+  async function handleArtifactAction(actionId: string, artifact: Artifact, input?: unknown) {
     if (isBusy) return;
     if (!sessionState?.currentNode) return;
-    if (!isValidDraftSelectionRewriteRequest(request)) {
-      setMessage("选中文本已经变化，请重新选择。");
-      return;
+    const nodeId = artifact.createdByNodeId;
+    setIsBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch(
+        apiPath(`/api/sessions/${sessionState.session.id}/artifact/actions/${encodeURIComponent(actionId)}`),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nodeId, artifactId: artifact.id, input })
+        }
+      );
+      const data = (await response.json()) as { state?: SessionState; error?: string };
+      if (!response.ok || !data.state) throw new Error(data.error ?? "无法执行作品操作。");
+      const nextNodeId = data.state.currentNode?.id ?? null;
+      setSessionState(data.state);
+      setViewNodeId(nextNodeId);
+      setCustomOption(null);
+      setSelectedArtifactId(data.state.currentArtifact?.id ?? artifact.id);
+      await allowArtifactRender();
+      await finishNodeGeneration(data.state, nextNodeId);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : "无法执行作品操作。";
+      setMessage(apiKeyMessage(text));
+    } finally {
+      setGenerationStage(null);
+      setStreamingArtifact(null);
+      setStreamingOptions(null);
+      setStreamingThinking(null);
+      setIsBusy(false);
     }
-
-    addAndChooseCustomOption(createSelectionReferenceOption(request));
   }
 
   if (loadState === "loading") return <main className="loading-screen">正在唤醒 Tritree...</main>;
@@ -1479,55 +1460,48 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   const startButtonLabel = isBusy && !sessionState ? "生成问题中" : sessionState ? "重新开始" : "开始创作";
   const activeViewNodeId = viewNodeId ?? sessionState?.currentNode?.id ?? null;
   const activeViewNode = sessionState ? findTreeNode(sessionState, activeViewNodeId) : null;
-  const treePreviousDraft =
-    activeViewNode?.parentId && sessionState
-      ? draftForNode(sessionState, activeViewNode.parentId)
-      : null;
-  const activeStreamingDraft = streamingDraft?.nodeId === activeViewNodeId ? streamingDraft : null;
-  const previousDraft = activeStreamingDraft?.previousDraft ?? treePreviousDraft;
-  const directDraftForView = sessionState ? directDraftForNode(sessionState, activeViewNodeId) : null;
-  const ancestorDraftForView = !directDraftForView && sessionState ? draftForNode(sessionState, activeViewNodeId) : null;
-  const persistedDraftForView = sessionState ? draftForNode(sessionState, activeViewNodeId) : null;
-  const isDraftGenerationForView = Boolean(
-    activeViewNodeId && generationStage?.nodeId === activeViewNodeId && generationStage.stage === "draft"
+  const activeStreamingArtifact = streamingArtifact?.nodeId === activeViewNodeId ? streamingArtifact : null;
+  const baseArtifacts = sessionState?.artifacts ?? [];
+  const displayArtifacts = activeStreamingArtifact
+    ? [
+        ...baseArtifacts.filter((artifact) => artifact.id !== activeStreamingArtifact.artifact.id),
+        activeStreamingArtifact.artifact
+      ]
+    : baseArtifacts;
+  const displaySessionState = sessionState
+    ? {
+        ...sessionState,
+        artifacts: displayArtifacts,
+        currentArtifact: activeStreamingArtifact?.artifact ?? sessionState.currentArtifact
+      }
+    : null;
+  const effectiveSelectedArtifactId = displaySessionState
+    ? selectedArtifactIdForDisplay(displaySessionState, selectedArtifactId)
+    : null;
+  const isArtifactGenerationForView = Boolean(
+    activeViewNodeId && generationStage?.nodeId === activeViewNodeId && generationStage.stage === "artifact"
   );
-  const isStreamingDraftForView = Boolean(activeStreamingDraft && isDraftGenerationForView);
-  const streamedDraftForView = isStreamingDraftForView ? activeStreamingDraft?.draft ?? null : null;
-  const liveDiffStreamingField = isStreamingDraftForView
-    ? liveDraftStreamingFieldFor(activeStreamingDraft?.streamingField)
-    : undefined;
-  const isDraftStageGeneratingForView = Boolean(
-    activeViewNodeId && generationStage?.nodeId === activeViewNodeId && generationStage.stage === "draft"
-  );
-  const isShowingAncestorDraft = Boolean(!directDraftForView && !isDraftGenerationForView && !isDraftStageGeneratingForView && ancestorDraftForView);
-  const viewedDraft = streamedDraftForView ?? (isDraftGenerationForView || isDraftStageGeneratingForView ? previousDraft : (persistedDraftForView ?? ancestorDraftForView));
-  const isGeneratedDiffReview = Boolean(
-    generatedDiffNodeId === activeViewNodeId && previousDraft && directDraftForView && !isDraftGenerationForView
-  );
-  const isLiveDraftStreaming = isDraftGenerationForView;
-  const shouldShowGeneratedDiff = isLiveDraftStreaming || isGeneratedDiffReview;
   const isViewingCurrentNode = Boolean(activeViewNodeId && activeViewNodeId === sessionState?.currentNode?.id);
-  const canRetryDraftGeneration = Boolean(
+  const canRetryArtifactGeneration = Boolean(
     sessionState &&
       activeViewNodeId &&
       isViewingCurrentNode &&
       !activeViewNode?.isTerminal &&
-      previousDraft &&
-      !directDraftForView &&
+      !artifactForNode(sessionState, activeViewNodeId) &&
       !isBusy
   );
   const canRegenerateOptions = Boolean(
     sessionState &&
       activeViewNodeId &&
       isViewingCurrentNode &&
-      directDraftForView &&
+      artifactForNode(sessionState, activeViewNodeId) &&
       activeViewNode?.options.length === 3
   );
   const canRetryMissingOptions = Boolean(
     sessionState &&
       activeViewNodeId &&
       isViewingCurrentNode &&
-      directDraftForView &&
+      artifactForNode(sessionState, activeViewNodeId) &&
       !activeViewNode?.isTerminal &&
       needsNodeOptions(sessionState, activeViewNodeId) &&
       !isBusy
@@ -1535,29 +1509,19 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
   const canRefreshOptions = canRegenerateOptions || canRetryMissingOptions;
   const streamedActiveViewNode = activeViewNode ? withStreamingOptions(activeViewNode, streamingOptions) : null;
   const currentNodeForCanvas = streamedActiveViewNode ? withCustomOption(streamedActiveViewNode, customOption) : null;
+  const treeGenerationStage = generationStage
+    ? { nodeId: generationStage.nodeId, stage: generationStage.stage === "artifact" ? "artifact" as const : "options" as const }
+    : null;
   const activeThinking =
     streamingThinking && (!streamingThinking.nodeId || streamingThinking.nodeId === activeViewNodeId) ? streamingThinking : null;
-  const liveDraftGenerationStage =
+  const artifactGenerationStage =
     generationStage && (!generationStage.nodeId || generationStage.nodeId === activeViewNodeId) ? generationStage.stage : null;
-  const hasLiveGenerationOutput =
-    liveDraftGenerationStage === "draft"
-      ? Boolean(activeStreamingDraft)
-      : liveDraftGenerationStage === "options"
-        ? Boolean(streamingOptions && streamingOptions.options.length > 0)
-        : false;
-  const liveDraftGenerationPhase = liveDraftGenerationStage
-    ? hasLiveGenerationOutput
-      ? "streaming"
-      : activeThinking?.stage === liveDraftGenerationStage
-        ? "thinking"
-        : "preparing"
-    : undefined;
-  const isDraftModuleGenerating = Boolean(liveDraftGenerationStage === "draft");
-  const isOptionsModuleGenerating = Boolean(liveDraftGenerationStage === "options");
-  const isMobileDraftModuleGenerating = isMobileLayout && isDraftModuleGenerating;
+  const isArtifactModuleGenerating = Boolean(artifactGenerationStage === "artifact");
+  const isOptionsModuleGenerating = Boolean(artifactGenerationStage === "options");
+  const isMobileArtifactModuleGenerating = isMobileLayout && isArtifactModuleGenerating;
   const isMobileOptionsModuleGenerating = isMobileLayout && isOptionsModuleGenerating;
-  const mobileDraftRegionClassName = `mobile-draft-region${
-    isMobileDraftModuleGenerating ? " mobile-module--generating mobile-draft-region--generating" : ""
+  const mobileArtifactRegionClassName = `mobile-artifact-region${
+    isMobileArtifactModuleGenerating ? " mobile-module--generating mobile-artifact-region--generating" : ""
   }`;
   const mobileOptionsRegionClassName = `mobile-options-region${
     isMobileOptionsModuleGenerating ? " mobile-module--generating mobile-options-region--generating" : ""
@@ -1569,20 +1533,20 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     defaultEnabled: skill.defaultEnabled ?? false,
     isArchived: skill.isArchived ?? false
   }));
-  const comparisonEntries = buildDraftComparisonEntries(sessionState);
+  const comparisonEntries = buildArtifactComparisonEntries(displaySessionState);
   const comparisonEntryByNodeId = new Map(comparisonEntries.map((entry) => [entry.nodeId, entry]));
-  const comparisonFrom = draftComparison?.fromNodeId ? comparisonEntryByNodeId.get(draftComparison.fromNodeId) : null;
-  const comparisonTo = draftComparison?.toNodeId ? comparisonEntryByNodeId.get(draftComparison.toNodeId) : null;
-  const comparisonSelectionCount = Number(Boolean(draftComparison?.fromNodeId)) + Number(Boolean(draftComparison?.toNodeId));
-  const comparisonDrafts =
-    comparisonFrom && comparisonTo ? { from: comparisonFrom.draft, to: comparisonTo.draft } : null;
+  const comparisonFrom = artifactComparison?.fromNodeId ? comparisonEntryByNodeId.get(artifactComparison.fromNodeId) : null;
+  const comparisonTo = artifactComparison?.toNodeId ? comparisonEntryByNodeId.get(artifactComparison.toNodeId) : null;
+  const comparisonSelectionCount = Number(Boolean(artifactComparison?.fromNodeId)) + Number(Boolean(artifactComparison?.toNodeId));
+  const comparisonArtifacts =
+    comparisonFrom && comparisonTo ? { from: comparisonFrom.artifact, to: comparisonTo.artifact } : null;
   const comparisonLabels =
     comparisonFrom && comparisonTo ? { from: comparisonFrom.label, to: comparisonTo.label } : null;
-  const changedDraftNodeIds = changedDraftNodeIdsForState(sessionState);
-  const toastRetryAction = canRetryDraftGeneration
+  const changedArtifactNodeIds = changedArtifactNodeIdsForState(displaySessionState);
+  const toastRetryAction = canRetryArtifactGeneration
     ? {
         label: "重试生成",
-        onClick: retryDraftGeneration
+        onClick: retryArtifactGeneration
       }
     : canRetryMissingOptions
       ? {
@@ -1591,9 +1555,32 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
         }
       : null;
 
-  function startDraftComparison() {
+  async function retryArtifactGeneration() {
+    if (!sessionState || !activeViewNodeId || isBusy) return;
+
+    setStreamingArtifact(null);
+    setStreamingOptions(null);
+    setStreamingThinking(null);
+    setIsBusy(true);
+    setMessage("");
+    try {
+      previewArtifactGeneration(sessionState, activeViewNodeId);
+      await allowArtifactRender();
+      await finishNodeGeneration(sessionState, activeViewNodeId);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : "生成下一版作品失败。";
+      setMessage(apiKeyMessage(text));
+    } finally {
+      setGenerationStage(null);
+      setStreamingArtifact(null);
+      setStreamingOptions(null);
+      setStreamingThinking(null);
+      setIsBusy(false);
+    }
+  }
+
+  function startArtifactComparison() {
     if (comparisonEntries.length < 2) return;
-    setGeneratedDiffNodeId(null);
     const defaultToNodeId =
       activeViewNodeId && comparisonEntryByNodeId.has(activeViewNodeId) ? activeViewNodeId : null;
     if (!defaultToNodeId) return;
@@ -1602,20 +1589,20 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
         ? activeViewNode.parentId
         : previousComparisonNodeId(comparisonEntries, defaultToNodeId);
 
-    setDraftComparison({
+    setArtifactComparison({
       fromNodeId: defaultFromNodeId,
       toNodeId: defaultToNodeId
     });
   }
 
-  function cancelDraftComparison() {
-    setDraftComparison(null);
+  function cancelArtifactComparison() {
+    setArtifactComparison(null);
   }
 
-  function selectDraftComparisonNode(nodeId: string) {
+  function selectArtifactComparisonNode(nodeId: string) {
     if (!comparisonEntryByNodeId.has(nodeId)) return;
 
-    setDraftComparison((current) => {
+    setArtifactComparison((current) => {
       if (!current) {
         return { fromNodeId: nodeId, toNodeId: null };
       }
@@ -1633,48 +1620,23 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
     });
   }
 
-  async function retryDraftGeneration() {
-    if (!sessionState || !activeViewNodeId || isBusy) return;
-
-    setGeneratedDiffNodeId(null);
-    setStreamingDraft(null);
-    setStreamingOptions(null);
-    setStreamingThinking(null);
-    setIsBusy(true);
-    setMessage("");
-    try {
-      previewDraftGeneration(sessionState, activeViewNodeId);
-      await allowDraftRender();
-      await finishNodeGeneration(sessionState, activeViewNodeId);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : "生成下一版草稿失败。";
-      setMessage(apiKeyMessage(text));
-    } finally {
-      setGenerationStage(null);
-      setStreamingDraft(null);
-      setStreamingOptions(null);
-      setStreamingThinking(null);
-      setIsBusy(false);
-    }
-  }
-
   function renderTreeCanvas(display: "full" | "options" | "tree") {
     return (
       <TreeCanvas
-        changedDraftNodeIds={changedDraftNodeIds}
-        comparisonNodeIds={draftComparison}
+        changedArtifactNodeIds={changedArtifactNodeIds}
+        comparisonNodeIds={artifactComparison}
         currentNode={currentNodeForCanvas}
         display={display}
         focusedNodeId={activeViewNodeId}
-        generationStage={generationStage}
-        isComparisonMode={Boolean(draftComparison)}
+        generationStage={treeGenerationStage}
+        isComparisonMode={Boolean(artifactComparison)}
         isBusy={treeChoicesDisabled}
         isMobileLayout={isMobileLayout}
         onActivateBranch={activateHistoricalBranch}
         onAddCustomOption={activeViewNodeId ? addAndChooseCustomOption : undefined}
         onChoose={chooseFromViewedNode}
         onRegenerateOptions={canRefreshOptions ? regenerateOptionsForCurrentNode : undefined}
-        onSelectComparisonNode={selectDraftComparisonNode}
+        onSelectComparisonNode={selectArtifactComparisonNode}
         onViewNode={(nodeId) => void viewNode(nodeId)}
         pendingBranch={pendingBranch}
         pendingChoice={pendingChoice}
@@ -1742,9 +1704,9 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           ) : null}
           <div className="workspace-actions" role="group" aria-label="作品操作">
             {currentUser ? (
-              <Link className="secondary-button" href="/drafts">
+              <Link className="secondary-button" href="/works">
                 <FileText aria-hidden="true" size={16} strokeWidth={2.25} />
-                <span>我的草稿</span>
+                <span>我的作品</span>
               </Link>
             ) : null}
             <button className="start-button" disabled={isBusy} onClick={startNewSeed} type="button">
@@ -1802,50 +1764,41 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
           <section className={`canvas-region${!isMobileLayout && isOptionsModuleGenerating ? " module--generating" : ""}`}>{renderTreeCanvas(isMobileLayout ? "tree" : "full")}</section>
         </div>
       ) : null}
-      <div className={mobilePanelClassName("draft", isMobileLayout ? "mobile-panel--unified" : undefined)}>
+      <div className={mobilePanelClassName("artifact", isMobileLayout ? "mobile-panel--unified" : undefined)}>
         <div
-          aria-busy={isMobileDraftModuleGenerating}
-          className={mobileDraftRegionClassName}
-          ref={mobileDraftRegionRef}
+          aria-busy={isMobileArtifactModuleGenerating}
+          className={mobileArtifactRegionClassName}
+          ref={mobileArtifactRegionRef}
         >
-          <LiveDraft
-            artifactType={artifactTypes.find((t) => t.id === (sessionState?.session.artifactTypeId ?? DEFAULT_ARTIFACT_TYPE_ID))}
-            artifactTypeId={sessionState?.session.artifactTypeId ?? DEFAULT_ARTIFACT_TYPE_ID}
-            canCompareDrafts={comparisonEntries.length >= 2}
-            comparisonDrafts={comparisonDrafts}
+          <ArtifactWorkspace
+            artifacts={displayArtifacts}
+            canCompareArtifacts={comparisonEntries.length >= 2}
+            comparisonArtifacts={comparisonArtifacts}
             comparisonLabels={comparisonLabels}
             comparisonSelectionCount={comparisonSelectionCount}
-            draft={viewedDraft}
-            emptyStateActions={
-              canRetryDraftGeneration ? (
-                <button className="secondary-button" onClick={() => void retryDraftGeneration()} type="button">
-                  重试生成
-                </button>
-              ) : null
-            }
+            currentNode={currentNodeForCanvas}
+            generationStage={artifactGenerationStage}
             headerActions={
-              <>
-                <button
-                  aria-expanded={isSkillPanelOpen}
-                  className="draft-skill-button"
-                  disabled={isBusy || !sessionState}
-                  onClick={() => {
-                    setIsSkillLibraryOpen(false);
-                    setIsSkillPanelOpen((open) => !open);
-                  }}
-                  type="button"
-                >
-                  {enabledSkillIds.length} 个技能
-                </button>
-              </>
+              <button
+                aria-expanded={isSkillPanelOpen}
+                className="secondary-button"
+                disabled={isBusy || !sessionState}
+                onClick={() => {
+                  setIsSkillLibraryOpen(false);
+                  setIsSkillPanelOpen((open) => !open);
+                }}
+                type="button"
+              >
+                {enabledSkillIds.length} 个技能
+              </button>
             }
             headerPanel={
               isSkillPanelOpen && sessionState ? (
-                <aside aria-label="本作品技能" className="draft-skill-panel">
-                  <header className="draft-skill-panel__header">
+                <aside aria-label="本作品技能" className="work-skill-panel">
+                  <header className="work-skill-panel__header">
                     <div>
                       <p className="eyebrow">本作品技能</p>
-                      <p className="draft-skill-panel__summary">已启用 {enabledSkillIds.length} 个</p>
+                      <p className="work-skill-panel__summary">已启用 {enabledSkillIds.length} 个</p>
                     </div>
                     <button
                       className="secondary-button"
@@ -1868,23 +1821,15 @@ export function TreeableApp({ currentUser, initialSessionId, startNewDraft = fal
                 </aside>
               ) : null
             }
-            generationPhase={liveDraftGenerationPhase}
-            generationStage={liveDraftGenerationStage}
             isBusy={isBusy}
-            isGenerating={!isMobileLayout && isDraftModuleGenerating}
-            isComparisonMode={Boolean(draftComparison)}
-            isEditable={Boolean(activeViewNodeId)}
-            isLiveDiff={shouldShowGeneratedDiff}
-            isLiveDiffStreaming={isLiveDraftStreaming}
-            liveDiffStreamingField={liveDiffStreamingField}
-            mode={isViewingCurrentNode ? "current" : "history"}
-            onCancelComparison={cancelDraftComparison}
-            onDismissLiveDiff={() => setGeneratedDiffNodeId(null)}
-            onRewriteSelection={rewriteDraftSelection}
-            onSave={saveDraft}
-            onStartComparison={startDraftComparison}
-            previousDraft={isShowingAncestorDraft ? null : previousDraft}
-            publishPackage={null}
+            isComparisonMode={Boolean(artifactComparison)}
+            isGenerating={isArtifactModuleGenerating}
+            onAction={handleArtifactAction}
+            onCancelComparison={cancelArtifactComparison}
+            onSave={saveArtifact}
+            onSelectArtifact={setSelectedArtifactId}
+            onStartComparison={startArtifactComparison}
+            selectedArtifactId={effectiveSelectedArtifactId}
             thinkingText={activeThinking?.text}
           />
         </div>

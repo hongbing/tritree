@@ -46,7 +46,7 @@ const baseState = {
   },
   session: {
     id: "session-1",
-    title: "Draft",
+    title: "Work",
     status: "active",
     currentNodeId: "node-1",
     createdAt: "2026-04-27T00:00:00.000Z",
@@ -68,14 +68,13 @@ const baseState = {
     foldedOptions: [],
     createdAt: "2026-04-27T00:00:00.000Z"
   },
-  currentDraft: { title: "Draft", body: "Draft body", hashtags: ["#draft"], imagePrompt: "draft image" },
-  nodeDrafts: [{ nodeId: "node-1", draft: { title: "Draft", body: "Draft body", hashtags: ["#draft"], imagePrompt: "draft image" } }],
+  currentArtifact: { title: "Work", body: "Work body", hashtags: ["#work"], imagePrompt: "work image" },
+  nodeArtifacts: [{ nodeId: "node-1", artifact: { title: "Work", body: "Work body", hashtags: ["#work"], imagePrompt: "work image" } }],
   selectedPath: [],
   treeNodes: [],
   enabledSkillIds: [],
   enabledSkills: [],
   foldedBranches: [],
-  publishPackage: null
 };
 
 beforeEach(() => {
@@ -100,7 +99,7 @@ describe("POST /api/sessions/:sessionId/choose", () => {
     expect(await response.json()).toEqual({ error: "请先登录。" });
   });
 
-  it("creates the selected child node before any AI draft generation", async () => {
+  it("creates the selected child node before any AI work generation", async () => {
     const childState = {
       ...baseState,
       session: { ...baseState.session, currentNodeId: "node-2" },
@@ -113,13 +112,13 @@ describe("POST /api/sessions/:sessionId/choose", () => {
         roundIntent: "A",
         options: []
       },
-      currentDraft: null,
+      currentArtifact: null,
       selectedPath: [baseState.currentNode, { ...baseState.currentNode, id: "node-2", parentId: "node-1", parentOptionId: "a", options: [] }]
     };
-    const createDraftChild = vi.fn().mockReturnValue(childState);
+    const createArtifactChild = vi.fn().mockReturnValue(childState);
     getRepositoryMock.mockReturnValue({
       getSessionState: vi.fn().mockReturnValue(baseState),
-      createDraftChild
+      createArtifactChild
     });
 
     const response = await POST(
@@ -136,7 +135,8 @@ describe("POST /api/sessions/:sessionId/choose", () => {
     const data = await response.json();
 
     expect(response.status).toBe(200);
-    expect(createDraftChild).toHaveBeenCalledWith({
+    expect(createArtifactChild).toHaveBeenCalledWith({
+      artifact: null,
       userId: "user-1",
       optionMode: "focused",
       sessionId: "session-1",
@@ -144,6 +144,6 @@ describe("POST /api/sessions/:sessionId/choose", () => {
       selectedOptionId: "a"
     });
     expect(data.state.currentNode.id).toBe("node-2");
-    expect(data.state.currentDraft).toBeNull();
+    expect(data.state.currentArtifact).toBeNull();
   });
 });

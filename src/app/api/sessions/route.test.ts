@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthApiError } from "@/lib/auth/current-user";
-import { createSeedDraft } from "@/lib/seed-draft";
 import { GET, POST } from "./route";
 
 const getRepositoryMock = vi.hoisted(() => vi.fn());
@@ -14,6 +13,45 @@ const currentUser = {
   isActive: true,
   createdAt: "2026-05-06T00:00:00.000Z",
   updatedAt: "2026-05-06T00:00:00.000Z"
+};
+
+const rootMemory = {
+  id: "root",
+  preferences: {
+    artifactTypeId: "social-post",
+    seed: "写一篇解释为什么要写作的文章",
+    creationRequest: "",
+    domains: ["创作"],
+    tones: ["平静"],
+    styles: ["观点型"],
+    personas: ["实践者"]
+  },
+  summary: "Seed：写一篇解释为什么要写作的文章",
+  learnedSummary: "",
+  createdAt: "2026-04-26T00:00:00.000Z",
+  updatedAt: "2026-04-26T00:00:00.000Z"
+};
+
+const sessionState = {
+  rootMemory,
+  session: {
+    artifactTypeId: "social-post",
+    id: "session-1",
+    title: "Work",
+    status: "active",
+    currentNodeId: "node-1",
+    createdAt: "2026-04-26T00:00:00.000Z",
+    updatedAt: "2026-04-26T00:00:00.000Z"
+  },
+  currentNode: null,
+  currentArtifact: null,
+  artifacts: [],
+  nodeArtifacts: [],
+  selectedPath: [],
+  treeNodes: [],
+  enabledSkillIds: ["system-analysis"],
+  enabledSkills: [],
+  foldedBranches: []
 };
 
 vi.mock("server-only", () => ({}));
@@ -30,49 +68,23 @@ vi.mock("@/lib/db/repository", () => ({
   getRepository: getRepositoryMock
 }));
 
-const resolvedSkills = [
-  {
-    id: "system-analysis",
-    title: "分析",
-    category: "方向",
-    description: "拆解写作动机。",
-    prompt: "先分析写作动机、读者和表达目标。",
-    appliesTo: "editor",
-    isSystem: true,
-    defaultEnabled: true,
-    isArchived: false,
-    createdAt: "2026-04-26T00:00:00.000Z",
-    updatedAt: "2026-04-26T00:00:00.000Z"
-  }
-];
-
 beforeEach(() => {
   getRepositoryMock.mockReset();
   requireCurrentUserMock.mockReset();
   requireCurrentUserMock.mockResolvedValue(currentUser);
 });
 
-describe("createSeedDraft", () => {
-  it("uses a content-derived title instead of the fixed seed placeholder", () => {
-    const draft = createSeedDraft("小林是某厂的产品经理，每周要跟进十几个需求迭代。她的习惯很规范。");
-
-    expect(draft.title).toBe("小林是某厂的产品经理");
-    expect(draft.title).not.toBe("种子念头");
-    expect(draft.body).toContain("小林是某厂的产品经理");
-  });
-});
-
 describe("GET /api/sessions", () => {
-  it("lists active draft summaries for the current user", async () => {
+  it("lists active work summaries for the current user", async () => {
     const listSessionSummaries = vi.fn().mockReturnValue([
       {
         id: "session-1",
-        title: "Draft one",
+        title: "Work one",
         status: "active",
         currentNodeId: "node-1",
         currentRoundIndex: 2,
-        bodyExcerpt: "Draft body",
-        bodyLength: 10,
+        artifactExcerpt: "Work body",
+        artifactSummaryLength: 10,
         isArchived: false,
         createdAt: "2026-05-07T00:00:00.000Z",
         updatedAt: "2026-05-07T01:00:00.000Z"
@@ -85,10 +97,10 @@ describe("GET /api/sessions", () => {
 
     expect(response.status).toBe(200);
     expect(listSessionSummaries).toHaveBeenCalledWith("user-1", { archived: false });
-    expect(data.drafts).toEqual([expect.objectContaining({ id: "session-1", title: "Draft one" })]);
+    expect(data.works).toEqual([expect.objectContaining({ id: "session-1", title: "Work one" })]);
   });
 
-  it("lists archived draft summaries for the current user", async () => {
+  it("lists archived work summaries for the current user", async () => {
     const listSessionSummaries = vi.fn().mockReturnValue([
       {
         id: "session-archived",
@@ -96,8 +108,8 @@ describe("GET /api/sessions", () => {
         status: "active",
         currentNodeId: "node-archived",
         currentRoundIndex: 1,
-        bodyExcerpt: "Archived body",
-        bodyLength: 13,
+        artifactExcerpt: "Archived body",
+        artifactSummaryLength: 13,
         isArchived: true,
         createdAt: "2026-05-07T00:00:00.000Z",
         updatedAt: "2026-05-07T01:00:00.000Z"
@@ -110,17 +122,17 @@ describe("GET /api/sessions", () => {
 
     expect(response.status).toBe(200);
     expect(listSessionSummaries).toHaveBeenCalledWith("user-1", { archived: true });
-    expect(data.drafts[0].isArchived).toBe(true);
+    expect(data.works[0].isArchived).toBe(true);
   });
 
-  it("rejects an empty draft view parameter", async () => {
+  it("rejects an empty work view parameter", async () => {
     const getLatestSessionState = vi.fn();
     getRepositoryMock.mockReturnValue({ getLatestSessionState });
 
     const response = await GET(new Request("http://test.local/api/sessions?view="));
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "不支持的草稿视图。" });
+    expect(await response.json()).toEqual({ error: "不支持的作品视图。" });
     expect(getLatestSessionState).not.toHaveBeenCalled();
   });
 });
@@ -135,223 +147,51 @@ describe("POST /api/sessions", () => {
     expect(await response.json()).toEqual({ error: "请先登录。" });
   });
 
-  it("creates a session draft without generating options", async () => {
-    const draftState = {
-      rootMemory: {
-        id: "root",
-        preferences: {
-          seed: "写一篇解释为什么要写作的文章",
-          domains: ["创作"],
-          tones: ["平静"],
-          styles: ["观点型"],
-          personas: ["实践者"]
-        },
-        summary: "Seed：写一篇解释为什么要写作的文章",
-        learnedSummary: "",
-        createdAt: "2026-04-26T00:00:00.000Z",
-        updatedAt: "2026-04-26T00:00:00.000Z"
-      },
-      session: {
-        id: "session-1",
-        title: "Draft",
-        status: "active",
-        currentNodeId: "node-1",
-        createdAt: "2026-04-26T00:00:00.000Z",
-        updatedAt: "2026-04-26T00:00:00.000Z"
-      },
-      currentNode: {
-        id: "node-1",
-        sessionId: "session-1",
-        parentId: null,
-        parentOptionId: null,
-        roundIndex: 1,
-        roundIntent: "选择起始方式",
-        options: [],
-        selectedOptionId: null,
-        foldedOptions: [],
-        agentMessages: [],
-        createdAt: "2026-04-26T00:00:00.000Z"
-      },
-      currentDraft: createSeedDraft("写一篇解释为什么要写作的文章"),
-      nodeDrafts: [{ nodeId: "node-1", draft: createSeedDraft("写一篇解释为什么要写作的文章") }],
-      selectedPath: [],
-      treeNodes: [],
-      enabledSkillIds: ["system-analysis"],
-      enabledSkills: resolvedSkills,
-      foldedBranches: [],
-      publishPackage: null
-    };
-    const createSessionDraft = vi.fn().mockReturnValue(draftState);
+  it("creates a session without generating options", async () => {
+    const createSession = vi.fn().mockReturnValue(sessionState);
     getRepositoryMock.mockReturnValue({
-      getRootMemory: () => ({
-        id: "root",
-        preferences: {
-          seed: "写一篇解释为什么要写作的文章",
-          domains: ["创作"],
-          tones: ["平静"],
-          styles: ["观点型"],
-          personas: ["实践者"]
-        },
-        summary: "Seed：写一篇解释为什么要写作的文章",
-        learnedSummary: "",
-        createdAt: "2026-04-26T00:00:00.000Z",
-        updatedAt: "2026-04-26T00:00:00.000Z"
-      }),
-      defaultEnabledSkillIds: vi.fn(() => ["system-analysis"]),
-      createSessionDraft
+      getRootMemory: () => rootMemory,
+      createSession
     });
 
     const response = await POST(new Request("http://test.local/api/sessions", { method: "POST" }));
     const data = await response.json();
 
     expect(response.status).toBe(200);
-    expect(createSessionDraft).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "user-1",
-        rootMemoryId: "root",
-        draft: expect.objectContaining({ body: "写一篇解释为什么要写作的文章" })
-      })
-    );
-    expect(data.state).toEqual(draftState);
+    expect(createSession).toHaveBeenCalledWith({
+      userId: "user-1",
+      rootMemoryId: "root"
+    });
+    expect(data.state).toEqual(sessionState);
   });
 
-  it("keeps the seed draft body raw when creating the session", async () => {
-    const rootMemoryWithRequest = {
-      id: "root",
-      preferences: {
-        seed: "写一篇解释为什么要写作的文章",
-        creationRequest: "改成英文的，保留口语感",
-        domains: ["创作"],
-        tones: ["平静"],
-        styles: ["观点型"],
-        personas: ["实践者"]
-      },
-      summary: [
-        "Seed：写一篇解释为什么要写作的文章",
-        "本次创作要求：改成英文的，保留口语感"
-      ].join("\n"),
-      learnedSummary: "",
-      createdAt: "2026-04-26T00:00:00.000Z",
-      updatedAt: "2026-04-26T00:00:00.000Z"
-    };
-    const draftState = {
-      rootMemory: rootMemoryWithRequest,
-      session: {
-        id: "session-1",
-        title: "Draft",
-        status: "active",
-        currentNodeId: "node-1",
-        createdAt: "2026-04-26T00:00:00.000Z",
-        updatedAt: "2026-04-26T00:00:00.000Z"
-      },
-      currentNode: {
-        id: "node-1",
-        sessionId: "session-1",
-        parentId: null,
-        parentOptionId: null,
-        roundIndex: 1,
-        roundIntent: "选择起始方式",
-        options: [],
-        selectedOptionId: null,
-        foldedOptions: [],
-        agentMessages: [],
-        createdAt: "2026-04-26T00:00:00.000Z"
-      },
-      currentDraft: createSeedDraft("写一篇解释为什么要写作的文章"),
-      nodeDrafts: [{ nodeId: "node-1", draft: createSeedDraft("写一篇解释为什么要写作的文章") }],
-      selectedPath: [],
-      treeNodes: [],
-      enabledSkillIds: ["system-analysis"],
-      enabledSkills: resolvedSkills,
-      foldedBranches: [],
-      publishPackage: null
-    };
-    const createSessionDraft = vi.fn().mockReturnValue(draftState);
+  it("passes only the root memory id so seed text stays owned by the repository", async () => {
+    const createSession = vi.fn().mockReturnValue({ ...sessionState, rootMemory });
     getRepositoryMock.mockReturnValue({
-      getRootMemory: () => rootMemoryWithRequest,
-      defaultEnabledSkillIds: vi.fn(() => ["system-analysis"]),
-      createSessionDraft
+      getRootMemory: () => ({
+        ...rootMemory,
+        preferences: {
+          ...rootMemory.preferences,
+          creationRequest: "改成英文的，保留口语感"
+        }
+      }),
+      createSession
     });
 
     const response = await POST(new Request("http://test.local/api/sessions", { method: "POST" }));
-    const data = await response.json();
 
     expect(response.status).toBe(200);
-    expect(createSessionDraft).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "user-1",
-        draft: expect.objectContaining({
-          body: "写一篇解释为什么要写作的文章"
-        })
-      })
-    );
-    expect(data.state.rootMemory.summary).toContain("本次创作要求：改成英文的，保留口语感");
+    expect(createSession).toHaveBeenCalledWith({
+      userId: "user-1",
+      rootMemoryId: "root"
+    });
   });
 
   it("starts a session with selected enabled skill ids", async () => {
-    const draftState = {
-      rootMemory: {
-        id: "root",
-        preferences: {
-          seed: "写一篇解释为什么要写作的文章",
-          domains: ["创作"],
-          tones: ["平静"],
-          styles: ["观点型"],
-          personas: ["实践者"]
-        },
-        summary: "Seed：写一篇解释为什么要写作的文章",
-        learnedSummary: "",
-        createdAt: "2026-04-26T00:00:00.000Z",
-        updatedAt: "2026-04-26T00:00:00.000Z"
-      },
-      session: {
-        id: "session-1",
-        title: "Draft",
-        status: "active",
-        currentNodeId: "node-1",
-        createdAt: "2026-04-26T00:00:00.000Z",
-        updatedAt: "2026-04-26T00:00:00.000Z"
-      },
-      currentNode: {
-        id: "node-1",
-        sessionId: "session-1",
-        parentId: null,
-        parentOptionId: null,
-        roundIndex: 1,
-        roundIntent: "选择起始方式",
-        options: [],
-        selectedOptionId: null,
-        foldedOptions: [],
-        agentMessages: [],
-        createdAt: "2026-04-26T00:00:00.000Z"
-      },
-      currentDraft: createSeedDraft("写一篇解释为什么要写作的文章"),
-      nodeDrafts: [{ nodeId: "node-1", draft: createSeedDraft("写一篇解释为什么要写作的文章") }],
-      selectedPath: [],
-      treeNodes: [],
-      enabledSkillIds: ["system-analysis"],
-      enabledSkills: resolvedSkills,
-      foldedBranches: [],
-      publishPackage: null
-    };
-    const createSessionDraft = vi.fn().mockReturnValue(draftState);
+    const createSession = vi.fn().mockReturnValue(sessionState);
     getRepositoryMock.mockReturnValue({
-      getRootMemory: () => ({
-        id: "root",
-        preferences: {
-          seed: "写一篇解释为什么要写作的文章",
-          domains: ["创作"],
-          tones: ["平静"],
-          styles: ["观点型"],
-          personas: ["实践者"]
-        },
-        summary: "Seed：写一篇解释为什么要写作的文章",
-        learnedSummary: "",
-        createdAt: "2026-04-26T00:00:00.000Z",
-        updatedAt: "2026-04-26T00:00:00.000Z"
-      }),
-      defaultEnabledSkillIds: vi.fn(() => ["system-analysis"]),
-      createSessionDraft
+      getRootMemory: () => rootMemory,
+      createSession
     });
 
     const response = await POST(
@@ -362,32 +202,17 @@ describe("POST /api/sessions", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(createSessionDraft).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "user-1",
-        enabledSkillIds: ["system-analysis", "system-no-hype-title"]
-      })
-    );
+    expect(createSession).toHaveBeenCalledWith({
+      userId: "user-1",
+      rootMemoryId: "root",
+      enabledSkillIds: ["system-analysis", "system-no-hype-title"]
+    });
   });
 
-  it("returns a server error if creating the session draft fails", async () => {
+  it("returns a server error if creating the session fails", async () => {
     getRepositoryMock.mockReturnValue({
-      getRootMemory: () => ({
-        id: "root",
-        preferences: {
-          seed: "写一篇青岛旅游攻略",
-          domains: ["旅行"],
-          tones: ["轻松"],
-          styles: ["攻略"],
-          personas: ["旅行者"]
-        },
-        summary: "Seed：写一篇青岛旅游攻略",
-        learnedSummary: "",
-        createdAt: "2026-04-26T00:00:00.000Z",
-        updatedAt: "2026-04-26T00:00:00.000Z"
-      }),
-      defaultEnabledSkillIds: vi.fn(() => ["system-analysis"]),
-      createSessionDraft: vi.fn(() => {
+      getRootMemory: () => rootMemory,
+      createSession: vi.fn(() => {
         throw new Error("database unavailable");
       })
     });

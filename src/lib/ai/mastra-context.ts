@@ -10,7 +10,7 @@ export type SharedAgentContextInput = {
   toolSummaries?: string[];
 };
 
-const SUBMIT_TREE_DRAFT_TOOL_NAME = "submit_tree_draft";
+const SUBMIT_TREE_ARTIFACT_TOOL_NAME = "submit_tree_artifact";
 const SUBMIT_TREE_NEXT_STEP_TOOL_NAME = "submit_tree_next_step";
 const SUBMIT_TREE_OPTIONS_TOOL_NAME = "submit_tree_options";
 
@@ -31,21 +31,22 @@ export function buildSharedAgentContext(input: SharedAgentContextInput) {
     .join("\n\n");
 }
 
-export function buildTreeDraftInstructions(input: SharedAgentContextInput) {
+export function buildTreeArtifactInstructions(input: SharedAgentContextInput) {
   return [
     "# ReAct Agent",
     formatGenericReactAgentRole(),
     buildSharedAgentContext(input),
     actualWorkExecutionProtocol(),
     "# 本轮固定目标",
-    "本轮固定目标：提交 draft 结果。",
+    "本轮固定目标：提交 artifact 结果。",
     "根据输入上下文、已启用 Skills 和可用工具完成目标；具体领域判断由 Skills 提供。",
-    ...finalSubmitExecutionRules(input, "draft"),
+    ...finalSubmitExecutionRules(input, "artifact"),
     "# 输出契约",
     "这里的输出要求指结构化结果或最终提交工具参数里的字段，不是额外自然语言消息。",
-    "本轮用户可见字段包括：roundIntent、draft.title、draft.body、draft.hashtags、draft.imagePrompt。",
+    "本轮用户可见字段包括：roundIntent、artifact.type、artifact.payload 和 artifact.sourceArtifactIds。",
+    "artifact.type 必须是本轮作品类型对应的产物类型；artifact.payload 必须遵守作品类型与输出结构里的字段、格式和交付要求。",
     "如果 Skill 要求固定文本、格式、语气或其他可观察结果，最终返回字段里必须能直接看见对应结果。",
-    "最终结构化结果必须包含完整 draft 对象。",
+    "最终结构化结果必须包含完整 artifact 对象。",
     "所有面向用户的字段默认使用简体中文；用户原文、专有名词、代码、品牌名和已启用 Skills 明确要求的非中文文本除外。",
     "# 提交前检查",
     "确认每个已启用 Skill 的要求已落实到本任务产出的用户可见字段；不要因为结构化输出字段而忽略 Skill 要求。"
@@ -91,10 +92,10 @@ export function buildTreeNextStepInstructions(input: SharedAgentContextInput) {
     ...finalSubmitExecutionRules(input, "next-step"),
     "# 输出契约",
     "只返回结构化结果。",
-    "action 只能是 options、draft 或 complete。",
+    "action 只能是 options、artifact 或 complete。",
     "当 action=options 时，roundIntent 必须是一个新问题，并必须返回 options[].label、options[].description 和 options[].impact；不需要输出 id 或 kind，系统会自动把三个答案映射为 a、b、c。",
-    "当 action=draft 时，不返回 options；只返回 roundIntent。",
-    "当 action=complete 时，不返回 options；只返回 roundIntent。",
+    "当 action=artifact 时，不返回 options；只返回 roundIntent，可以返回 artifact 或 artifact=null。",
+    "当 action=complete 时，不返回 options；只返回 roundIntent，可以返回 artifact=null。",
     "所有面向用户的字段默认使用简体中文；用户原文、专有名词、代码、品牌名和已启用 Skills 明确要求的非中文文本除外。"
   ]
     .filter(Boolean)
@@ -130,10 +131,10 @@ function threeChoiceProtocol() {
   ].join("\n");
 }
 
-function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "draft" | "next-step" | "options") {
+function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "artifact" | "next-step" | "options") {
   const toolName =
-    target === "draft"
-      ? SUBMIT_TREE_DRAFT_TOOL_NAME
+    target === "artifact"
+      ? SUBMIT_TREE_ARTIFACT_TOOL_NAME
       : target === "next-step"
         ? SUBMIT_TREE_NEXT_STEP_TOOL_NAME
         : SUBMIT_TREE_OPTIONS_TOOL_NAME;
@@ -142,9 +143,9 @@ function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "draf
   );
   if (!hasFinalSubmitTool) return [];
 
-  const taskName = target === "draft" ? "draft" : target === "next-step" ? "next-step" : "options";
+  const taskName = target === "artifact" ? "产物生成" : target === "next-step" ? "路由决策" : "澄清选项";
   return [
-    `本轮可用工具里包含 ${toolName} 时，最终目标就是调用 ${toolName} 完成本轮 ${taskName} 任务；不要把最终结果写成普通文本。`,
+    `本轮可用工具里包含 ${toolName} 时，最终目标就是调用 ${toolName} 完成本轮${taskName}任务；不要把最终结果写成普通文本。`,
     `调用 ${toolName} 前可以按需调用其他工具收集信息；一旦结果足够，直接把结构化字段作为 ${toolName} 的参数提交。`
   ];
 }
@@ -178,7 +179,7 @@ function formatEnabledSkills(skills: Skill[]) {
 }
 
 function skillScopeLabel(appliesTo: Skill["appliesTo"]) {
-  if (appliesTo === "writer") return "draft";
+  if (appliesTo === "writer") return "artifact";
   if (appliesTo === "editor") return "options/next-step";
   return "全程";
 }

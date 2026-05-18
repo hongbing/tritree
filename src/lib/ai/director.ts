@@ -1,6 +1,7 @@
 import {
-  type DirectorDraftOutput,
-  DirectorDraftOutputSchema,
+  type DirectorArtifactOutput,
+  DirectorArtifactOutputSchema,
+  DirectorNextStepOutputSchema,
   type DirectorOptionsOutput,
   DirectorOptionsOutputSchema,
   type DirectorOutput,
@@ -16,6 +17,9 @@ import {
 export const DEFAULT_KIMI_BASE_URL = "https://api.moonshot.ai/anthropic";
 export const DEFAULT_KIMI_MODEL = "kimi-k2.5";
 
+export { DirectorArtifactOutputSchema, DirectorNextStepOutputSchema };
+export type { DirectorArtifactOutput };
+
 export function parseDirectorOutput(value: unknown): DirectorOutput {
   const parsed = DirectorOutputSchema.parse(value);
   requireThreeOptions(parsed.options);
@@ -23,8 +27,8 @@ export function parseDirectorOutput(value: unknown): DirectorOutput {
   return parsed;
 }
 
-export function parseDirectorDraftOutput(value: unknown): DirectorDraftOutput {
-  return DirectorDraftOutputSchema.parse(value);
+export function parseDirectorArtifactOutput(value: unknown): DirectorArtifactOutput {
+  return DirectorArtifactOutputSchema.parse(value);
 }
 
 export function parseDirectorOptionsOutput(value: unknown): DirectorOptionsOutput {
@@ -38,8 +42,8 @@ export function buildDirectorInput(parts: DirectorInputParts) {
   return buildDirectorUserPrompt(parts);
 }
 
-export function parseDirectorDraftText(text: string): DirectorDraftOutput {
-  return parseDirectorDraftOutput(parseDirectorJsonObject(text));
+export function parseDirectorArtifactText(text: string): DirectorArtifactOutput {
+  return parseDirectorArtifactOutput(parseDirectorJsonObject(text));
 }
 
 export function parseDirectorOptionsText(text: string): DirectorOptionsOutput {

@@ -16,7 +16,7 @@ export async function GET(_request: Request, context: { params: Promise<{ sessio
   try {
     const user = await requireCurrentUser();
     const state = getRepository().getSessionState(user.id, sessionId);
-    if (!state) return NextResponse.json({ error: "没有找到这篇草稿。" }, { status: 404 });
+    if (!state) return NextResponse.json({ error: "没有找到这件作品。" }, { status: 404 });
     return NextResponse.json({ state });
   } catch (error) {
     const response = authErrorResponse(error);
@@ -31,15 +31,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ sessi
   try {
     const user = await requireCurrentUser();
     const body = RenameSessionBodySchema.parse(await request.json());
-    const draft = getRepository().renameSession(user.id, sessionId, body.title);
-    if (!draft) return NextResponse.json({ error: "没有找到这篇草稿。" }, { status: 404 });
-    return NextResponse.json({ draft });
+    const work = getRepository().renameSession(user.id, sessionId, body.title);
+    if (!work) return NextResponse.json({ error: "没有找到这件作品。" }, { status: 404 });
+    return NextResponse.json({ work });
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;
     if (isBadRequestError(error)) return badRequestResponse(error);
     console.error("[treeable:rename-session]", error);
-    return NextResponse.json({ error: "无法重命名草稿。" }, { status: 500 });
+    return NextResponse.json({ error: "无法重命名作品。" }, { status: 500 });
   }
 }
 
@@ -48,13 +48,13 @@ export async function DELETE(_request: Request, context: { params: Promise<{ ses
 
   try {
     const user = await requireCurrentUser();
-    const draft = getRepository().archiveSession(user.id, sessionId);
-    if (!draft) return NextResponse.json({ error: "没有找到这篇草稿。" }, { status: 404 });
-    return NextResponse.json({ draft });
+    const work = getRepository().archiveSession(user.id, sessionId);
+    if (!work) return NextResponse.json({ error: "没有找到这件作品。" }, { status: 404 });
+    return NextResponse.json({ work });
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;
     console.error("[treeable:archive-session]", error);
-    return NextResponse.json({ error: "无法归档草稿。" }, { status: 500 });
+    return NextResponse.json({ error: "无法归档作品。" }, { status: 500 });
   }
 }

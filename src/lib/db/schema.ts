@@ -110,6 +110,9 @@ export const treeNodes = sqliteTable("tree_nodes", {
     .references(() => sessions.id),
   parentId: text("parent_id").references((): AnySQLiteColumn => treeNodes.id),
   parentOptionId: text("parent_option_id"),
+  kind: text("kind").notNull().default("decision"),
+  producedArtifactId: text("produced_artifact_id"),
+  sourceArtifactIdsJson: text("source_artifact_ids_json").notNull().default("[]"),
   roundIndex: integer("round_index").notNull(),
   roundIntent: text("round_intent").notNull(),
   optionsJson: text("options_json").notNull(),
@@ -120,7 +123,7 @@ export const treeNodes = sqliteTable("tree_nodes", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`)
 });
 
-export const draftVersions = sqliteTable("draft_versions", {
+export const artifacts = sqliteTable("artifacts", {
   id: text("id").primaryKey(),
   sessionId: text("session_id")
     .notNull()
@@ -128,12 +131,12 @@ export const draftVersions = sqliteTable("draft_versions", {
   nodeId: text("node_id")
     .notNull()
     .references(() => treeNodes.id),
-  roundIndex: integer("round_index").notNull(),
-  title: text("title").notNull(),
-  body: text("body").notNull(),
-  hashtagsJson: text("hashtags_json").notNull(),
-  imagePrompt: text("image_prompt").notNull(),
-  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`)
+  type: text("type").notNull(),
+  version: integer("version").notNull(),
+  payloadJson: text("payload_json").notNull(),
+  sourceArtifactIdsJson: text("source_artifact_ids_json").notNull().default("[]"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`)
 });
 
 export const branchHistory = sqliteTable("branch_history", {
@@ -147,22 +150,3 @@ export const branchHistory = sqliteTable("branch_history", {
   optionJson: text("option_json").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`)
 });
-
-export const publishPackages = sqliteTable(
-  "publish_packages",
-  {
-    id: text("id").primaryKey(),
-    sessionId: text("session_id")
-      .notNull()
-      .references(() => sessions.id),
-    nodeId: text("node_id")
-      .notNull()
-      .references(() => treeNodes.id),
-    title: text("title").notNull(),
-    body: text("body").notNull(),
-    hashtagsJson: text("hashtags_json").notNull(),
-    imagePrompt: text("image_prompt").notNull(),
-    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`)
-  },
-  (table) => [unique("publish_packages_session_id_unique").on(table.sessionId)]
-);

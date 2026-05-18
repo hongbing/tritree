@@ -3,7 +3,6 @@ import { z } from "zod";
 import { badRequestResponse, isBadRequestError, publicServerErrorMessage } from "@/lib/api/errors";
 import { authErrorResponse, requireCurrentUser } from "@/lib/auth/current-user";
 import { getRepository } from "@/lib/db/repository";
-import { createSeedDraft } from "@/lib/seed-draft";
 
 export const runtime = "nodejs";
 
@@ -20,11 +19,11 @@ export async function GET(request: Request) {
     const view = searchParams.get("view");
     if (view === "active" || view === "archived") {
       return NextResponse.json({
-        drafts: getRepository().listSessionSummaries(user.id, { archived: view === "archived" })
+        works: getRepository().listSessionSummaries(user.id, { archived: view === "archived" })
       });
     }
     if (searchParams.has("view")) {
-      return NextResponse.json({ error: "不支持的草稿视图。" }, { status: 400 });
+      return NextResponse.json({ error: "不支持的作品视图。" }, { status: 400 });
     }
     return NextResponse.json({ state: getRepository().getLatestSessionState(user.id) });
   } catch (error) {
@@ -59,14 +58,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const seedDraft = createSeedDraft(rootMemory.preferences.seed);
-    const draftState = repository.createSessionDraft({
+    const state = repository.createSession({
       userId: user.id,
       rootMemoryId: rootMemory.id,
-      draft: seedDraft,
       ...(body.enabledSkillIds ? { enabledSkillIds: body.enabledSkillIds } : {})
     });
-    return NextResponse.json({ state: draftState });
+    return NextResponse.json({ state });
   } catch (error) {
     console.error("[treeable:start-session]", error);
     return NextResponse.json({ error: publicServerErrorMessage(error, "无法启动创作。") }, { status: 500 });

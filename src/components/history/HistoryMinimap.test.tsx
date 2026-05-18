@@ -7,7 +7,9 @@ const state: SessionState = {
   rootMemory: {
     id: "root-1",
     preferences: {
+      artifactTypeId: "social-post",
       seed: "A seed idea",
+      creationRequest: "",
       domains: ["AI"],
       tones: ["clear"],
       styles: ["visual"],
@@ -19,6 +21,7 @@ const state: SessionState = {
     updatedAt: "2026-04-25T00:00:00.000Z"
   },
   session: {
+    artifactTypeId: "social-post",
     id: "session-1",
     title: "Treeable session",
     status: "active",
@@ -27,13 +30,18 @@ const state: SessionState = {
     updatedAt: "2026-04-25T00:00:00.000Z"
   },
   currentNode: null,
-  currentDraft: null,
-  nodeDrafts: [],
+  currentArtifact: null,
+  artifacts: [],
+  nodeArtifacts: [],
   selectedPath: [
     {
       id: "node-1",
       sessionId: "session-1",
       parentId: null,
+      parentOptionId: null,
+      kind: "analysis",
+      producedArtifactId: null,
+      sourceArtifactIds: [],
       roundIndex: 1,
       roundIntent: "Choose a direction",
       options: [],
@@ -43,6 +51,8 @@ const state: SessionState = {
       createdAt: "2026-04-25T00:00:00.000Z"
     }
   ],
+  enabledSkillIds: [],
+  enabledSkills: [],
   foldedBranches: [
     {
       id: "branch-1",
@@ -56,8 +66,7 @@ const state: SessionState = {
       },
       createdAt: "2026-04-25T00:00:00.000Z"
     }
-  ],
-  publishPackage: null
+  ]
 };
 
 describe("HistoryMinimap", () => {

@@ -3,7 +3,7 @@ import type { DirectorInputParts, DirectorMessage } from "./prompts";
 
 export type ContextViewPolicy = {
   artifacts: {
-    draft: "latest" | "none";
+    current: "latest" | "none";
   };
   tree: "current-node";
   messages: "recent" | "none";
@@ -11,14 +11,14 @@ export type ContextViewPolicy = {
 };
 
 export const SUBAGENT_CONTEXT_POLICY = {
-  artifacts: { draft: "latest" },
+  artifacts: { current: "latest" },
   tree: "current-node",
   messages: "recent",
   skills: "enabled"
 } satisfies ContextViewPolicy;
 
 export type CurrentArtifact = {
-  type: "draft";
+  type: "artifact";
   value: string;
 };
 
@@ -36,15 +36,15 @@ export function projectAgentContext(
   source: DirectorInputParts,
   policy: ContextViewPolicy = SUBAGENT_CONTEXT_POLICY
 ): ProjectedAgentContext {
-  const currentDraft = source.currentDraft.trim();
+  const currentArtifact = source.currentArtifact.trim();
 
   return {
     artifactContext: source.artifactContext?.trim() ?? "",
     currentArtifact:
-      policy.artifacts.draft === "latest" && currentDraft
+      policy.artifacts.current === "latest" && currentArtifact
         ? {
-            type: "draft",
-            value: currentDraft
+            type: "artifact",
+            value: currentArtifact
           }
         : null,
     currentNode: source.pathSummary.trim(),

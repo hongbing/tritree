@@ -51,20 +51,20 @@ describe("artifact type registry", () => {
     expect(instructions).toContain("目标");
     expect(instructions).toContain("非目标");
     expect(instructions).toContain("需求");
-    expect(instructions).toContain("hashtags 必须返回空数组");
+    expect(instructions).toContain("artifact.type=\"prd\"");
+    expect(instructions).toContain("artifact.payload.markdown");
+    expect(instructions).not.toContain("work.");
   });
 
   it("builds PRD delivery markdown and section checks", () => {
     const delivery = buildArtifactDelivery("prd", {
-      title: "移动端草稿管理 PRD",
-      body: ["## 背景", "用户需要移动端继续草稿。", "## 目标", "降低继续写作成本。", "## 需求", "- 列出草稿"].join("\n"),
-      hashtags: ["#不应出现"],
-      imagePrompt: "不应出现"
+      title: "移动端作品管理 PRD",
+      markdown: ["## 背景", "用户需要移动端继续作品。", "## 目标", "降低继续写作成本。", "## 需求", "- 列出作品"].join("\n")
     });
 
     expect(delivery.title).toBe("PRD 交付稿");
     expect(delivery.copyLabel).toBe("复制 PRD Markdown");
-    expect(delivery.text).toContain("# 移动端草稿管理 PRD");
+    expect(delivery.text).toContain("# 移动端作品管理 PRD");
     expect(delivery.text).toContain("## 背景");
     expect(delivery.text).not.toContain("#不应出现");
     expect(delivery.checks).toContainEqual({ text: "已包含：背景", tone: "ok" });

@@ -2,14 +2,14 @@ import {
   SkillSchema,
   skillsForTarget,
   DEFAULT_ARTIFACT_TYPE_ID,
+  type Artifact,
   type BranchOption,
-  type Draft,
   type OptionGenerationMode,
   type SessionState
 } from "@/lib/domain";
 import type { DirectorInputParts, DirectorMessage } from "@/lib/ai/prompts";
 import { formatArtifactInstructionsForDirector } from "@/lib/artifacts";
-import { isSeedDraft } from "@/lib/seed-draft";
+import { getArtifactPlugin } from "@/artifacts/registry";
 
 export function summarizeSessionForDirector(
   state: SessionState,
@@ -18,24 +18,24 @@ export function summarizeSessionForDirector(
   optionMode: OptionGenerationMode = "balanced"
 ): DirectorInputParts {
   const trimmedNote = selectedOptionNote?.trim();
-  const modeHint = formatDraftDirectionRangeHint(optionMode);
+  const modeHint = formatArtifactDirectionRangeHint(optionMode);
   const selectedOptionLabel = formatWritingIntentLabel(selectedOption, trimmedNote, modeHint);
-  const currentDraft = currentDraftForState(state);
+  const currentArtifact = currentArtifactForState(state);
 
   return {
     artifactContext: artifactContextForState(state),
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
-    currentDraft: currentDraft ? formatDraftForDirectorInState(state, currentDraft) : "",
+    currentArtifact: formatArtifactForDirector(currentArtifact),
     pathSummary: "",
     foldedSummary: "",
     selectedOptionLabel,
     enabledSkills: enabledSkillsForDirector(state),
-    messages: buildDraftConversationMessages(
+    messages: buildArtifactConversationMessages(
       state,
       [
         shouldRepeatArtifactContextForFinalRequest(state) ? artifactContextForState(state) : "",
-        formatDraftUserRequest({
+        formatArtifactUserRequest({
           modeHint,
           selectedOption,
           selectedOptionNote: trimmedNote
@@ -51,19 +51,19 @@ function formatOptionsDirectionRangeHint(optionMode: OptionGenerationMode) {
   }
 
   if (optionMode === "focused") {
-    return "方向范围：专注。沿当前稿已经成立的思路继续推进，优先补清楚、写顺、写实。";
+    return "方向范围：专注。沿当前产物已经成立的思路继续推进，优先补清楚、写顺、写实。";
   }
 
   return "";
 }
 
-function formatDraftDirectionRangeHint(optionMode: OptionGenerationMode) {
+function formatArtifactDirectionRangeHint(optionMode: OptionGenerationMode) {
   if (optionMode === "divergent") {
     return "方向范围：发散。可以更大胆地重组角度、结构或表达方式，让内容有更强的新鲜感。";
   }
 
   if (optionMode === "focused") {
-    return "方向范围：专注。沿当前稿已经成立的思路继续推进，优先补清楚、写顺、写实。";
+    return "方向范围：专注。沿当前产物已经成立的思路继续推进，优先补清楚、写顺、写实。";
   }
 
   return "";
@@ -93,54 +93,54 @@ function formatWritingIntentLabel(
     .join("\n");
 }
 
-export function summarizeEditedDraftForDirector(state: SessionState, draft: Draft): DirectorInputParts {
+export function summarizeEditedArtifactForDirector(state: SessionState, artifact: Artifact): DirectorInputParts {
   const selectedOptionLabel = "";
 
   return {
     artifactContext: artifactContextForState(state),
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
-    currentDraft: formatDraftForDirectorInState(state, draft),
+    currentArtifact: formatArtifactForDirector(artifact),
     pathSummary: "",
     foldedSummary: "",
     selectedOptionLabel,
     enabledSkills: enabledSkillsForDirector(state),
-    messages: buildEditorMessages(state, draft, selectedOptionLabel)
+    messages: buildEditorMessages(state, artifact, selectedOptionLabel)
   };
 }
 
-export function summarizeCurrentDraftOptionsForDirector(
+export function summarizeCurrentArtifactOptionsForDirector(
   state: SessionState,
   optionMode: OptionGenerationMode = "balanced"
 ): DirectorInputParts {
   const selectedOptionLabel = formatOptionsDirectionRangeHint(optionMode);
-  const currentDraft = currentDraftForState(state);
+  const currentArtifact = currentArtifactForState(state);
 
   return {
     artifactContext: artifactContextForState(state),
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
-    currentDraft: currentDraft ? formatDraftForDirectorInState(state, currentDraft) : "",
+    currentArtifact: formatArtifactForDirector(currentArtifact),
     pathSummary: "",
     foldedSummary: "",
     selectedOptionLabel,
     enabledSkills: enabledSkillsForDirector(state),
-    messages: buildEditorMessages(state, currentDraft, selectedOptionLabel)
+    messages: buildEditorMessages(state, currentArtifact, selectedOptionLabel)
   };
 }
 
-export function summarizeSelectionRewriteForDirector(
+export function summarizeArtifactSelectionRewriteForDirector(
   state: SessionState,
-  draft: Draft,
+  artifact: Artifact,
   selectedText: string,
   instruction: string,
-  field: "body"
+  field: string
 ) {
   return {
     rootSummary: state.rootMemory.summary,
     learnedSummary: state.rootMemory.learnedSummary,
     pathSummary: "",
-    currentDraft: draft,
+    currentArtifact: formatArtifactForDirector(artifact),
     enabledSkills: skillsForTarget(enabledSkillsForDirector(state), "writer"),
     field,
     selectedText,
@@ -157,13 +157,13 @@ export function focusSessionStateForNode(state: SessionState, nodeId: string): S
   const node = treeNodes.find((item) => item.id === nodeId);
   if (!node) return null;
 
-  const nodeDraft =
-    state.nodeDrafts.find((item) => item.nodeId === nodeId)?.draft ??
-    (state.currentNode?.id === nodeId ? state.currentDraft : null);
+  const currentArtifact = node.producedArtifactId
+    ? state.artifacts.find((artifact) => artifact.id === node.producedArtifactId) ?? null
+    : null;
   return {
     ...state,
     currentNode: node,
-    currentDraft: nodeDraft,
+    currentArtifact,
     selectedPath: activePathFor(treeNodes, node)
   };
 }
@@ -194,7 +194,7 @@ function formatPathForDirector(state: SessionState) {
     .join("\n");
 }
 
-function buildDraftConversationMessages(state: SessionState, finalUserRequest: string): DirectorMessage[] {
+function buildArtifactConversationMessages(state: SessionState, finalUserRequest: string): DirectorMessage[] {
   const messages: DirectorMessage[] = [
     {
       role: "user",
@@ -213,27 +213,27 @@ function buildDraftConversationMessages(state: SessionState, finalUserRequest: s
     if (node.agentMessages.length > 0) {
       messages.push(...node.agentMessages);
     } else {
-      messages.push({ role: "assistant", content: formatDraftHistoryRoundForWriter(state, node, index === lastPathIndex) });
+      messages.push({ role: "assistant", content: formatArtifactHistoryRoundForWriter(state, node, index === lastPathIndex) });
     }
 
     const selectedOption = node.selectedOptionId
       ? node.options.find((option) => option.id === node.selectedOptionId)
       : null;
-    const isCurrentDraftIntent = index === lastPathIndex;
-    if (selectedOption && !isCurrentDraftIntent) {
+    const isCurrentArtifactIntent = index === lastPathIndex;
+    if (selectedOption && !isCurrentArtifactIntent) {
       messages.push({ role: "user", content: formatSuggestionForDirector(selectedOption) });
     }
   });
 
-  if (state.selectedPath.length === 0 && state.currentDraft) {
-    messages.push({ role: "assistant", content: formatCurrentDraftForWriter(state, state.currentDraft) });
+  if (state.selectedPath.length === 0 && state.currentArtifact) {
+    messages.push({ role: "assistant", content: formatCurrentArtifactForWriter(state.currentArtifact) });
   }
 
   messages.push({ role: "user", content: finalUserRequest });
   return mergeConsecutiveUserMessages(messages);
 }
 
-function buildEditorMessages(state: SessionState, currentDraft: Draft | null, reviewInstruction = ""): DirectorMessage[] {
+function buildEditorMessages(state: SessionState, currentArtifact: Artifact | null, reviewInstruction = ""): DirectorMessage[] {
   const messages: DirectorMessage[] = [
     {
       role: "user",
@@ -262,7 +262,7 @@ function buildEditorMessages(state: SessionState, currentDraft: Draft | null, re
     const writingIntent = nextNode.parentOptionId
       ? (node.options.find((option) => option.id === nextNode.parentOptionId) ?? null)
       : null;
-    const revisionSummary = formatEditorRevisionSummary(nextNode, writingIntent, draftForNode(state, nextNode));
+    const revisionSummary = formatEditorRevisionSummary(nextNode, writingIntent, artifactForNode(state, nextNode));
 
     if (index + 1 === lastPathIndex) {
       latestRevisionSummary = revisionSummary;
@@ -272,8 +272,7 @@ function buildEditorMessages(state: SessionState, currentDraft: Draft | null, re
   });
 
   const finalReviewMaterial = formatEditorCurrentReviewMaterial({
-    state,
-    currentDraft,
+    currentArtifact,
     latestRevisionSummary,
     reviewInstruction
   });
@@ -307,48 +306,34 @@ function mergeConsecutiveUserMessages(messages: DirectorMessage[]) {
   return merged;
 }
 
-function formatDraftHistoryRoundForWriter(
+function formatArtifactHistoryRoundForWriter(
   state: SessionState,
   node: SessionState["selectedPath"][number],
-  includeFullDraft = false
+  includeFullArtifact = false
 ) {
-  const draft = draftForNode(state, node);
-  if (draft && includeFullDraft) {
-    if (isSeedDraftForState(state, draft)) {
-      return formatUnformedSeedDraftForDirector(draft);
-    }
-
+  const artifact = artifactForNode(state, node);
+  if (artifact && includeFullArtifact) {
     return [
-      `第 ${node.roundIndex} 版已形成草稿`,
-      formatDraftForDirector(draft)
+      `第 ${node.roundIndex} 版已形成产物`,
+      formatArtifactForDirector(artifact)
     ]
       .filter(Boolean)
       .join("\n");
   }
 
   return [
-    `第 ${node.roundIndex} 版已形成版本摘要`,
-    `形成版本：${
-      draft
-        ? isSeedDraftForState(state, draft)
-          ? "当前只有种子念头，尚未形成正式草稿。"
-          : formatDraftVersionSummary(draft)
-        : "暂无可用正文，仅保留本轮意图。"
-    }`
+    `第 ${node.roundIndex} 版已形成产物摘要`,
+    `形成产物：${artifact ? formatArtifactVersionSummary(artifact) : "本轮未形成产物，仅保留本轮意图。"}`
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-function formatCurrentDraftForWriter(state: SessionState, draft: Draft) {
-  if (isSeedDraftForState(state, draft)) {
-    return formatUnformedSeedDraftForDirector(draft);
-  }
-
-  return ["当前已形成草稿", formatDraftForDirector(draft)].join("\n");
+function formatCurrentArtifactForWriter(artifact: Artifact) {
+  return ["当前已形成产物", formatArtifactForDirector(artifact)].join("\n");
 }
 
-function formatDraftUserRequest({
+function formatArtifactUserRequest({
   modeHint,
   selectedOption,
   selectedOptionNote
@@ -372,7 +357,7 @@ function formatDraftUserRequest({
         selectedOptionNote ? `用户补充要求：${selectedOptionNote}` : "",
         modeHint
       ].filter(Boolean)
-    : ["基于初始内容和上一版草稿生成新的内容版本。"];
+    : ["基于初始内容和上一版产物生成新的内容版本。"];
 
   return [
     ...selectedLines
@@ -398,43 +383,22 @@ function shouldRepeatArtifactContextForFinalRequest(state: SessionState) {
 }
 
 function formatEditorCurrentReviewMaterial({
-  state,
-  currentDraft,
+  currentArtifact,
   latestRevisionSummary,
   reviewInstruction
 }: {
-  state: SessionState;
-  currentDraft: Draft | null;
+  currentArtifact: Artifact | null;
   latestRevisionSummary: string;
   reviewInstruction: string;
 }) {
   return [
     "本轮审稿材料：",
     reviewInstruction ? `本轮要求：\n${reviewInstruction}` : "",
-    `当前内容：\n${currentDraft ? formatDraftForDirectorInState(state, currentDraft) : "暂无内容。"}`,
+    `当前内容：\n${currentArtifact ? formatArtifactForDirector(currentArtifact) : "暂无内容。"}`,
     latestRevisionSummary
   ]
     .filter(Boolean)
     .join("\n\n");
-}
-
-function formatDraftForDirectorInState(state: SessionState, draft: Draft) {
-  if (isSeedDraftForState(state, draft)) {
-    return formatUnformedSeedDraftForDirector(draft);
-  }
-
-  return formatDraftForDirector(draft);
-}
-
-function formatUnformedSeedDraftForDirector(draft: Draft) {
-  return [
-    "当前只有种子念头，尚未形成正式草稿。",
-    `种子内容：${draft.body}`
-  ].join("\n");
-}
-
-function isSeedDraftForState(state: SessionState, draft: Draft) {
-  return isSeedDraft(draft, state.rootMemory.preferences.seed ?? "");
 }
 
 function formatEditorSuggestionRound(node: SessionState["selectedPath"][number]) {
@@ -448,11 +412,11 @@ function formatEditorSuggestionRound(node: SessionState["selectedPath"][number])
 function formatEditorRevisionSummary(
   node: SessionState["selectedPath"][number],
   writingIntent: BranchOption | null,
-  draft: Draft | null
+  artifact: Artifact | null
 ) {
   return [
     `最近一次修改：${writingIntent ? writingIntent.label : node.roundIntent}`,
-    `形成版本：${draft ? formatDraftVersionSummary(draft) : node.roundIntent}`
+    `形成产物：${artifact ? formatArtifactVersionSummary(artifact) : node.roundIntent}`
   ].join("\n");
 }
 
@@ -520,48 +484,24 @@ function uniqueLabels(options: BranchOption[]) {
   return labels;
 }
 
-function formatDraftForDirector(draft: Draft) {
-  return [
-    `标题：${draft.title || "未命名"}`,
-    `正文：${draft.body}`,
-    `话题：${draft.hashtags.join("、") || "暂无"}`,
-    `配图提示：${draft.imagePrompt || "暂无"}`
-  ].join("\n");
+function formatArtifactForDirector(artifact: Artifact | null) {
+  if (!artifact) return "";
+  const plugin = getArtifactPlugin(artifact.type);
+  if (!plugin) return JSON.stringify(artifact.payload, null, 2);
+  const payload = plugin.payloadSchema.parse(artifact.payload);
+  return plugin.summarizeForDirector(payload);
 }
 
-function formatDraftVersionSummary(draft: Draft) {
-  return [
-    `标题：${draft.title || "未命名"}`,
-    `正文约 ${draft.body.length} 字`,
-    `话题：${draft.hashtags.join("、") || "暂无"}`,
-    draft.imagePrompt ? "已有配图提示" : "暂无配图提示"
-  ].join("；");
+function formatArtifactVersionSummary(artifact: Artifact) {
+  return truncateText(formatArtifactForDirector(artifact).replace(/\s+/g, " "), 36);
 }
 
-function draftForNode(state: SessionState, node: SessionState["selectedPath"][number]) {
-  return draftForNodeId(state, node.id) ?? nearestAncestorDraftForNode(state, node);
+function artifactForNode(state: SessionState, node: SessionState["selectedPath"][number]) {
+  if (!node.producedArtifactId) return null;
+  return state.artifacts.find((artifact) => artifact.id === node.producedArtifactId) ?? null;
 }
 
-function currentDraftForState(state: SessionState) {
-  if (!state.currentNode) return state.currentDraft;
-  return draftForNode(state, state.currentNode);
-}
-
-function draftForNodeId(state: SessionState, nodeId: string) {
-  return state.nodeDrafts.find((item) => item.nodeId === nodeId)?.draft ?? (state.currentNode?.id === nodeId ? state.currentDraft : null);
-}
-
-function nearestAncestorDraftForNode(state: SessionState, node: SessionState["selectedPath"][number]) {
-  const nodesById = new Map(
-    [...(state.treeNodes ?? []), ...state.selectedPath, ...(state.currentNode ? [state.currentNode] : [])].map((item) => [item.id, item])
-  );
-  let cursor = node.parentId ? nodesById.get(node.parentId) : null;
-
-  while (cursor) {
-    const draft = draftForNodeId(state, cursor.id);
-    if (draft) return draft;
-    cursor = cursor.parentId ? nodesById.get(cursor.parentId) : null;
-  }
-
-  return null;
+function currentArtifactForState(state: SessionState) {
+  if (!state.currentNode) return state.currentArtifact;
+  return artifactForNode(state, state.currentNode);
 }

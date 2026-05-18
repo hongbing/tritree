@@ -15,14 +15,14 @@ const currentUser = {
   updatedAt: "2026-05-06T00:00:00.000Z"
 };
 
-const draftSummary = {
+const workSummary = {
   id: "session-1",
-  title: "Draft one",
+  title: "Work one",
   status: "active",
   currentNodeId: "node-1",
   currentRoundIndex: 2,
-  bodyExcerpt: "Draft body",
-  bodyLength: 10,
+  artifactExcerpt: "Work body",
+  artifactSummaryLength: 10,
   isArchived: false,
   createdAt: "2026-05-07T00:00:00.000Z",
   updatedAt: "2026-05-07T01:00:00.000Z"
@@ -45,7 +45,7 @@ const sessionState = {
   },
   session: {
     id: "session-1",
-    title: "Draft one",
+    title: "Work one",
     status: "active",
     currentNodeId: "node-1",
     createdAt: "2026-04-27T00:00:00.000Z",
@@ -63,14 +63,13 @@ const sessionState = {
     foldedOptions: [],
     createdAt: "2026-04-27T00:00:00.000Z"
   },
-  currentDraft: { title: "Draft one", body: "Draft body", hashtags: ["#draft"], imagePrompt: "draft image" },
-  nodeDrafts: [{ nodeId: "node-1", draft: { title: "Draft one", body: "Draft body", hashtags: ["#draft"], imagePrompt: "draft image" } }],
+  currentArtifact: { title: "Work one", body: "Work body", hashtags: ["#work"], imagePrompt: "work image" },
+  nodeArtifacts: [{ nodeId: "node-1", artifact: { title: "Work one", body: "Work body", hashtags: ["#work"], imagePrompt: "work image" } }],
   selectedPath: [],
   treeNodes: [],
   enabledSkillIds: [],
   enabledSkills: [],
   foldedBranches: [],
-  publishPackage: null
 };
 
 vi.mock("server-only", () => ({}));
@@ -94,7 +93,7 @@ beforeEach(() => {
 });
 
 describe("/api/sessions/:sessionId", () => {
-  it("returns 401 when loading a draft without login", async () => {
+  it("returns 401 when loading a work without login", async () => {
     requireCurrentUserMock.mockRejectedValue(new AuthApiError(401, "请先登录。"));
 
     const response = await GET(new Request("http://test.local/api/sessions/session-1"), {
@@ -105,7 +104,7 @@ describe("/api/sessions/:sessionId", () => {
     expect(await response.json()).toEqual({ error: "请先登录。" });
   });
 
-  it("loads a draft session state for the current user", async () => {
+  it("loads a work session state for the current user", async () => {
     const getSessionState = vi.fn().mockReturnValue(sessionState);
     getRepositoryMock.mockReturnValue({ getSessionState });
 
@@ -119,7 +118,7 @@ describe("/api/sessions/:sessionId", () => {
     expect(data.state.session.id).toBe("session-1");
   });
 
-  it("returns 404 when loading a missing draft", async () => {
+  it("returns 404 when loading a missing work", async () => {
     const getSessionState = vi.fn().mockReturnValue(null);
     getRepositoryMock.mockReturnValue({ getSessionState });
 
@@ -128,11 +127,11 @@ describe("/api/sessions/:sessionId", () => {
     });
 
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: "没有找到这篇草稿。" });
+    expect(await response.json()).toEqual({ error: "没有找到这件作品。" });
   });
 
-  it("renames a draft with a trimmed title", async () => {
-    const renameSession = vi.fn().mockReturnValue({ ...draftSummary, title: "New title" });
+  it("renames a work with a trimmed title", async () => {
+    const renameSession = vi.fn().mockReturnValue({ ...workSummary, title: "New title" });
     getRepositoryMock.mockReturnValue({ renameSession });
 
     const response = await PATCH(
@@ -146,10 +145,10 @@ describe("/api/sessions/:sessionId", () => {
 
     expect(response.status).toBe(200);
     expect(renameSession).toHaveBeenCalledWith("user-1", "session-1", "New title");
-    expect(data.draft.title).toBe("New title");
+    expect(data.work.title).toBe("New title");
   });
 
-  it("returns 400 when renaming a draft to an empty title", async () => {
+  it("returns 400 when renaming a work to an empty title", async () => {
     const renameSession = vi.fn();
     getRepositoryMock.mockReturnValue({ renameSession });
 
@@ -167,8 +166,8 @@ describe("/api/sessions/:sessionId", () => {
     expect(renameSession).not.toHaveBeenCalled();
   });
 
-  it("archives a draft for the current user", async () => {
-    const archiveSession = vi.fn().mockReturnValue({ ...draftSummary, isArchived: true });
+  it("archives a work for the current user", async () => {
+    const archiveSession = vi.fn().mockReturnValue({ ...workSummary, isArchived: true });
     getRepositoryMock.mockReturnValue({ archiveSession });
 
     const response = await DELETE(new Request("http://test.local/api/sessions/session-1", { method: "DELETE" }), {
@@ -178,6 +177,6 @@ describe("/api/sessions/:sessionId", () => {
 
     expect(response.status).toBe(200);
     expect(archiveSession).toHaveBeenCalledWith("user-1", "session-1");
-    expect(data.draft.isArchived).toBe(true);
+    expect(data.work.isArchived).toBe(true);
   });
 });

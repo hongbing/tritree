@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSharedAgentContext,
-  buildTreeDraftInstructions,
+  buildTreeArtifactInstructions,
   buildTreeNextStepInstructions,
   buildTreeOptionsInstructions,
   type SharedAgentContextInput
@@ -65,7 +65,7 @@ const shellInput = {
   toolSummaries: [
     "run_subagent_template：运行预创建子代理模板；运行时会提供当前上下文视图。",
     "run_custom_subagent：运行自定义子代理；运行时会提供当前上下文视图。",
-    "submit_tree_draft：最终提交工具。",
+    "submit_tree_artifact：最终提交工具。",
     "submit_tree_next_step：最终提交工具。",
     "submit_tree_options：最终提交工具。"
   ]
@@ -83,7 +83,7 @@ describe("buildSharedAgentContext", () => {
     expect(context).toContain("说明：负责判断资料缺口，并建议是否委托检索或核查。");
     expect(context).toContain("要求：先识别当前内容中最影响可信度的事实缺口；必要时建议委托资料型 subagent 做最小范围核查。");
     expect(context).toContain("## Skill: 朋友圈语气");
-    expect(context).toContain("适用目标：draft");
+    expect(context).toContain("适用目标：artifact");
     expect(context).toContain("## Skill: 结构审读");
     expect(context).toContain("适用目标：options/next-step");
     expect(context).toContain("小红书标题：生成适合小红书的标题。");
@@ -103,7 +103,7 @@ describe("buildSharedAgentContext", () => {
 describe("agent instructions", () => {
   it("keeps the main prompt as a generic ReAct shell", () => {
     const instructions = [
-      buildTreeDraftInstructions(shellInput),
+      buildTreeArtifactInstructions(shellInput),
       buildTreeOptionsInstructions(shellInput),
       buildTreeNextStepInstructions(shellInput)
     ].join("\n\n---\n\n");
@@ -122,6 +122,7 @@ describe("agent instructions", () => {
     expect(instructions).not.toContain("临时");
     expect(instructions).not.toContain("# 内容工作流阶段");
     expect(instructions).not.toContain("# 总导演任务");
+    expect(instructions).not.toContain("# 产物生成任务");
 
     for (const businessPhrase of [
       "创作状态",
@@ -142,15 +143,15 @@ describe("agent instructions", () => {
   });
 
   it("keeps target differences limited to final tool contracts", () => {
-    const draftInstructions = buildTreeDraftInstructions(shellInput);
+    const artifactInstructions = buildTreeArtifactInstructions(shellInput);
     const optionsInstructions = buildTreeOptionsInstructions(shellInput);
     const nextStepInstructions = buildTreeNextStepInstructions(shellInput);
 
-    expect(draftInstructions.startsWith("# ReAct Agent")).toBe(true);
-    expect(draftInstructions).toContain("本轮固定目标：提交 draft 结果");
-    expect(draftInstructions).toContain("submit_tree_draft");
-    expect(draftInstructions).toContain("draft.title、draft.body、draft.hashtags、draft.imagePrompt");
-    expect(draftInstructions).not.toContain("# 三选一协议");
+    expect(artifactInstructions.startsWith("# ReAct Agent")).toBe(true);
+    expect(artifactInstructions).toContain("本轮固定目标：提交 artifact 结果");
+    expect(artifactInstructions).toContain("submit_tree_artifact");
+    expect(artifactInstructions).toContain("artifact.type、artifact.payload 和 artifact.sourceArtifactIds");
+    expect(artifactInstructions).not.toContain("# 三选一交互协议");
 
     expect(optionsInstructions.startsWith("# ReAct Agent")).toBe(true);
     expect(optionsInstructions).toContain("本轮固定目标：提交 options 结果");
@@ -161,12 +162,12 @@ describe("agent instructions", () => {
 
     expect(nextStepInstructions.startsWith("# ReAct Agent")).toBe(true);
     expect(nextStepInstructions).toContain("本轮固定目标：提交 next-step 路由结果");
-    expect(nextStepInstructions).toContain("action 只能是 options、draft 或 complete");
+    expect(nextStepInstructions).toContain("action 只能是 options、artifact 或 complete");
     expect(nextStepInstructions).toContain("submit_tree_next_step");
 
-    expect(draftInstructions.indexOf("# 已启用 Skills")).toBeGreaterThan(draftInstructions.indexOf("# ReAct Agent"));
-    expect(draftInstructions.indexOf("# ReAct 执行协议")).toBeGreaterThan(draftInstructions.indexOf("# 已启用 Skills"));
-    expect(draftInstructions.indexOf("# 本轮固定目标")).toBeGreaterThan(draftInstructions.indexOf("# ReAct 执行协议"));
-    expect(draftInstructions.indexOf("# 输出契约")).toBeGreaterThan(draftInstructions.indexOf("# 本轮固定目标"));
+    expect(artifactInstructions.indexOf("# 已启用 Skills")).toBeGreaterThan(artifactInstructions.indexOf("# ReAct Agent"));
+    expect(artifactInstructions.indexOf("# ReAct 执行协议")).toBeGreaterThan(artifactInstructions.indexOf("# 已启用 Skills"));
+    expect(artifactInstructions.indexOf("# 本轮固定目标")).toBeGreaterThan(artifactInstructions.indexOf("# ReAct 执行协议"));
+    expect(artifactInstructions.indexOf("# 输出契约")).toBeGreaterThan(artifactInstructions.indexOf("# 本轮固定目标"));
   });
 });

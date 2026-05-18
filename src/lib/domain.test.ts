@@ -1,16 +1,81 @@
 import { describe, expect, it } from "vitest";
 import {
+  ArtifactSchema,
   BranchOptionSchema,
+  DirectorArtifactOutputSchema,
   DirectorOptionsOutputSchema,
   DirectorNextStepOutputSchema,
   DirectorOutputSchema,
+  NodeArtifactSchema,
   RootPreferencesSchema,
   SessionStateSchema,
   SkillSchema,
   SkillUpsertSchema,
+  TreeNodeSchema,
   requireThreeOptions,
   skillsForTarget
 } from "./domain";
+
+function validRootMemory() {
+  return {
+    id: "root-1",
+    preferences: {
+      artifactTypeId: "social-post",
+      seed: "Seed",
+      creationRequest: "",
+      domains: ["Creation"],
+      tones: ["Sincere"],
+      styles: ["Opinion-driven"],
+      personas: ["Practitioner"]
+    },
+    summary: "Seed",
+    learnedSummary: "",
+    createdAt: "2026-05-18T00:00:00.000Z",
+    updatedAt: "2026-05-18T00:00:00.000Z"
+  };
+}
+
+function validSession() {
+  return {
+    artifactTypeId: "social-post",
+    id: "session-1",
+    title: "Session",
+    status: "active",
+    currentNodeId: null,
+    createdAt: "2026-05-18T00:00:00.000Z",
+    updatedAt: "2026-05-18T00:00:00.000Z"
+  };
+}
+
+function validArtifact() {
+  return {
+    id: "artifact-1",
+    type: "social-post",
+    version: 1,
+    payload: {
+      title: "A working title",
+      body: "A short body.",
+      hashtags: ["#AI"],
+      imagePrompt: "A luminous tree on a writing desk."
+    },
+    sourceArtifactIds: [],
+    createdByNodeId: "node-1",
+    createdAt: "2026-05-18T00:00:00.000Z",
+    updatedAt: "2026-05-18T00:00:00.000Z"
+  };
+}
+
+function validGeneratedArtifact() {
+  return {
+    type: "social-post",
+    payload: {
+      title: "A working title",
+      body: "A short body.",
+      hashtags: ["#AI"],
+      imagePrompt: "A luminous tree on a writing desk."
+    }
+  };
+}
 
 describe("RootPreferencesSchema", () => {
   it("accepts a seed-driven first-run shape", () => {
@@ -73,7 +138,7 @@ describe("RootPreferencesSchema", () => {
 
     const prd = RootPreferencesSchema.parse({
       artifactTypeId: "prd",
-      seed: "移动端草稿管理",
+      seed: "移动端作品管理",
       domains: ["Work"],
       tones: ["calm"],
       styles: ["document"],
@@ -97,30 +162,53 @@ describe("DirectorOptionsOutputSchema", () => {
     });
 
     expect(parsed.options.map((option) => option.id)).toEqual(["a", "b", "c"]);
-    expect(parsed).not.toHaveProperty("draft");
+    expect(parsed).not.toHaveProperty("work");
     expect(parsed).not.toHaveProperty("memoryObservation");
+  });
+
+  it("rejects work-shaped extras in an options-only response", () => {
+    expect(
+      DirectorOptionsOutputSchema.safeParse({
+        roundIntent: "生成下一步",
+        options: [
+          { id: "a", label: "补场景", description: "补一个真实场景。", impact: "让内容更具体。", kind: "explore" },
+          { id: "b", label: "深挖原因", description: "说清背后的原因。", impact: "让观点更可信。", kind: "deepen" },
+          { id: "c", label: "换角度", description: "从反面重看问题。", impact: "让表达更有张力。", kind: "reframe" }
+        ],
+        work: { title: "T", body: "B", hashtags: [], imagePrompt: "" }
+      }).success
+    ).toBe(false);
   });
 });
 
 describe("DirectorNextStepOutputSchema", () => {
-  it("accepts a decision to generate a draft without options", () => {
+  it("accepts a decision to generate an artifact without options", () => {
     const parsed = DirectorNextStepOutputSchema.parse({
-      action: "draft",
-      roundIntent: "信息足够，生成一版 PRD"
+      action: "artifact",
+      roundIntent: "信息足够，生成一版 PRD",
+      artifact: {
+        type: "prd",
+        payload: { title: "登录 PRD", markdown: "## 背景\n登录慢。" }
+      }
     });
 
-    expect(parsed.action).toBe("draft");
+    expect(parsed.action).toBe("artifact");
+    if (parsed.action === "artifact") {
+      expect(parsed.artifact?.type).toBe("prd");
+    }
     expect(parsed).not.toHaveProperty("options");
     expect(parsed).not.toHaveProperty("memoryObservation");
   });
 
-  it("accepts a decision to complete the current path without more options or a draft", () => {
+  it("accepts a decision to complete the current path without more options or a work", () => {
     const parsed = DirectorNextStepOutputSchema.parse({
       action: "complete",
-      roundIntent: "当前版本已经可以交付"
+      roundIntent: "当前版本已经可以交付",
+      artifact: null
     });
 
     expect(parsed.action).toBe("complete");
+    expect(parsed.artifact).toBeNull();
     expect(parsed).not.toHaveProperty("options");
     expect(parsed).not.toHaveProperty("memoryObservation");
   });
@@ -130,7 +218,7 @@ describe("DirectorNextStepOutputSchema", () => {
       action: "options",
       roundIntent: "需要先澄清样式修改范围",
       options: [
-        { id: "a", label: "说明页面范围", description: "先确认哪些页面需要改。", impact: "避免草稿假设范围。", kind: "deepen" },
+        { id: "a", label: "说明页面范围", description: "先确认哪些页面需要改。", impact: "避免作品假设范围。", kind: "deepen" },
         { id: "b", label: "说明目标风格", description: "先确认要改成什么感觉。", impact: "让后续 PRD 更准确。", kind: "reframe" },
         { id: "c", label: "说明验收标准", description: "先确认怎么判断改好了。", impact: "让需求可执行。", kind: "finish" }
       ]
@@ -147,7 +235,7 @@ describe("DirectorNextStepOutputSchema", () => {
     const parsed = DirectorNextStepOutputSchema.parse({
       roundIntent: "需要先澄清样式修改范围",
       options: [
-        { id: "a", label: "说明页面范围", description: "先确认哪些页面需要改。", impact: "避免草稿假设范围。", kind: "deepen" },
+        { id: "a", label: "说明页面范围", description: "先确认哪些页面需要改。", impact: "避免作品假设范围。", kind: "deepen" },
         { id: "b", label: "说明目标风格", description: "先确认要改成什么感觉。", impact: "让后续 PRD 更准确。", kind: "reframe" },
         { id: "c", label: "说明验收标准", description: "先确认怎么判断改好了。", impact: "让需求可执行。", kind: "finish" }
       ]
@@ -193,12 +281,12 @@ describe("DirectorNextStepOutputSchema", () => {
 });
 
 describe("DirectorOutputSchema", () => {
-  it("accepts a structured AI director response", () => {
+  it("accepts a structured AI director response with a generated artifact", () => {
     const option = {
       id: "a",
       label: "Turn it into a sharper opinion",
-      description: "Make the draft more memorable by adding contrast.",
-      impact: "The next draft will emphasize tension.",
+      description: "Make the work more memorable by adding contrast.",
+      impact: "The next work will emphasize tension.",
       kind: "reframe"
     };
 
@@ -209,18 +297,135 @@ describe("DirectorOutputSchema", () => {
         { ...option, id: "b", kind: "deepen" },
         { ...option, id: "c", kind: "finish" }
       ],
-      draft: {
-        title: "A working title",
-        body: "A short body.",
-        hashtags: ["#AI"],
-        imagePrompt: "A luminous tree on a writing desk."
+      artifact: {
+        type: "social-post",
+        payload: { title: "A working title", body: "A short body.", hashtags: ["#AI"], imagePrompt: "" }
       },
-      finishAvailable: true,
-      publishPackage: null
+      finishAvailable: true
     });
 
     expect(parsed.options).toHaveLength(3);
+    expect(parsed.artifact?.type).toBe("social-post");
+    expect(parsed.artifact?.sourceArtifactIds).toEqual([]);
     expect(parsed).not.toHaveProperty("memoryObservation");
+  });
+
+  it("accepts a structured AI director response with no artifact", () => {
+    const option = {
+      id: "a",
+      label: "先补背景",
+      description: "先确认背景是否足够。",
+      impact: "让下一步更准确。",
+      kind: "explore"
+    };
+
+    const parsed = DirectorOutputSchema.parse({
+      roundIntent: "先判断是否需要更多信息",
+      options: [
+        option,
+        { ...option, id: "b", kind: "deepen" },
+        { ...option, id: "c", kind: "finish" }
+      ],
+      artifact: null
+    });
+
+    expect(parsed.artifact).toBeNull();
+  });
+
+  it("rejects work-shaped director output", () => {
+    const option = {
+      id: "a",
+      label: "先补背景",
+      description: "先确认背景是否足够。",
+      impact: "让下一步更准确。",
+      kind: "explore"
+    };
+
+    expect(
+      DirectorOutputSchema.safeParse({
+        roundIntent: "不要接受 work 核心输出",
+        options: [
+          option,
+          { ...option, id: "b", kind: "deepen" },
+          { ...option, id: "c", kind: "finish" }
+        ],
+        work: { title: "T", body: "B", hashtags: [], imagePrompt: "" }
+      }).success
+    ).toBe(false);
+  });
+
+  it("accepts generated artifact output without persistence metadata", () => {
+    const parsed = DirectorArtifactOutputSchema.parse({
+      roundIntent: "生成一版社媒内容",
+      artifact: {
+        type: "social-post",
+        payload: { title: "T", body: "B", hashtags: [], imagePrompt: "" }
+      }
+    });
+
+    expect(parsed.artifact).toEqual({
+      type: "social-post",
+      payload: { title: "T", body: "B", hashtags: [], imagePrompt: "" },
+      sourceArtifactIds: []
+    });
+  });
+
+  it("requires generated artifact payloads", () => {
+    expect(
+      DirectorArtifactOutputSchema.safeParse({
+        roundIntent: "生成一版 PRD",
+        artifact: {
+          type: "prd"
+        }
+      }).success
+    ).toBe(false);
+  });
+
+  it("accepts no-artifact output without work fallback", () => {
+    const parsed = DirectorArtifactOutputSchema.parse({
+      roundIntent: "这一步只判断",
+      artifact: null
+    });
+
+    expect(parsed.artifact).toBeNull();
+    expect(
+      DirectorArtifactOutputSchema.safeParse({
+        roundIntent: "不要接受 work 核心输出",
+        work: { title: "T", body: "B", hashtags: [], imagePrompt: "" }
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects persisted artifact metadata in generated artifact output", () => {
+    expect(
+      DirectorArtifactOutputSchema.safeParse({
+        roundIntent: "生成一版社媒内容",
+        artifact: validArtifact()
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects persisted artifact metadata in director option output", () => {
+    const option = {
+      id: "a",
+      label: "Turn it into a sharper opinion",
+      description: "Make the work more memorable by adding contrast.",
+      impact: "The next work will emphasize tension.",
+      kind: "reframe"
+    };
+
+    expect(
+      DirectorOutputSchema.safeParse({
+        roundIntent: "Add tension",
+        options: [
+          option,
+          { ...option, id: "b", kind: "deepen" },
+          { ...option, id: "c", kind: "finish" }
+        ],
+        artifact: validArtifact(),
+        finishAvailable: true
+      }).success
+    ).toBe(false);
   });
 
   it("rejects responses with one option", () => {
@@ -236,14 +441,8 @@ describe("DirectorOutputSchema", () => {
       DirectorOutputSchema.parse({
         roundIntent: "Add tension",
         options: [option],
-        draft: {
-          title: "",
-          body: "",
-          hashtags: [],
-          imagePrompt: ""
-        },
-        finishAvailable: false,
-        publishPackage: null
+        artifact: validGeneratedArtifact(),
+        finishAvailable: false
       })
     ).toThrow("AI suggestions must include exactly three items.");
   });
@@ -252,8 +451,8 @@ describe("DirectorOutputSchema", () => {
     const option = {
       id: "a",
       label: "Turn it into a sharper opinion",
-      description: "Make the draft more memorable by adding contrast.",
-      impact: "The next draft will emphasize tension.",
+      description: "Make the work more memorable by adding contrast.",
+      impact: "The next work will emphasize tension.",
       kind: "reframe"
     };
 
@@ -266,14 +465,8 @@ describe("DirectorOutputSchema", () => {
           { ...option, id: "c", kind: "finish" },
           { ...option, id: "a", label: "Try another angle" }
         ],
-        draft: {
-          title: "",
-          body: "",
-          hashtags: [],
-          imagePrompt: ""
-        },
-        finishAvailable: false,
-        publishPackage: null
+        artifact: validGeneratedArtifact(),
+        finishAvailable: false
       })
     ).toThrow("AI suggestions must include exactly three items.");
   });
@@ -282,8 +475,8 @@ describe("DirectorOutputSchema", () => {
     const option = {
       id: "a",
       label: "Turn it into a sharper opinion",
-      description: "Make the draft more memorable by adding contrast.",
-      impact: "The next draft will emphasize tension.",
+      description: "Make the work more memorable by adding contrast.",
+      impact: "The next work will emphasize tension.",
       kind: "reframe"
     };
 
@@ -295,14 +488,8 @@ describe("DirectorOutputSchema", () => {
           { ...option, label: "Deepen the proof" },
           { ...option, label: "Try another angle" }
         ],
-        draft: {
-          title: "",
-          body: "",
-          hashtags: [],
-          imagePrompt: ""
-        },
-        finishAvailable: false,
-        publishPackage: null
+        artifact: validGeneratedArtifact(),
+        finishAvailable: false
       })
     ).toThrow("AI suggestions must include IDs a, b, and c exactly once.");
   });
@@ -311,8 +498,8 @@ describe("DirectorOutputSchema", () => {
     const option = {
       id: "a",
       label: "Turn it into a sharper opinion",
-      description: "Make the draft more memorable by adding contrast.",
-      impact: "The next draft will emphasize tension.",
+      description: "Make the work more memorable by adding contrast.",
+      impact: "The next work will emphasize tension.",
       kind: "reframe"
     };
 
@@ -324,14 +511,8 @@ describe("DirectorOutputSchema", () => {
           { ...option, id: "b", kind: "deepen" },
           { ...option, id: "custom-user", label: "User custom branch" }
         ],
-        draft: {
-          title: "",
-          body: "",
-          hashtags: [],
-          imagePrompt: ""
-        },
-        finishAvailable: false,
-        publishPackage: null
+        artifact: validGeneratedArtifact(),
+        finishAvailable: false
       })
     ).toThrow("AI suggestions must include IDs a, b, and c exactly once.");
   });
@@ -435,7 +616,7 @@ describe("SkillSchema", () => {
       id: "writer",
       title: "自然短句",
       category: "风格",
-      description: "让草稿更自然。",
+      description: "让作品更自然。",
       prompt: "句子短一点。",
       appliesTo: "writer",
       isSystem: false,
@@ -487,7 +668,7 @@ describe("SessionStateSchema", () => {
       id: "a",
       label: "Explore",
       description: "Open a fresh direction.",
-      impact: "The next draft will add range.",
+      impact: "The next work will add range.",
       kind: "explore"
     });
 
@@ -495,6 +676,9 @@ describe("SessionStateSchema", () => {
       id: "node-1",
       sessionId: "session-1",
       parentId: null,
+      kind: "artifact",
+      producedArtifactId: "artifact-1",
+      sourceArtifactIds: [],
       roundIndex: 0,
       roundIntent: "Start",
       options: [option],
@@ -505,35 +689,17 @@ describe("SessionStateSchema", () => {
     };
 
     const parsed = SessionStateSchema.parse({
-      rootMemory: {
-        id: "root-1",
-        preferences: {
-          domains: ["AI"],
-          tones: ["calm"],
-          styles: ["opinion-driven"],
-          personas: ["practitioner"]
-        },
-        summary: "",
-        learnedSummary: "",
-        createdAt: "2026-04-24T00:00:00.000Z",
-        updatedAt: "2026-04-24T00:00:00.000Z"
-      },
+      rootMemory: validRootMemory(),
       session: {
+        ...validSession(),
         artifactTypeId: "prd",
-        id: "session-1",
         title: "Treeable session",
-        status: "active",
-        currentNodeId: "node-1",
-        createdAt: "2026-04-24T00:00:00.000Z",
-        updatedAt: "2026-04-24T00:00:00.000Z"
+        currentNodeId: "node-1"
       },
       currentNode: node,
-      currentDraft: {
-        title: "",
-        body: "",
-        hashtags: [],
-        imagePrompt: ""
-      },
+      currentArtifact: validArtifact(),
+      artifacts: [validArtifact()],
+      nodeArtifacts: [{ nodeId: "node-1", artifact: validArtifact() }],
       selectedPath: [node],
       enabledSkillIds: ["skill-analysis"],
       enabledSkills: [
@@ -557,11 +723,126 @@ describe("SessionStateSchema", () => {
           option,
           createdAt: "2026-04-24T00:00:00.000Z"
         }
-      ],
-      publishPackage: null
+      ]
     });
 
     expect(parsed.session.status).toBe("active");
     expect(parsed.session.artifactTypeId).toBe("prd");
+  });
+});
+
+describe("ArtifactSchema", () => {
+  it("parses generic artifacts and node artifacts", () => {
+    const artifact = ArtifactSchema.parse({
+      id: "artifact-1",
+      type: "social-post",
+      version: 1,
+      payload: { title: "T", body: "B", hashtags: [], imagePrompt: "" },
+      sourceArtifactIds: ["artifact-0"],
+      createdByNodeId: "node-1",
+      createdAt: "2026-05-18T00:00:00.000Z",
+      updatedAt: "2026-05-18T00:00:00.000Z"
+    });
+
+    expect(artifact.type).toBe("social-post");
+    expect(NodeArtifactSchema.parse({ nodeId: "node-1", artifact }).artifact.id).toBe("artifact-1");
+  });
+
+  it("requires persisted artifact payloads", () => {
+    expect(
+      ArtifactSchema.safeParse({
+        id: "artifact-1",
+        type: "prd",
+        version: 1,
+        sourceArtifactIds: [],
+        createdByNodeId: "node-1",
+        createdAt: "2026-05-18T00:00:00.000Z",
+        updatedAt: "2026-05-18T00:00:00.000Z"
+      }).success
+    ).toBe(false);
+  });
+
+  it("parses workflow nodes without produced artifacts", () => {
+    const node = TreeNodeSchema.parse({
+      id: "node-1",
+      sessionId: "session-1",
+      parentId: null,
+      parentOptionId: null,
+      kind: "analysis",
+      producedArtifactId: null,
+      sourceArtifactIds: [],
+      roundIndex: 1,
+      roundIntent: "只分析，不生成产物",
+      options: [],
+      selectedOptionId: null,
+      foldedOptions: [],
+      agentMessages: [],
+      createdAt: "2026-05-18T00:00:00.000Z"
+    });
+
+    expect(node.producedArtifactId).toBeNull();
+  });
+
+  it("requires artifact nodes to declare a produced artifact", () => {
+    const result = TreeNodeSchema.safeParse({
+      id: "node-1",
+      sessionId: "session-1",
+      parentId: null,
+      parentOptionId: null,
+      kind: "artifact",
+      producedArtifactId: null,
+      sourceArtifactIds: [],
+      roundIndex: 1,
+      roundIntent: "生成产物",
+      options: [],
+      selectedOptionId: null,
+      foldedOptions: [],
+      agentMessages: [],
+      createdAt: "2026-05-18T00:00:00.000Z"
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects produced artifacts on non-artifact workflow nodes", () => {
+    for (const kind of ["decision", "analysis", "action"] as const) {
+      const result = TreeNodeSchema.safeParse({
+        id: `node-${kind}`,
+        sessionId: "session-1",
+        parentId: null,
+        parentOptionId: null,
+        kind,
+        producedArtifactId: "artifact-1",
+        sourceArtifactIds: [],
+        roundIndex: 1,
+        roundIntent: "不生成产物",
+        options: [],
+        selectedOptionId: null,
+        foldedOptions: [],
+        agentMessages: [],
+        createdAt: "2026-05-18T00:00:00.000Z"
+      });
+
+      expect(result.success).toBe(false);
+    }
+  });
+
+  it("rejects legacy work fields in session state", () => {
+    const result = SessionStateSchema.safeParse({
+      rootMemory: validRootMemory(),
+      session: validSession(),
+      currentNode: null,
+      currentArtifact: null,
+      artifacts: [],
+      nodeArtifacts: [],
+      selectedPath: [],
+      enabledSkillIds: [],
+      enabledSkills: [],
+      foldedBranches: [],
+      currentArtifactLegacy: { title: "legacy", body: "legacy", hashtags: [], imagePrompt: "" },
+      deliveryBundle: null
+    });
+
+    expect(result.success).toBe(false);
   });
 });

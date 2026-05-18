@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import { getArtifactPlugin, requireArtifactPlugin } from "@/artifacts/registry";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import {
   type CreateInitialAdminInput,
@@ -25,11 +26,7 @@ import {
   type AgentMessage,
   type CreationRequestOption,
   type CreationRequestOptionUpsert,
-  type DirectorDraftOutput,
   type DirectorOptionsOutput,
-  type DirectorOutput,
-  type Draft,
-  type DraftSummary,
   type OptionGenerationMode,
   type RootMemory,
   type RootPreferences,
@@ -37,14 +34,11 @@ import {
   type SkillUpsert,
   type SessionState,
   type TreeNode,
+  type WorkSummary,
   AgentMessageSchema,
   BranchOptionSchema,
-  CUSTOM_EDIT_OPTION,
-  CUSTOM_OPTION_ID_PREFIX,
   CreationRequestOptionSchema,
   CreationRequestOptionUpsertSchema,
-  DraftSummarySchema,
-  DraftSchema,
   DEFAULT_ARTIFACT_TYPE_ID,
   RootPreferencesSchema,
   SessionStateSchema,
@@ -52,6 +46,7 @@ import {
   SkillSchema,
   SkillUpsertSchema,
   TreeNodeSchema,
+  WorkSummarySchema,
   requireThreeOptions
 } from "@/lib/domain";
 import {
@@ -113,9 +108,9 @@ type SessionRow = {
   updated_at: string;
 };
 
-type DraftSummaryRow = SessionRow & {
+type WorkSummaryRow = SessionRow & {
   current_round_index: number | null;
-  latest_body: string | null;
+  latest_artifact_id: string | null;
 };
 
 type TreeNodeRow = {
@@ -123,6 +118,9 @@ type TreeNodeRow = {
   session_id: string;
   parent_id: string | null;
   parent_option_id: string | null;
+  kind?: string;
+  produced_artifact_id?: string | null;
+  source_artifact_ids_json?: string;
   round_index: number;
   round_intent: string;
   options_json: string;
@@ -133,16 +131,16 @@ type TreeNodeRow = {
   created_at: string;
 };
 
-type DraftVersionRow = {
+type ArtifactRow = {
   id: string;
   session_id: string;
   node_id: string;
-  round_index: number;
-  title: string;
-  body: string;
-  hashtags_json: string;
-  image_prompt: string;
+  type: string;
+  version: number;
+  payload_json: string;
+  source_artifact_ids_json: string;
   created_at: string;
+  updated_at: string;
 };
 
 type BranchHistoryRow = {
@@ -284,11 +282,11 @@ function toRootMemory(row: RootMemoryRow): RootMemory {
   };
 }
 
-function rootMemoryForSession(row: RootMemoryRow, session: SessionRow, initialDraft: DraftVersionRow | undefined): RootMemory {
+function rootMemoryForSession(row: RootMemoryRow, session: SessionRow, initialArtifact: ArtifactRow | undefined): RootMemory {
   const rootMemory = toRootMemory(row);
   const currentSeed = rootMemory.preferences.seed.trim();
-  const initialSeed = initialDraft?.body.trim() ?? "";
-  const rootWasEditedAfterSessionStarted = row.updated_at > (initialDraft?.created_at ?? session.created_at);
+  const initialSeed = initialArtifact ? artifactExcerpt(initialArtifact).trim() : "";
+  const rootWasEditedAfterSessionStarted = row.updated_at > (initialArtifact?.created_at ?? session.created_at);
   if (!rootWasEditedAfterSessionStarted || !currentSeed || !initialSeed || currentSeed === initialSeed) return rootMemory;
 
   const preferences = RootPreferencesSchema.parse({
@@ -314,6 +312,9 @@ function toNode(row: TreeNodeRow): TreeNode {
     sessionId: row.session_id,
     parentId: row.parent_id,
     parentOptionId: row.parent_option_id as BranchOption["id"] | null,
+    kind: row.kind ?? "decision",
+    producedArtifactId: row.produced_artifact_id ?? null,
+    sourceArtifactIds: parseJson<string[]>(row.source_artifact_ids_json || "[]"),
     roundIndex: row.round_index,
     roundIntent: row.round_intent,
     options,
@@ -325,13 +326,25 @@ function toNode(row: TreeNodeRow): TreeNode {
   });
 }
 
-function toDraft(row: DraftVersionRow): Draft {
-  return DraftSchema.parse({
-    title: row.title,
-    body: row.body,
-    hashtags: parseJson<string[]>(row.hashtags_json),
-    imagePrompt: row.image_prompt
-  });
+function toArtifact(row: ArtifactRow) {
+  return {
+    id: row.id,
+    type: row.type,
+    version: row.version,
+    payload: parseJson(row.payload_json),
+    sourceArtifactIds: parseJson<string[]>(row.source_artifact_ids_json),
+    createdByNodeId: row.node_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function artifactExcerpt(row: ArtifactRow | undefined) {
+  if (!row) return "";
+  const plugin = getArtifactPlugin(row.type);
+  if (!plugin) return row.payload_json;
+  const payload = plugin.payloadSchema.parse(parseJson(row.payload_json));
+  return plugin.summarizeForTree(payload);
 }
 
 function toSkill(row: SkillRow): Skill {
@@ -364,12 +377,6 @@ function toCreationRequestOption(row: CreationRequestOptionRow): CreationRequest
 
 function uniqueSkillIds(skillIds: string[]) {
   return Array.from(new Set(skillIds.filter((id) => id.trim().length > 0)));
-}
-
-function latestDraftForNode(draftsByNode: Map<string, DraftVersionRow>, nodeId: string | null) {
-  if (!nodeId) return null;
-  const row = draftsByNode.get(nodeId);
-  return row ? toDraft(row) : null;
 }
 
 function activePathFor(nodes: TreeNode[], currentNode: TreeNode | null) {
@@ -1200,39 +1207,90 @@ export function createTreeableRepository(
     return toRootMemory(row);
   }
 
-  function createSessionDraft({
+  function requireOwnedRootMemory(userId: string, rootMemoryId: string) {
+    const rootRow = db.prepare("SELECT * FROM root_memory WHERE id = ? AND user_id = ?").get(rootMemoryId, userId) as
+      | RootMemoryRow
+      | undefined;
+    const root = rootRow ? toRootMemory(rootRow) : null;
+    if (!root) throw new Error("Root memory was not found.");
+    return root;
+  }
+
+  function artifactTreeTitle(artifact: { type: string; payload: unknown } | null) {
+    if (!artifact) return null;
+    const plugin = requireArtifactPlugin(artifact.type);
+    const parsedPayload = plugin.payloadSchema.parse(artifact.payload);
+    return plugin.summarizeForTree(parsedPayload);
+  }
+
+  function insertArtifact({
+    sessionId,
+    nodeId,
+    type,
+    payload,
+    sourceArtifactIds,
+    timestamp
+  }: {
+    sessionId: string;
+    nodeId: string;
+    type: string;
+    payload: unknown;
+    sourceArtifactIds: string[];
+    timestamp: string;
+  }) {
+    const plugin = requireArtifactPlugin(type);
+    const parsedPayload = plugin.payloadSchema.parse(payload);
+    const artifactId = nanoid();
+    db.prepare(
+      `
+        INSERT INTO artifacts (id, session_id, node_id, type, version, payload_json, source_artifact_ids_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+    ).run(artifactId, sessionId, nodeId, type, 1, JSON.stringify(parsedPayload), JSON.stringify(sourceArtifactIds), timestamp, timestamp);
+    return artifactId;
+  }
+
+  function createWorkflowNodeWithOptionalArtifact({
     userId,
-    enabledSkillIds,
     rootMemoryId,
-    draft,
-    roundIntent = "种子念头"
+    artifactTypeId,
+    enabledSkillIds,
+    parent,
+    roundIntent,
+    artifact
   }: {
     userId: string;
-    enabledSkillIds?: string[];
     rootMemoryId: string;
-    draft: Draft;
-    roundIntent?: string;
+    artifactTypeId: string;
+    enabledSkillIds?: string[];
+    parent: {
+      session: SessionRow;
+      node: TreeNode;
+      selectedOptionId: BranchOption["id"];
+      options: BranchOption[];
+    } | null;
+    roundIntent: string;
+    artifact: { type: string; payload: unknown; sourceArtifactIds?: string[] } | null;
   }) {
-    const sessionId = nanoid();
-    const nodeId = nanoid();
-    const draftId = nanoid();
     const timestamp = now();
-    const parsedDraft = DraftSchema.parse(draft);
+    const sessionId = parent?.session.id ?? nanoid();
+    const nodeId = nanoid();
+    const nextRoundIndex = parent ? parent.node.roundIndex + 1 : 1;
+    const sourceArtifactIds = artifact?.sourceArtifactIds ?? [];
+    const artifactTitle = artifactTreeTitle(artifact);
+    const sessionTitle = artifactTitle || parent?.session.title || roundIntent || "Untitled Tree";
 
     return withTransaction(db, () => {
-      const rootRow = db.prepare("SELECT * FROM root_memory WHERE id = ? AND user_id = ?").get(rootMemoryId, userId) as
-        | RootMemoryRow
-        | undefined;
-      const root = rootRow ? toRootMemory(rootRow) : null;
-      if (!root) throw new Error("Root memory was not found.");
-      const artifactTypeId = root.preferences.artifactTypeId ?? DEFAULT_ARTIFACT_TYPE_ID;
-
-      db.prepare(
-        `
-          INSERT INTO sessions (id, user_id, root_memory_id, artifact_type_id, title, status, current_node_id, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `
-      ).run(sessionId, userId, rootMemoryId, artifactTypeId, parsedDraft.title || "Untitled Tree", "active", nodeId, timestamp, timestamp);
+      if (parent) {
+        saveNodeSelection(sessionId, parent.node.id, parent.options, parent.selectedOptionId, timestamp);
+      } else {
+        db.prepare(
+          `
+            INSERT INTO sessions (id, user_id, root_memory_id, artifact_type_id, title, status, current_node_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `
+        ).run(sessionId, userId, rootMemoryId, artifactTypeId, sessionTitle, "active", nodeId, timestamp, timestamp);
+      }
 
       db.prepare(
         `
@@ -1241,6 +1299,9 @@ export function createTreeableRepository(
             session_id,
             parent_id,
             parent_option_id,
+            kind,
+            produced_artifact_id,
+            source_artifact_ids_json,
             round_index,
             round_intent,
             options_json,
@@ -1248,14 +1309,17 @@ export function createTreeableRepository(
             folded_options_json,
             created_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
       ).run(
         nodeId,
         sessionId,
+        parent?.node.id ?? null,
+        parent?.selectedOptionId ?? null,
+        artifact ? "artifact" : "analysis",
         null,
-        null,
-        1,
+        JSON.stringify(sourceArtifactIds),
+        nextRoundIndex,
         roundIntent,
         "[]",
         null,
@@ -1263,274 +1327,166 @@ export function createTreeableRepository(
         timestamp
       );
 
+      const artifactId = artifact
+        ? insertArtifact({
+            sessionId,
+            nodeId,
+            type: artifact.type,
+            payload: artifact.payload,
+            sourceArtifactIds,
+            timestamp
+          })
+        : null;
+
       db.prepare(
         `
-          INSERT INTO draft_versions (id, session_id, node_id, round_index, title, body, hashtags_json, image_prompt, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          UPDATE tree_nodes
+          SET produced_artifact_id = ?
+          WHERE id = ?
         `
-      ).run(
-        draftId,
-        sessionId,
-        nodeId,
-        1,
-        parsedDraft.title,
-        parsedDraft.body,
-        JSON.stringify(parsedDraft.hashtags),
-        parsedDraft.imagePrompt,
-        timestamp
-      );
+      ).run(artifactId, nodeId);
 
-      saveSessionEnabledSkills(sessionId, userId, enabledSkillIds ?? defaultEnabledSkillIds(), timestamp);
+      if (parent) {
+        db.prepare(
+          `
+            UPDATE sessions
+            SET current_node_id = ?, title = ?, status = ?, updated_at = ?
+            WHERE id = ? AND user_id = ?
+          `
+        ).run(nodeId, sessionTitle, "active", timestamp, sessionId, userId);
+      } else {
+        saveSessionEnabledSkills(sessionId, userId, enabledSkillIds ?? defaultEnabledSkillIds(), timestamp);
+      }
 
       const state = getSessionState(userId, sessionId);
       if (!state) {
-        throw new Error("Failed to create session draft state.");
+        throw new Error("Failed to create workflow node state.");
       }
       return state;
     });
   }
 
-  function createDraftChild({
-    userId,
-    customOption,
-    draft,
-    optionMode = "balanced",
-    roundIntent,
-    sessionId,
-    nodeId,
-    selectedOptionId
-  }: {
-    userId: string;
+  function createSession({ userId, enabledSkillIds, rootMemoryId }: { userId: string; enabledSkillIds?: string[]; rootMemoryId: string }) {
+    const root = requireOwnedRootMemory(userId, rootMemoryId);
+    const plugin = requireArtifactPlugin(root.preferences.artifactTypeId ?? DEFAULT_ARTIFACT_TYPE_ID);
+    const seedPayload = plugin.createSeedPayload({
+      creationRequest: root.preferences.creationRequest,
+      seed: root.preferences.seed,
+      skills: []
+    });
+    return createWorkflowNodeWithOptionalArtifact({
+      userId,
+      rootMemoryId,
+      artifactTypeId: plugin.id,
+      enabledSkillIds,
+      parent: null,
+      roundIntent: seedPayload ? plugin.summarizeForTree(seedPayload) : "种子念头",
+      artifact: seedPayload ? { type: plugin.id, payload: seedPayload, sourceArtifactIds: [] } : null
+    });
+  }
+
+  function createArtifactChild(input: {
+    artifact: { type: string; payload: unknown; sourceArtifactIds?: string[] } | null;
     customOption?: BranchOption;
-    draft?: Draft;
     optionMode?: OptionGenerationMode;
     roundIntent?: string;
+    selectedOptionId: BranchOption["id"];
     sessionId: string;
     nodeId: string;
-    selectedOptionId: BranchOption["id"];
-  }) {
-    const session = getActiveSession(userId, sessionId);
+    userId: string;
+  }): SessionState {
+    const session = getActiveSession(input.userId, input.sessionId);
     if (!session) {
       throw new Error("Session was not found.");
     }
 
-    const current = db.prepare("SELECT * FROM tree_nodes WHERE id = ?").get(nodeId) as TreeNodeRow | undefined;
-    if (!current || current.session_id !== sessionId) {
+    const current = db.prepare("SELECT * FROM tree_nodes WHERE id = ?").get(input.nodeId) as TreeNodeRow | undefined;
+    if (!current || current.session_id !== input.sessionId) {
       throw new Error("Parent tree node was not found.");
     }
 
     const parentNode = toNode(current);
-    const parsedDraft = draft ? DraftSchema.parse(draft) : null;
-    const parsedCustomOption = customOption ? BranchOptionSchema.parse(customOption) : null;
-    if (parsedCustomOption && parsedCustomOption.id !== selectedOptionId) {
+    const parsedCustomOption = input.customOption ? BranchOptionSchema.parse(input.customOption) : null;
+    if (parsedCustomOption && parsedCustomOption.id !== input.selectedOptionId) {
       throw new Error("Custom option must match the selected option.");
     }
     const optionsWithCustom = parsedCustomOption
       ? [...parentNode.options.filter((option) => option.id !== parsedCustomOption.id), parsedCustomOption]
       : parentNode.options;
     const parentOptions = optionsWithCustom.map((option) =>
-      option.id === selectedOptionId && optionMode ? { ...option, mode: optionMode } : option
+      option.id === input.selectedOptionId && input.optionMode ? { ...option, mode: input.optionMode } : option
     );
-    const selected = parentOptions.find((option) => option.id === selectedOptionId);
-    if (!selected) {
+    const selected = parentOptions.find((option) => option.id === input.selectedOptionId);
+    if (!selected && parentOptions.length > 0) {
       throw new Error("Selected option is not part of the parent node.");
     }
 
-    const nextNodeId = nanoid();
-    const nextRoundIndex = parentNode.roundIndex + 1;
-    const timestamp = now();
-
-    return withTransaction(db, () => {
-      saveNodeSelection(sessionId, nodeId, parentOptions, selectedOptionId, timestamp);
-
-      db.prepare(
-        `
-          INSERT INTO tree_nodes (
-            id,
-            session_id,
-            parent_id,
-            parent_option_id,
-            round_index,
-            round_intent,
-            options_json,
-            selected_option_id,
-            folded_options_json,
-            created_at
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `
-      ).run(
-        nextNodeId,
-        sessionId,
-        nodeId,
-        selectedOptionId,
-        nextRoundIndex,
-        roundIntent ?? selected.label,
-        "[]",
-        null,
-        "[]",
-        timestamp
-      );
-
-      if (parsedDraft) {
-        db.prepare(
-          `
-            INSERT INTO draft_versions (id, session_id, node_id, round_index, title, body, hashtags_json, image_prompt, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `
-        ).run(
-          nanoid(),
-          sessionId,
-          nextNodeId,
-          nextRoundIndex,
-          parsedDraft.title,
-          parsedDraft.body,
-          JSON.stringify(parsedDraft.hashtags),
-          parsedDraft.imagePrompt,
-          timestamp
-        );
-      }
-
-      db.prepare(
-        `
-          UPDATE sessions
-          SET current_node_id = ?, title = ?, status = ?, updated_at = ?
-          WHERE id = ? AND user_id = ?
-        `
-      ).run(nextNodeId, parsedDraft?.title || session.title || "Untitled Tree", "active", timestamp, sessionId, userId);
-
-      const state = getSessionState(userId, sessionId);
-      if (!state) {
-        throw new Error("Failed to create draft child state.");
-      }
-      return state;
+    return createWorkflowNodeWithOptionalArtifact({
+      userId: input.userId,
+      rootMemoryId: session.root_memory_id,
+      artifactTypeId: session.artifact_type_id || DEFAULT_ARTIFACT_TYPE_ID,
+      parent: {
+        session,
+        node: parentNode,
+        selectedOptionId: input.selectedOptionId,
+        options: parentOptions
+      },
+      roundIntent: input.roundIntent ?? selected?.label ?? "继续",
+      artifact: input.artifact
     });
   }
 
-  function createEditedDraftChild({
-    userId,
-    sessionId,
-    nodeId,
-    draft,
-    output
-  }: {
-    userId: string;
-    sessionId: string;
-    nodeId: string;
-    draft: Draft;
-    output?: DirectorOptionsOutput;
-  }) {
-    const parsedDraft = DraftSchema.parse(draft);
-    const customEditOption = BranchOptionSchema.parse({
-      ...CUSTOM_EDIT_OPTION,
-      id: `${CUSTOM_OPTION_ID_PREFIX}edit-${nanoid()}`
-    });
-
-    const draftState = createDraftChild({
-      userId,
-      customOption: customEditOption,
-      draft: parsedDraft,
-      optionMode: "balanced",
-      roundIntent: output?.roundIntent ?? customEditOption.label,
-      sessionId,
-      nodeId,
-      selectedOptionId: customEditOption.id
-    });
-
-    if (!output) return draftState;
-
-    return updateNodeOptions({
-      userId,
-      sessionId,
-      nodeId: draftState.currentNode!.id,
-      output
-    });
-  }
-
-  function updateCurrentNodeDraftAndOptions({
-    userId,
-    sessionId,
-    nodeId,
-    draft,
-    output
-  }: {
-    userId: string;
-    sessionId: string;
-    nodeId: string;
-    draft: Draft;
-    output: DirectorOutput;
-  }) {
-    requireThreeOptions(output.options);
-    const session = getActiveSession(userId, sessionId);
-    if (!session) {
-      throw new Error("Session was not found.");
-    }
-    if (session.current_node_id !== nodeId) {
-      throw new Error("Edited node is not the active node.");
-    }
-
-    return createEditedDraftChild({
-      userId,
-      sessionId,
-      nodeId,
-      draft,
-      output: {
-        roundIntent: output.roundIntent,
-        options: output.options
-      }
-    });
-  }
-
-  function updateNodeDraft({
-    userId,
-    sessionId,
-    nodeId,
-    output,
-    agentMessages
-  }: {
-    userId: string;
-    sessionId: string;
-    nodeId: string;
-    output: DirectorDraftOutput;
+  function updateNodeArtifact(input: {
     agentMessages?: AgentMessage[];
-  }) {
-    const session = getActiveSession(userId, sessionId);
+    artifact: { type: string; payload: unknown; sourceArtifactIds?: string[] } | null;
+    nodeId: string;
+    roundIntent: string;
+    sessionId: string;
+    userId: string;
+  }): SessionState {
+    const session = getActiveSession(input.userId, input.sessionId);
     if (!session) {
       throw new Error("Session was not found.");
     }
-    const target = db.prepare("SELECT * FROM tree_nodes WHERE id = ?").get(nodeId) as TreeNodeRow | undefined;
-    if (!target || target.session_id !== sessionId) {
+    const target = db.prepare("SELECT * FROM tree_nodes WHERE id = ?").get(input.nodeId) as TreeNodeRow | undefined;
+    if (!target || target.session_id !== input.sessionId) {
       throw new Error("Tree node was not found.");
     }
 
-    const parsedDraft = DraftSchema.parse(output.draft);
     const timestamp = now();
-    const agentMessagesJson = appendAgentMessagesJson(target.agent_messages_json, agentMessages);
+    const sourceArtifactIds = input.artifact?.sourceArtifactIds ?? [];
+    const agentMessagesJson = appendAgentMessagesJson(target.agent_messages_json, input.agentMessages);
+    const title = artifactTreeTitle(input.artifact) ?? session.title;
 
     return withTransaction(db, () => {
+      const artifactId = input.artifact
+        ? insertArtifact({
+            sessionId: input.sessionId,
+            nodeId: input.nodeId,
+            type: input.artifact.type,
+            payload: input.artifact.payload,
+            sourceArtifactIds,
+            timestamp
+          })
+        : null;
+
       db.prepare(
         `
           UPDATE tree_nodes
-          SET round_intent = ?, agent_messages_json = ?
+          SET round_intent = ?,
+              kind = ?,
+              produced_artifact_id = ?,
+              source_artifact_ids_json = ?,
+              agent_messages_json = ?
           WHERE id = ?
         `
-      ).run(output.roundIntent, agentMessagesJson, nodeId);
-
-      db.prepare(
-        `
-          INSERT INTO draft_versions (id, session_id, node_id, round_index, title, body, hashtags_json, image_prompt, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `
       ).run(
-        nanoid(),
-        sessionId,
-        nodeId,
-        target.round_index,
-        parsedDraft.title,
-        parsedDraft.body,
-        JSON.stringify(parsedDraft.hashtags),
-        parsedDraft.imagePrompt,
-        timestamp
+        input.roundIntent,
+        input.artifact ? "artifact" : "analysis",
+        artifactId,
+        JSON.stringify(sourceArtifactIds),
+        agentMessagesJson,
+        input.nodeId
       );
 
       db.prepare(
@@ -1539,11 +1495,11 @@ export function createTreeableRepository(
           SET title = ?, status = ?, updated_at = ?
           WHERE id = ? AND user_id = ?
         `
-      ).run(parsedDraft.title || session.title || "Untitled Tree", "active", timestamp, sessionId, userId);
+      ).run(title, "active", timestamp, input.sessionId, input.userId);
 
-      const state = getSessionState(userId, sessionId);
+      const state = getSessionState(input.userId, input.sessionId);
       if (!state) {
-        throw new Error("Failed to update node draft.");
+        throw new Error("Failed to update node artifact.");
       }
       return state;
     });
@@ -1605,13 +1561,15 @@ export function createTreeableRepository(
     sessionId,
     nodeId,
     output,
-    agentMessages
+    agentMessages,
+    artifact = null
   }: {
     userId: string;
     sessionId: string;
     nodeId: string;
     output: { roundIntent: string };
     agentMessages?: AgentMessage[];
+    artifact?: { type: string; payload: unknown; sourceArtifactIds?: string[] } | null;
   }) {
     const session = getActiveSession(userId, sessionId);
     if (!session) {
@@ -1623,24 +1581,43 @@ export function createTreeableRepository(
     }
 
     const timestamp = now();
+    const sourceArtifactIds = artifact?.sourceArtifactIds ?? [];
     const agentMessagesJson = appendAgentMessagesJson(target.agent_messages_json, agentMessages);
+    const title = artifactTreeTitle(artifact) ?? session.title;
 
     return withTransaction(db, () => {
+      const artifactId = artifact
+        ? insertArtifact({
+            sessionId,
+            nodeId,
+            type: artifact.type,
+            payload: artifact.payload,
+            sourceArtifactIds,
+            timestamp
+          })
+        : null;
+
       db.prepare(
         `
           UPDATE tree_nodes
-          SET round_intent = ?, options_json = '[]', agent_messages_json = ?, is_terminal = 1
+          SET round_intent = ?,
+              options_json = '[]',
+              kind = ?,
+              produced_artifact_id = ?,
+              source_artifact_ids_json = ?,
+              agent_messages_json = ?,
+              is_terminal = 1
           WHERE id = ?
         `
-      ).run(output.roundIntent, agentMessagesJson, nodeId);
+      ).run(output.roundIntent, artifact ? "artifact" : "analysis", artifactId, JSON.stringify(sourceArtifactIds), agentMessagesJson, nodeId);
 
       db.prepare(
         `
           UPDATE sessions
-          SET updated_at = ?
+          SET title = ?, updated_at = ?
           WHERE id = ? AND user_id = ?
         `
-      ).run(timestamp, sessionId, userId);
+      ).run(title, timestamp, sessionId, userId);
 
       const state = getSessionState(userId, sessionId);
       if (!state) {
@@ -1684,99 +1661,20 @@ export function createTreeableRepository(
     const timestamp = now();
     return withTransaction(db, () => {
       saveNodeSelection(sessionId, nodeId, selectedOptions, selectedOptionId, timestamp);
-      const draft = latestDraftForNode(latestDraftRowsByNode(sessionId), existingChild.id);
+      const artifact = existingChild.produced_artifact_id
+        ? (db.prepare("SELECT * FROM artifacts WHERE id = ?").get(existingChild.produced_artifact_id) as
+            | ArtifactRow
+            | undefined)
+        : undefined;
       db.prepare(
         `
           UPDATE sessions
           SET current_node_id = ?, title = ?, status = ?, updated_at = ?
           WHERE id = ? AND user_id = ?
         `
-      ).run(existingChild.id, draft?.title || session.title, "active", timestamp, sessionId, userId);
+      ).run(existingChild.id, artifactExcerpt(artifact) || session.title, "active", timestamp, sessionId, userId);
 
       return getSessionState(userId, sessionId);
-    });
-  }
-
-  function createHistoricalDraftChild({
-    userId,
-    customOption,
-    optionMode = "balanced",
-    sessionId,
-    nodeId,
-    selectedOptionId
-  }: {
-    userId: string;
-    customOption?: BranchOption;
-    optionMode?: OptionGenerationMode;
-    sessionId: string;
-    nodeId: string;
-    selectedOptionId: BranchOption["id"];
-  }) {
-    const session = getActiveSession(userId, sessionId);
-    if (!session) {
-      throw new Error("Session was not found.");
-    }
-
-    const parent = getNodeForSelection(sessionId, nodeId);
-    const parsedCustomOption = customOption ? BranchOptionSchema.parse(customOption) : null;
-    if (parsedCustomOption && parsedCustomOption.id !== selectedOptionId) {
-      throw new Error("Custom option must match the selected option.");
-    }
-    const parentOptions = parsedCustomOption
-      ? [...parent.options.filter((option) => option.id !== parsedCustomOption.id), parsedCustomOption]
-      : parent.options;
-    const selectedOptions = optionsWithSelection({ ...parent, options: parentOptions }, selectedOptionId, optionMode);
-    const selected = selectedOptions.find((option) => option.id === selectedOptionId)!;
-    const timestamp = now();
-
-    return withTransaction(db, () => {
-      saveNodeSelection(sessionId, nodeId, selectedOptions, selectedOptionId, timestamp);
-
-      const nextNodeId = nanoid();
-      const nextRoundIndex = parent.roundIndex + 1;
-
-      db.prepare(
-        `
-          INSERT INTO tree_nodes (
-            id,
-            session_id,
-            parent_id,
-            parent_option_id,
-            round_index,
-            round_intent,
-            options_json,
-            selected_option_id,
-            folded_options_json,
-            created_at
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `
-      ).run(
-        nextNodeId,
-        sessionId,
-        nodeId,
-        selectedOptionId,
-        nextRoundIndex,
-        selected.label,
-        "[]",
-        null,
-        "[]",
-        timestamp
-      );
-
-      db.prepare(
-        `
-          UPDATE sessions
-          SET current_node_id = ?, status = ?, updated_at = ?
-          WHERE id = ? AND user_id = ?
-        `
-      ).run(nextNodeId, "active", timestamp, sessionId, userId);
-
-      const state = getSessionState(userId, sessionId);
-      if (!state) {
-        throw new Error("Failed to create historical draft child state.");
-      }
-      return state;
     });
   }
 
@@ -1829,35 +1727,25 @@ export function createTreeableRepository(
     }
   }
 
-  function latestDraftRowsByNode(sessionId: string) {
-    const drafts = db
-      .prepare("SELECT * FROM draft_versions WHERE session_id = ? ORDER BY round_index DESC, created_at DESC, rowid DESC")
-      .all(sessionId) as DraftVersionRow[];
-    const latestDraftByNode = new Map<string, DraftVersionRow>();
-    for (const draft of drafts) {
-      if (!latestDraftByNode.has(draft.node_id)) {
-        latestDraftByNode.set(draft.node_id, draft);
-      }
-    }
-    return latestDraftByNode;
-  }
-
   function getActiveSession(userId: string, sessionId: string) {
     return db.prepare("SELECT * FROM sessions WHERE id = ? AND user_id = ? AND is_archived = 0").get(sessionId, userId) as
       | SessionRow
       | undefined;
   }
 
-  function toDraftSummary(row: DraftSummaryRow): DraftSummary {
-    const body = row.latest_body ?? "";
-    return DraftSummarySchema.parse({
+  function toWorkSummary(row: WorkSummaryRow): WorkSummary {
+    const artifactRow = row.latest_artifact_id
+      ? (db.prepare("SELECT * FROM artifacts WHERE id = ?").get(row.latest_artifact_id) as ArtifactRow | undefined)
+      : undefined;
+    const excerpt = artifactExcerpt(artifactRow);
+    return WorkSummarySchema.parse({
       id: row.id,
       title: row.title,
       status: SessionStatusSchema.parse(row.status),
       currentNodeId: row.current_node_id,
       currentRoundIndex: row.current_round_index,
-      bodyExcerpt: Array.from(body).slice(0, 120).join(""),
-      bodyLength: Array.from(body).length,
+      artifactExcerpt: Array.from(excerpt).slice(0, 120).join(""),
+      artifactSummaryLength: Array.from(excerpt).length,
       isArchived: Boolean(row.is_archived),
       createdAt: row.created_at,
       updatedAt: row.updated_at
@@ -1871,34 +1759,30 @@ export function createTreeableRepository(
           SELECT
             sessions.*,
             current_node.round_index AS current_round_index,
-            COALESCE(current_draft.body, latest_draft.body, '') AS latest_body
+            COALESCE(current_artifact.id, latest_artifact.id) AS latest_artifact_id
           FROM sessions
           LEFT JOIN tree_nodes AS current_node
             ON current_node.id = sessions.current_node_id
-          LEFT JOIN draft_versions AS current_draft
-            ON current_draft.id = (
-              SELECT id
-              FROM draft_versions
-              WHERE session_id = sessions.id
-                AND node_id = sessions.current_node_id
-              ORDER BY round_index DESC, created_at DESC, rowid DESC
-              LIMIT 1
-            )
-          LEFT JOIN draft_versions AS latest_draft
-            ON latest_draft.id = (
-              SELECT id
-              FROM draft_versions
-              WHERE session_id = sessions.id
-              ORDER BY round_index DESC, created_at DESC, rowid DESC
+          LEFT JOIN artifacts AS current_artifact
+            ON current_artifact.id = current_node.produced_artifact_id
+          LEFT JOIN artifacts AS latest_artifact
+            ON latest_artifact.id = (
+              SELECT linked_artifacts.id
+              FROM tree_nodes AS linked_nodes
+              JOIN artifacts AS linked_artifacts
+                ON linked_artifacts.id = linked_nodes.produced_artifact_id
+              WHERE linked_nodes.session_id = sessions.id
+                AND linked_nodes.produced_artifact_id IS NOT NULL
+              ORDER BY linked_artifacts.updated_at DESC, linked_artifacts.created_at DESC, linked_artifacts.rowid DESC
               LIMIT 1
             )
           WHERE sessions.id = ?
             AND sessions.user_id = ?
         `
       )
-      .get(sessionId, userId) as DraftSummaryRow | undefined;
+      .get(sessionId, userId) as WorkSummaryRow | undefined;
 
-    return row ? toDraftSummary(row) : null;
+    return row ? toWorkSummary(row) : null;
   }
 
   function listSessionSummaries(userId: string, { archived = false }: { archived?: boolean } = {}) {
@@ -1908,25 +1792,21 @@ export function createTreeableRepository(
           SELECT
             sessions.*,
             current_node.round_index AS current_round_index,
-            COALESCE(current_draft.body, latest_draft.body, '') AS latest_body
+            COALESCE(current_artifact.id, latest_artifact.id) AS latest_artifact_id
           FROM sessions
           LEFT JOIN tree_nodes AS current_node
             ON current_node.id = sessions.current_node_id
-          LEFT JOIN draft_versions AS current_draft
-            ON current_draft.id = (
-              SELECT id
-              FROM draft_versions
-              WHERE session_id = sessions.id
-                AND node_id = sessions.current_node_id
-              ORDER BY round_index DESC, created_at DESC, rowid DESC
-              LIMIT 1
-            )
-          LEFT JOIN draft_versions AS latest_draft
-            ON latest_draft.id = (
-              SELECT id
-              FROM draft_versions
-              WHERE session_id = sessions.id
-              ORDER BY round_index DESC, created_at DESC, rowid DESC
+          LEFT JOIN artifacts AS current_artifact
+            ON current_artifact.id = current_node.produced_artifact_id
+          LEFT JOIN artifacts AS latest_artifact
+            ON latest_artifact.id = (
+              SELECT linked_artifacts.id
+              FROM tree_nodes AS linked_nodes
+              JOIN artifacts AS linked_artifacts
+                ON linked_artifacts.id = linked_nodes.produced_artifact_id
+              WHERE linked_nodes.session_id = sessions.id
+                AND linked_nodes.produced_artifact_id IS NOT NULL
+              ORDER BY linked_artifacts.updated_at DESC, linked_artifacts.created_at DESC, linked_artifacts.rowid DESC
               LIMIT 1
             )
           WHERE sessions.user_id = ?
@@ -1934,9 +1814,9 @@ export function createTreeableRepository(
           ORDER BY sessions.updated_at DESC, sessions.created_at DESC, sessions.rowid DESC
         `
       )
-      .all(userId, archived ? 1 : 0) as DraftSummaryRow[];
+      .all(userId, archived ? 1 : 0) as WorkSummaryRow[];
 
-    return rows.map(toDraftSummary);
+    return rows.map(toWorkSummary);
   }
 
   function renameSession(userId: string, sessionId: string, title: string) {
@@ -1967,26 +1847,21 @@ export function createTreeableRepository(
     const nodes = (db.prepare("SELECT * FROM tree_nodes WHERE session_id = ?").all(sessionId) as TreeNodeRow[])
       .map(toNode)
       .sort((a, b) => a.roundIndex - b.roundIndex);
-    const drafts = db
-      .prepare("SELECT * FROM draft_versions WHERE session_id = ? ORDER BY round_index DESC, created_at DESC, rowid DESC")
-      .all(sessionId) as DraftVersionRow[];
-    const initialDraft = db
-      .prepare("SELECT * FROM draft_versions WHERE session_id = ? ORDER BY round_index ASC, created_at ASC, rowid ASC LIMIT 1")
-      .get(sessionId) as DraftVersionRow | undefined;
-    const latestDraftByNode = new Map<string, DraftVersionRow>();
-    for (const draft of drafts) {
-      if (!latestDraftByNode.has(draft.node_id)) {
-        latestDraftByNode.set(draft.node_id, draft);
-      }
-    }
+    const artifactRows = db.prepare("SELECT * FROM artifacts WHERE session_id = ? ORDER BY created_at ASC, rowid ASC").all(sessionId) as ArtifactRow[];
+    const artifacts = artifactRows.map(toArtifact);
+    const artifactById = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
     const currentNode = session.current_node_id ? nodes.find((node) => node.id === session.current_node_id) ?? null : null;
-    const currentDraft = latestDraftForNode(latestDraftByNode, currentNode?.id ?? null);
+    const currentArtifact = currentNode?.producedArtifactId ? artifactById.get(currentNode.producedArtifactId) ?? null : null;
+    const nodeArtifacts = nodes.flatMap((node) => {
+      const artifact = node.producedArtifactId ? artifactById.get(node.producedArtifactId) : null;
+      return artifact ? [{ nodeId: node.id, artifact }] : [];
+    });
     const historyRows = db.prepare("SELECT * FROM branch_history WHERE session_id = ?").all(sessionId) as BranchHistoryRow[];
     const selectedPath = activePathFor(nodes, currentNode);
     const enabledSkills = enabledSkillsForSession(sessionId, userId);
 
     return SessionStateSchema.parse({
-      rootMemory: rootMemoryForSession(root, session, initialDraft),
+      rootMemory: rootMemoryForSession(root, session, artifactRows[0]),
       session: {
         artifactTypeId: session.artifact_type_id || DEFAULT_ARTIFACT_TYPE_ID,
         id: session.id,
@@ -1997,8 +1872,9 @@ export function createTreeableRepository(
         updatedAt: session.updated_at
       },
       currentNode,
-      currentDraft,
-      nodeDrafts: [...latestDraftByNode.values()].map((row) => ({ nodeId: row.node_id, draft: toDraft(row) })),
+      currentArtifact,
+      artifacts,
+      nodeArtifacts,
       selectedPath,
       treeNodes: nodes,
       enabledSkillIds: enabledSkills.map((skill) => skill.id),
@@ -2008,8 +1884,7 @@ export function createTreeableRepository(
         nodeId: row.node_id,
         option: BranchOptionSchema.parse(parseJson(row.option_json)),
         createdAt: row.created_at
-      })),
-      publishPackage: null
+      }))
     });
   }
 
@@ -2056,14 +1931,11 @@ export function createTreeableRepository(
     defaultEnabledSkillIds,
     resolveSkillsByIds,
     replaceSessionEnabledSkills,
-    createSessionDraft,
+    createSession,
+    createArtifactChild,
+    updateNodeArtifact,
     completeNode,
-    createDraftChild,
     activateHistoricalBranch,
-    createHistoricalDraftChild,
-    createEditedDraftChild,
-    updateCurrentNodeDraftAndOptions,
-    updateNodeDraft,
     updateNodeOptions,
     listSessionSummaries,
     renameSession,

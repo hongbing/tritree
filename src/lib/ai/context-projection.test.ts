@@ -27,7 +27,7 @@ function parts(overrides: Partial<DirectorInputParts> = {}): DirectorInputParts 
     artifactContext: "产物类型：社媒草稿。",
     rootSummary: "Seed：写 AI PM 的真实困境。",
     learnedSummary: "用户喜欢真实、克制的表达。",
-    currentDraft: [
+    currentArtifact: [
       "标题：最新标题",
       "正文：这是最新 draft 正文。",
       "话题：#AI",
@@ -46,11 +46,11 @@ function parts(overrides: Partial<DirectorInputParts> = {}): DirectorInputParts 
 }
 
 describe("projectAgentContext", () => {
-  it("projects the latest draft as the sole draft body for the default subagent policy", () => {
+  it("projects the latest artifact as the sole artifact body for the default subagent policy", () => {
     const snapshot = projectAgentContext(parts(), SUBAGENT_CONTEXT_POLICY);
 
     expect(snapshot.currentArtifact).toEqual({
-      type: "draft",
+      type: "artifact",
       value: expect.stringContaining("这是最新 draft 正文。")
     });
     expect(snapshot.currentArtifact?.value).not.toContain("这是旧 draft 正文");
@@ -59,10 +59,10 @@ describe("projectAgentContext", () => {
     expect(snapshot.recentUserFeedback).toEqual(["用户补充：别写成教程。"]);
   });
 
-  it("omits the draft body when draft projection is disabled", () => {
+  it("omits the artifact body when artifact projection is disabled", () => {
     const policy = {
       ...SUBAGENT_CONTEXT_POLICY,
-      artifacts: { draft: "none" }
+      artifacts: { current: "none" }
     } satisfies ContextViewPolicy;
 
     const snapshot = projectAgentContext(parts(), policy);
@@ -113,7 +113,7 @@ describe("projectAgentContext", () => {
 
     expect(text).toContain("# Scoped Working Context");
     expect(text).toContain("## Current Artifact");
-    expect(text).toContain("type: draft");
+    expect(text).toContain("type: artifact");
     expect(text).toContain("这是最新 draft 正文");
     expect(text).toContain("## Recent User Feedback");
     expect(text).toContain("用户补充：别写成教程。");

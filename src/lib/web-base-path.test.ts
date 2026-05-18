@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiPath, appPath, normalizeWebBasePath } from "./web-base-path";
+import { apiPath, appPath, getAppRootPath, normalizeWebBasePath } from "./web-base-path";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -23,5 +23,32 @@ describe("web base path helpers", () => {
     expect(appPath("/login")).toBe("/tritree/login");
     expect(appPath("/tritree/login")).toBe("/tritree/login");
     expect(apiPath("/api/sessions?view=active")).toBe("/tritree/api/sessions?view=active");
+  });
+
+  describe("getAppRootPath", () => {
+    it("returns empty string when not configured", () => {
+      expect(getAppRootPath()).toBe("");
+    });
+
+    it("reads from TRITREE_APP_ROOT_PATH", () => {
+      vi.stubEnv("TRITREE_APP_ROOT_PATH", "/chat");
+      expect(getAppRootPath()).toBe("/chat");
+    });
+
+    it("reads from NEXT_PUBLIC_TRITREE_APP_ROOT_PATH", () => {
+      vi.stubEnv("NEXT_PUBLIC_TRITREE_APP_ROOT_PATH", "/chat");
+      expect(getAppRootPath()).toBe("/chat");
+    });
+
+    it("NEXT_PUBLIC variant takes precedence over server-only variant", () => {
+      vi.stubEnv("TRITREE_APP_ROOT_PATH", "/app");
+      vi.stubEnv("NEXT_PUBLIC_TRITREE_APP_ROOT_PATH", "/chat");
+      expect(getAppRootPath()).toBe("/chat");
+    });
+
+    it("normalizes the configured app root path", () => {
+      vi.stubEnv("TRITREE_APP_ROOT_PATH", "chat/");
+      expect(getAppRootPath()).toBe("/chat");
+    });
   });
 });

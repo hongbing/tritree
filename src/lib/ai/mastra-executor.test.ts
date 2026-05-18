@@ -2200,9 +2200,8 @@ describe("tree director compatibility generators", () => {
             toolCallId: "subagent-1",
             toolName: "run_subagent_template",
             args: {
-              context: "主题：青岛亲子游",
-              task: "找三条低幼家庭可用素材",
-              templateId: "material-search"
+              templateId: "material-search",
+              task: "找三条低幼家庭可用素材"
             }
           }
         };
@@ -2287,7 +2286,7 @@ describe("tree director compatibility generators", () => {
           payload: {
             toolCallId: "custom-subagent-1",
             toolName: "run_custom_subagent",
-            argsTextDelta: '媒写手","task":"把这个方案写成一篇完整草稿"}'
+            argsTextDelta: '媒写手","task":"把这个方案写成一篇完整草稿","expectedOutput":"返回一版草稿"}'
           }
         };
         yield {

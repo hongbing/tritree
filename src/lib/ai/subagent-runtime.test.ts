@@ -52,7 +52,7 @@ describe("subagent runtime tools", () => {
     expect(runtime.subagentTemplateSummaries).toHaveLength(1);
     expect(runtime.toolSummaries.join("\n")).toContain("run_subagent_template");
     expect(runtime.toolSummaries.join("\n")).toContain("run_custom_subagent");
-    expect(runtime.toolSummaries.join("\n")).toContain("优先使用 run_subagent_template");
+    expect(runtime.toolSummaries.join("\n")).toContain("运行时会提供当前上下文视图");
     expect(runtime.toolSummaries.join("\n")).not.toContain("临时");
     expect(runtime.toolSummaries.join("\n")).not.toContain("temporary");
   });
@@ -62,6 +62,17 @@ describe("subagent runtime tools", () => {
     const controller = new AbortController();
     const runtime = createSubagentRuntimeTools({
       env: { KIMI_API_KEY: "test-token" },
+      contextSource: {
+        artifactContext: "产物类型：社媒草稿。",
+        rootSummary: "Seed：周末短途旅行",
+        learnedSummary: "",
+        currentDraft: "标题：最新版\n正文：最新正文",
+        pathSummary: "",
+        foldedSummary: "",
+        selectedOptionLabel: "补资料",
+        enabledSkills: [],
+        messages: [{ role: "user", content: "用户补充：保留真实感。" }]
+      },
       runSubagentTask: vi.fn(async (task) => {
         calls.push(task);
         return "search result";
@@ -71,8 +82,7 @@ describe("subagent runtime tools", () => {
     const result = await executableTool(runtime.tools.run_subagent_template).execute(
       {
         templateId: "material-search",
-        task: "找三条资料",
-        context: "主题：周末短途旅行"
+        task: "找三条资料"
       },
       { abortSignal: controller.signal }
     );
@@ -85,7 +95,7 @@ describe("subagent runtime tools", () => {
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
-      context: "主题：周末短途旅行",
+      context: expect.stringContaining("最新正文"),
       env: { KIMI_API_KEY: "test-token" },
       expectedOutput: "资料清单：每条包含来源、要点、可用角度和可信度提示。",
       task: "找三条资料",
@@ -93,6 +103,8 @@ describe("subagent runtime tools", () => {
       title: "素材搜索",
       abortSignal: controller.signal
     });
+    expect(calls[0].context).toContain("# Scoped Working Context");
+    expect(calls[0].context).toContain("用户补充：保留真实感。");
   });
 
   it("runs a selected template with expected output override", async () => {
@@ -122,6 +134,17 @@ describe("subagent runtime tools", () => {
     const controller = new AbortController();
     const runtime = createSubagentRuntimeTools({
       env: { TRITREE_MAX_OUTPUT_TOKENS: "1234" },
+      contextSource: {
+        artifactContext: "产物类型：社媒草稿。",
+        rootSummary: "Seed：AI PM",
+        learnedSummary: "",
+        currentDraft: "标题：最新\n正文：最新草稿正文",
+        pathSummary: "",
+        foldedSummary: "",
+        selectedOptionLabel: "修正文",
+        enabledSkills: [],
+        messages: []
+      },
       runSubagentTask: async (task) => {
         calls.push(task);
         return "custom result";
@@ -132,9 +155,8 @@ describe("subagent runtime tools", () => {
       {
         title: "事实核查",
         task: "检查这段话是否自洽",
-        context: "待审文本",
         expectedOutput: "列出问题和建议",
-        constraints: "不要扩写正文"
+        constraints: "只返回检查结论"
       },
       { abortSignal: controller.signal }
     );
@@ -144,18 +166,16 @@ describe("subagent runtime tools", () => {
       result: "custom result",
       title: "事实核查"
     });
-    expect(calls).toEqual([
-      {
-        constraints: "不要扩写正文",
-        context: "待审文本",
+    expect(calls[0]).toMatchObject({
+      constraints: "只返回检查结论",
+      context: expect.stringContaining("最新草稿正文"),
       env: { TRITREE_MAX_OUTPUT_TOKENS: "1234" },
       expectedOutput: "列出问题和建议",
-        task: "检查这段话是否自洽",
-        template: undefined,
+      task: "检查这段话是否自洽",
+      template: undefined,
       title: "事实核查",
       abortSignal: controller.signal
-      }
-    ]);
+    });
   });
 
   it("passes abortSignal to the default Mastra agent generate call", async () => {

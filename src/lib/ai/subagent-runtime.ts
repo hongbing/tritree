@@ -3,8 +3,15 @@ import type { ToolsInput } from "@mastra/core/agent";
 import { TokenLimiterProcessor } from "@mastra/core/processors";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
+import {
+  SUBAGENT_CONTEXT_POLICY,
+  formatProjectedAgentContext,
+  projectAgentContext,
+  type ContextViewPolicy
+} from "./context-projection";
 import { createTreeableAnthropicModel } from "./mastra-agents";
 import { DEFAULT_MAX_OUTPUT_TOKENS, resolveModelContextBudget } from "./model-context";
+import type { DirectorInputParts } from "./prompts";
 import {
   DEFAULT_SUBAGENT_TEMPLATES,
   formatSubagentTemplateSummaries,
@@ -32,16 +39,21 @@ type ToolExecuteContext = {
 };
 
 type CreateSubagentRuntimeToolsOptions = {
+  contextPolicy?: ContextViewPolicy;
+  contextSource?: DirectorInputParts;
   env?: StringEnv;
   runSubagentTask?: SubagentTaskRunner;
   templates?: SubagentTemplate[];
 };
 
 export function createSubagentRuntimeTools({
+  contextPolicy = SUBAGENT_CONTEXT_POLICY,
+  contextSource,
   env = process.env,
   runSubagentTask = runSubagentTaskWithModel,
   templates = DEFAULT_SUBAGENT_TEMPLATES
 }: CreateSubagentRuntimeToolsOptions = {}) {
+  const subagentContext = subagentContextForRun(contextSource, contextPolicy);
   const tools: ToolsInput = {
     run_subagent_template: createTool({
       id: "run_subagent_template",
@@ -50,10 +62,9 @@ export function createSubagentRuntimeTools({
       inputSchema: z.object({
         templateId: z.string().min(1).describe("Template id from the available subagent template list."),
         task: z.string().min(1).describe("Specific bounded task for the subagent."),
-        context: z.string().min(1).describe("Context the subagent needs to complete the task."),
         expectedOutput: z.string().min(1).optional().describe("Optional output override for this run.")
       }),
-      execute: async ({ templateId, task, context, expectedOutput }, executeContext?: ToolExecuteContext) => {
+      execute: async ({ templateId, task, expectedOutput }, executeContext?: ToolExecuteContext) => {
         const template = getSubagentTemplate(templateId, templates);
         if (!template) {
           throw new Error(`Unknown subagent template: ${templateId}`);
@@ -61,7 +72,7 @@ export function createSubagentRuntimeTools({
 
         const result = await runSubagentTask({
           abortSignal: executeContext?.abortSignal,
-          context,
+          context: subagentContext,
           env,
           expectedOutput: expectedOutput ?? template.expectedOutput,
           task,
@@ -84,15 +95,14 @@ export function createSubagentRuntimeTools({
       inputSchema: z.object({
         title: z.string().min(1).describe("Short role title for the custom subagent."),
         task: z.string().min(1).describe("Specific bounded task for the subagent."),
-        context: z.string().min(1).describe("Context the subagent needs to complete the task."),
         expectedOutput: z.string().min(1).describe("Expected output shape or content requirements."),
         constraints: z.string().min(1).optional().describe("Optional constraints for this run.")
       }),
-      execute: async ({ title, task, context, expectedOutput, constraints }, executeContext?: ToolExecuteContext) => {
+      execute: async ({ title, task, expectedOutput, constraints }, executeContext?: ToolExecuteContext) => {
         const result = await runSubagentTask({
           abortSignal: executeContext?.abortSignal,
           constraints,
-          context,
+          context: subagentContext,
           env,
           expectedOutput,
           task,
@@ -112,11 +122,16 @@ export function createSubagentRuntimeTools({
   return {
     subagentTemplateSummaries: [formatSubagentTemplateSummaries(templates)],
     toolSummaries: [
-      "run_subagent_template：运行预创建子代理模板；当模板列表中某个 templateId 与任务匹配时使用。",
-      "run_custom_subagent：运行自定义子代理，仅当预创建模板不匹配且任务边界清晰时使用；如果任务适合 subagent，优先使用 run_subagent_template。"
+      "run_subagent_template：运行预创建子代理模板；当模板列表中某个 templateId 与任务匹配时使用。调用时提供 templateId、task 和可选 expectedOutput，运行时会提供当前上下文视图。",
+      "run_custom_subagent：运行自定义子代理，仅当预创建模板不匹配且任务边界清晰时使用；调用时提供 title、task、expectedOutput 和可选 constraints，运行时会提供当前上下文视图。"
     ],
     tools
   };
+}
+
+function subagentContextForRun(contextSource: DirectorInputParts | undefined, policy: ContextViewPolicy) {
+  if (!contextSource) return "# Scoped Working Context\n暂无可用上下文。";
+  return formatProjectedAgentContext(projectAgentContext(contextSource, policy));
 }
 
 export async function runSubagentTaskWithModel(task: SubagentTask): Promise<string> {
@@ -142,14 +157,16 @@ export async function runSubagentTaskWithModel(task: SubagentTask): Promise<stri
 
 function buildSubagentInstructions(task: SubagentTask) {
   return `
-You are a bounded Tritree subagent.
-Work only on the assigned task. Return the requested output directly.
+You are an isolated execution unit called by the main agent.
+You receive a scoped, read-only snapshot of the current working context.
+Complete only the assigned task.
+Return a result that the main agent can inspect, verify, and decide how to use.
 All user-facing text should be Simplified Chinese unless the input requires otherwise.
 
 # Role
 ${task.title}
 
-${task.template ? `# Template Prompt\n${task.template.prompt}` : "# Template Prompt\nNo precreated template. Follow the task title and constraints precisely."}
+${task.template ? `# Template Prompt\n${task.template.prompt}` : "# Custom Role\nFollow the role title, assigned task, and constraints precisely."}
 `.trim();
 }
 

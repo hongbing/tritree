@@ -49,6 +49,9 @@ describe("subagent runtime tools", () => {
     });
 
     expect(Object.keys(runtime.tools)).toEqual(["run_subagent_template", "run_custom_subagent"]);
+    expect(runtime.tools.run_subagent_template).toMatchObject({
+      description: expect.not.stringContaining("supplied context")
+    });
     expect(runtime.subagentTemplateSummaries).toHaveLength(1);
     expect(runtime.toolSummaries.join("\n")).toContain("run_subagent_template");
     expect(runtime.toolSummaries.join("\n")).toContain("run_custom_subagent");
@@ -115,7 +118,6 @@ describe("subagent runtime tools", () => {
       {
         templateId: "platform-rewrite",
         task: "改写为两个平台版本",
-        context: "原稿",
         expectedOutput: "只返回两个版本"
       },
       {}

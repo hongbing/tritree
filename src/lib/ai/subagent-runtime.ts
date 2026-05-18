@@ -58,7 +58,7 @@ export function createSubagentRuntimeTools({
     run_subagent_template: createTool({
       id: "run_subagent_template",
       description:
-        "Run one precreated Tritree subagent template for a bounded task using supplied context. Use this when a listed template matches the need.",
+        "Run one precreated Tritree subagent template for a bounded task. Use this when a listed template matches the need.",
       inputSchema: z.object({
         templateId: z.string().min(1).describe("Template id from the available subagent template list."),
         task: z.string().min(1).describe("Specific bounded task for the subagent."),

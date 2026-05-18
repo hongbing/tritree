@@ -328,7 +328,7 @@ export async function streamTreeNextStep({
   const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeNextStepAgent), {
     includeSubagentTools: false
   });
-  const { agentContext, tools } = executionContext;
+  const { agentContext, toolLabels, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
     let agentContextWithSubmit = agentContext;
@@ -352,6 +352,7 @@ export async function streamTreeNextStep({
         schema: DirectorNextStepOutputSchema,
         signal,
         target: "next-step",
+        toolLabels,
         tools: runtimeTools
       });
       logAiResponse("next-step", "stream", output);
@@ -428,7 +429,7 @@ export async function streamTreeTurn({
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorTurnOutput & DirectorAgentTrace> {
   const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeTurnAgent));
-  const { agentContext, tools } = executionContext;
+  const { agentContext, toolLabels, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
     let agentContextWithSubmit = agentContext;
@@ -452,6 +453,7 @@ export async function streamTreeTurn({
         schema: DirectorTurnOutputSchema,
         signal,
         target: "turn",
+        toolLabels,
         tools: runtimeTools
       });
       logAiResponse("turn", "stream", output);
@@ -517,7 +519,7 @@ export async function streamTreeArtifact({
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorArtifactOutput & DirectorAgentTrace> {
   const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeArtifactAgent));
-  const { agentContext, tools } = executionContext;
+  const { agentContext, toolLabels, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
     let agentContextWithSubmit = agentContext;
@@ -542,6 +544,7 @@ export async function streamTreeArtifact({
         schema: DirectorArtifactOutputSchema,
         signal,
         target: "artifact",
+        toolLabels,
         tools: runtimeTools
       });
       logAiResponse("artifact", "stream", output);
@@ -618,7 +621,7 @@ export async function streamTreeOptions({
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorOptionsOutput & DirectorAgentTrace> {
   const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeOptionsAgent));
-  const { agentContext, tools } = executionContext;
+  const { agentContext, toolLabels, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
     let agentContextWithSubmit = agentContext;
@@ -642,6 +645,7 @@ export async function streamTreeOptions({
         schema: DirectorOptionsOutputSchema,
         signal,
         target: "options",
+        toolLabels,
         tools: runtimeTools
       });
       logAiResponse("options", "stream", output);
@@ -705,7 +709,6 @@ function contextForDirectorParts(
     toolSummaries: context.toolSummaries
   };
 }
-
 function withFinalSubmitToolSummary(
   context: SharedAgentContextInput,
   target: RuntimeSubmitTarget
@@ -846,6 +849,7 @@ async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
   schema,
   signal,
   target,
+  toolLabels,
   tools
 }: {
   agent: TreeArtifactAgentLike | TreeOptionsAgentLike;
@@ -857,6 +861,7 @@ async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
   schema: ParseableOutputSchema<TOutput>;
   signal?: AbortSignal;
   target: RuntimeSubmitTarget;
+  toolLabels?: Record<string, string>;
   tools: ToolsInput;
 }): Promise<TOutput & DirectorAgentTrace> {
   return withStructuredOutputRetries(messages, target, async (attemptMessages) => {
@@ -870,6 +875,7 @@ async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
       schema,
       signal,
       target,
+      toolLabels,
       tools
     });
     return withAgentMessages(output, agentMessages);
@@ -894,6 +900,7 @@ async function streamRuntimeToolsOnce<TPartial, TOutput>({
   schema,
   signal,
   target,
+  toolLabels,
   tools
 }: {
   agent: TreeArtifactAgentLike | TreeOptionsAgentLike;
@@ -905,6 +912,7 @@ async function streamRuntimeToolsOnce<TPartial, TOutput>({
   schema: ParseableOutputSchema<TOutput>;
   signal?: AbortSignal;
   target: RuntimeSubmitTarget;
+  toolLabels?: Record<string, string>;
   tools: ToolsInput;
 }): Promise<{ agentMessages: AgentMessage[]; output: TOutput }> {
   const stream = agent.stream
@@ -933,7 +941,8 @@ async function streamRuntimeToolsOnce<TPartial, TOutput>({
     onProcessData,
     onReasoningText,
     signal,
-    target
+    target,
+    toolLabels
   });
   return {
     agentMessages: summary.agentMessages,
@@ -949,6 +958,7 @@ async function consumeRuntimeReActStream<TPartial>(
     onReasoningText?: (event: ReasoningTextEvent) => void;
     signal?: AbortSignal;
     target: RuntimeSubmitTarget;
+    toolLabels?: Record<string, string>;
   }
 ): Promise<RuntimeToolStreamSummary> {
   const streamStartedAt = Date.now();
@@ -985,7 +995,7 @@ async function consumeRuntimeReActStream<TPartial>(
       const processData = processDataDisplayFromStreamChunk(chunk, toolCallDeltaState);
       const reasoningDelta = hasSeenFinalSubmitOutput ? "" : reasoningDeltaFromStreamChunk(chunk);
       const toolProgressDelta =
-        toolProgressDeltaFromStreamChunk(chunk) || toolCallDeltaProgressFromStreamChunk(chunk, toolCallDeltaState);
+        toolProgressDeltaFromStreamChunk(chunk, options.toolLabels) || toolCallDeltaProgressFromStreamChunk(chunk, toolCallDeltaState);
       collectAgentMessageFromStreamChunk(chunk, agentMessageHistoryState);
       const hasToolActivity = Boolean(toolProgressDelta);
       const visibleTextDelta = hasSeenFinalSubmitOutput ? "" : visibleRuntimeTextDelta(textDelta, rawText);
@@ -1565,6 +1575,7 @@ async function executionContextForDirectorParts(
     return {
       agentContext: baseContext,
       disconnect: async () => undefined,
+      toolLabels: {} as Record<string, string>,
       tools: undefined as ToolsInput | undefined
     };
   }
@@ -1604,6 +1615,7 @@ async function executionContextForDirectorParts(
       ]
     },
     disconnect: () => disconnectRuntimeTools(mcpRuntime),
+    toolLabels: mcpRuntime.toolLabels,
     tools
   };
 }
@@ -1705,10 +1717,10 @@ async function consumeStructuredFullStream<TPartial>(
   return latestPartial;
 }
 
-function progressSegmentsFromStreamChunk(chunk: unknown): ProgressSegment[] {
+function progressSegmentsFromStreamChunk(chunk: unknown, toolLabels?: Record<string, string>): ProgressSegment[] {
   const segments: ProgressSegment[] = [
     { delta: reasoningDeltaFromStreamChunk(chunk), kind: "text" },
-    { delta: toolProgressDeltaFromStreamChunk(chunk), kind: "tool" }
+    { delta: toolProgressDeltaFromStreamChunk(chunk, toolLabels), kind: "tool" }
   ];
 
   return segments.filter((segment) => Boolean(segment.delta));
@@ -1829,11 +1841,11 @@ function looksLikeStructuredRuntimeText(text: string) {
   return trimmed.length > 80 && structuralChars / trimmed.length > 0.16;
 }
 
-function toolProgressDeltaFromStreamChunk(chunk: unknown): string {
+function toolProgressDeltaFromStreamChunk(chunk: unknown, toolLabels?: Record<string, string>): string {
   if (!isObjectRecord(chunk)) return "";
 
   const nestedAgentChunk = nestedAgentExecutionChunk(chunk);
-  if (nestedAgentChunk) return toolProgressDeltaFromStreamChunk(nestedAgentChunk);
+  if (nestedAgentChunk) return toolProgressDeltaFromStreamChunk(nestedAgentChunk, toolLabels);
 
   const chunkType = typeof chunk.type === "string" ? chunk.type : "";
   if (!chunkType.includes("tool")) return "";
@@ -1844,12 +1856,14 @@ function toolProgressDeltaFromStreamChunk(chunk: unknown): string {
   if (isFinalSubmitToolName(toolName)) return "";
   if (isProcessDataDisplayToolName(toolName)) return "";
 
+  const displayName = toolLabels?.[toolName] ?? toolName;
+
   if (chunkType === "tool-call" || chunkType === "tool-execution-start") {
     if (isSubagentToolName(toolName)) {
       return `\n[子代理] 运行 ${subagentCallLabel(toolName, toolInputFromPayload(payload))}`;
     }
 
-    return `\n[工具] 调用 ${toolName}`;
+    return `\n[工具] 调用 ${displayName}`;
   }
 
   if (chunkType === "tool-result" || chunkType === "tool-output" || chunkType === "tool-execution-end") {
@@ -1861,7 +1875,7 @@ function toolProgressDeltaFromStreamChunk(chunk: unknown): string {
       }`;
     }
 
-    return `\n[工具] ${toolName} ${verb}`;
+    return `\n[工具] ${displayName} ${verb}`;
   }
 
   if (chunkType === "tool-error" || chunkType === "tool-execution-abort") {
@@ -1869,7 +1883,7 @@ function toolProgressDeltaFromStreamChunk(chunk: unknown): string {
       return `\n[子代理] ${subagentToolFallbackTitle(toolName)} 失败`;
     }
 
-    return `\n[工具] ${toolName} 失败`;
+    return `\n[工具] ${displayName} 失败`;
   }
 
   return "";

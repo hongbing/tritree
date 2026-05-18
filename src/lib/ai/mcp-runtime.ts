@@ -9,6 +9,7 @@ type StringEnv = Record<string, string | undefined>;
 export type McpRuntimeTools = {
   diagnostics: string[];
   disconnect: () => Promise<void>;
+  toolLabels: Record<string, string>;
   toolSummaries: string[];
   tools: ToolsInput;
 };
@@ -44,14 +45,15 @@ type LoadServerDefinitionsOptions = {
 type LoadServerDefinitionsResult = {
   configHash: string;
   diagnostics: string[];
+  serverLabels: Record<string, string>;
   servers: Record<string, MastraMCPServerDefinition>;
 };
 
 const SERVER_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
 const ENV_PLACEHOLDER_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 const MAX_TIMEOUT_MS = 120_000;
-const STDIO_NORMALIZED_KEYS = new Set(["args", "command", "cwd", "disabled", "env", "roots", "timeout"]);
-const HTTP_NORMALIZED_KEYS = new Set(["connectTimeout", "disabled", "headers", "requestInit", "roots", "timeout", "url"]);
+const STDIO_NORMALIZED_KEYS = new Set(["args", "command", "cwd", "disabled", "env", "label", "roots", "timeout"]);
+const HTTP_NORMALIZED_KEYS = new Set(["connectTimeout", "disabled", "headers", "label", "requestInit", "roots", "timeout", "url"]);
 
 export function defaultMcpConfigPath(cwd = process.cwd()) {
   return path.join(cwd, ".tritree", "mcp.json");
@@ -79,7 +81,7 @@ export function loadMcpServerDefinitions({
   readFile = (filePath) => readFileSync(filePath, "utf8")
 }: LoadServerDefinitionsOptions): LoadServerDefinitionsResult {
   if (!exists(configPath)) {
-    return { configHash: "", diagnostics: [], servers: {} };
+    return { configHash: "", diagnostics: [], serverLabels: {}, servers: {} };
   }
 
   let configText: string;
@@ -89,6 +91,7 @@ export function loadMcpServerDefinitions({
     return {
       configHash: "",
       diagnostics: [`MCP config ${configPath} could not be read: ${redactMcpDiagnostic(errorMessage(error))}`],
+      serverLabels: {},
       servers: {}
     };
   }
@@ -100,6 +103,7 @@ export function loadMcpServerDefinitions({
     return {
       configHash: hashConfig(configText),
       diagnostics: [`MCP config ${configPath} is not valid JSON: ${redactMcpDiagnostic(errorMessage(error))}`],
+      serverLabels: {},
       servers: {}
     };
   }
@@ -108,33 +112,39 @@ export function loadMcpServerDefinitions({
     return {
       configHash: hashConfig(configText),
       diagnostics: [`MCP config ${configPath} must be a JSON object.`],
+      serverLabels: {},
       servers: {}
     };
   }
-
   const mcpServers = rawConfig.mcpServers;
   if (mcpServers === undefined) {
-    return { configHash: hashConfig(configText), diagnostics: [], servers: {} };
+    return { configHash: hashConfig(configText), diagnostics: [], serverLabels: {}, servers: {} };
   }
   if (!isRecord(mcpServers)) {
     return {
       configHash: hashConfig(configText),
       diagnostics: ["MCP config mcpServers must be an object."],
+      serverLabels: {},
       servers: {}
     };
   }
 
   const diagnostics: string[] = [];
+  const serverLabels: Record<string, string> = {};
   const servers: Record<string, MastraMCPServerDefinition> = {};
   for (const [serverName, rawServer] of Object.entries(mcpServers)) {
     const parsed = parseServerDefinition(serverName, rawServer, env);
     diagnostics.push(...parsed.diagnostics.map(redactMcpDiagnostic));
-    if (parsed.server) servers[serverName] = parsed.server;
+    if (parsed.server) {
+      servers[serverName] = parsed.server;
+      if (parsed.label) serverLabels[serverName] = parsed.label;
+    }
   }
 
   return {
     configHash: hashConfig(configText),
     diagnostics,
+    serverLabels,
     servers
   };
 }
@@ -143,7 +153,7 @@ function parseServerDefinition(
   serverName: string,
   rawServer: unknown,
   env: StringEnv
-): { diagnostics: string[]; server?: MastraMCPServerDefinition } {
+): { diagnostics: string[]; label?: string; server?: MastraMCPServerDefinition } {
   if (!SERVER_NAME_PATTERN.test(serverName)) {
     return { diagnostics: [`MCP server ${serverName} has an invalid name.`] };
   }
@@ -154,15 +164,19 @@ function parseServerDefinition(
     return { diagnostics: [] };
   }
 
+  const label = typeof rawServer.label === "string" ? rawServer.label.trim() || undefined : undefined;
+
   const hasCommand = typeof rawServer.command === "string";
   const hasUrl = typeof rawServer.url === "string";
   if (hasCommand === hasUrl) {
     return { diagnostics: [`MCP server ${serverName} must define exactly one of command or url.`] };
   }
 
-  return hasCommand
+  const parsed = hasCommand
     ? parseStdioServerDefinition(serverName, rawServer, env)
     : parseHttpServerDefinition(serverName, rawServer, env);
+
+  return { ...parsed, ...(label ? { label } : {}) };
 }
 
 function parseStdioServerDefinition(
@@ -512,6 +526,7 @@ export async function createMcpRuntimeTools(options: McpRuntimeOptions = {}): Pr
       return {
         diagnostics,
         disconnect: () => disconnectMcpClient(client),
+        toolLabels: {},
         toolSummaries: diagnostics,
         tools: {}
       };
@@ -524,15 +539,17 @@ export async function createMcpRuntimeTools(options: McpRuntimeOptions = {}): Pr
   }
 
   const tools: ToolsInput = {};
+  const toolLabels: Record<string, string> = {};
   const toolSummaries = [...diagnostics];
   const existingTools = options.existingTools ?? {};
 
   for (const [serverName, serverTools] of Object.entries(toolsets)) {
+    const serverLabel = loaded.serverLabels[serverName] ?? serverName;
     const loadedToolSummaries: string[] = [];
     for (const [toolName, tool] of Object.entries(serverTools)) {
       const namespacedName = `${serverName}_${toolName}`;
       if (namespacedName in existingTools || namespacedName in tools) {
-        const diagnostic = `MCP ${serverName} skipped ${namespacedName} because a tool with that name already exists.`;
+        const diagnostic = `MCP ${serverLabel} skipped ${namespacedName} because a tool with that name already exists.`;
         diagnostics.push(diagnostic);
         toolSummaries.push(diagnostic);
         options.log?.(`[tritree:mcp] ${diagnostic}`);
@@ -540,12 +557,13 @@ export async function createMcpRuntimeTools(options: McpRuntimeOptions = {}): Pr
       }
 
       tools[namespacedName] = tool;
+      if (serverLabel !== serverName) toolLabels[namespacedName] = serverLabel;
       loadedToolSummaries.push(formatMcpToolSummary(namespacedName, tool));
     }
 
     if (loadedToolSummaries.length > 0) {
       toolSummaries.push(
-        `MCP ${serverName}：可用工具 ${loadedToolSummaries.join("、")}。仅当本轮任务需要该 MCP 服务能力时调用。`
+        `MCP ${serverLabel}：可用工具 ${loadedToolSummaries.join("、")}。仅当本轮任务需要该 MCP 服务能力时调用。`
       );
     }
   }
@@ -553,6 +571,7 @@ export async function createMcpRuntimeTools(options: McpRuntimeOptions = {}): Pr
   return {
     diagnostics,
     disconnect: () => disconnectMcpClient(client),
+    toolLabels,
     toolSummaries,
     tools
   };
@@ -571,6 +590,7 @@ function emptyMcpRuntimeTools(diagnostics: string[] = []): McpRuntimeTools {
   return {
     diagnostics,
     disconnect: async () => undefined,
+    toolLabels: {},
     toolSummaries: diagnostics,
     tools: {}
   };

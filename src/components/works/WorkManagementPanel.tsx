@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
 import { type WorkSummary } from "@/lib/domain";
-import { apiPath } from "@/lib/web-base-path";
+import { apiPath, appHomePath } from "@/lib/web-base-path";
 
 type WorksResponse = {
   works?: WorkSummary[];
@@ -135,10 +135,10 @@ export function WorkManagementPanel() {
             <h1 id="works-title">我的作品</h1>
           </div>
           <div className="works-panel__actions">
-            <Link className="works-link-button" href="/">
+            <Link className="works-link-button" href={appHomePath()}>
               返回创作
             </Link>
-            <Link className="works-primary-link" href="/?new=1">
+            <Link className="works-primary-link" href={appHomePath("?new=1")}>
               新念头
             </Link>
           </div>
@@ -197,7 +197,7 @@ export function WorkManagementPanel() {
                 ) : null}
 
                 <div className="works-row__actions">
-                  <Link className="works-link-button" href={`/?sessionId=${encodeURIComponent(work.id)}`}>
+                  <Link className="works-link-button" href={appHomePath(`?sessionId=${encodeURIComponent(work.id)}`)}>
                     打开
                   </Link>
                   <button disabled={isMutating} type="button" onClick={() => startRename(work)}>

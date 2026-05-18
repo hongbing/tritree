@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
-import { apiPath } from "@/lib/web-base-path";
+import { apiPath, appHomePath } from "@/lib/web-base-path";
 
 type AdminUserView = {
   id: string;
@@ -231,7 +231,7 @@ export function AdminUsersPanel() {
         <div className="admin-panel__header">
           <h1 id="admin-users-title">用户管理</h1>
           <div className="admin-panel__actions">
-            <Link className="admin-return-link" href="/">
+            <Link className="admin-return-link" href={appHomePath()}>
               返回创作
             </Link>
             <span>{isLoading ? "加载中" : `${users.length} 个用户`}</span>

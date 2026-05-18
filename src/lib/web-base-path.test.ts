@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiPath, appPath, getAppRootPath, normalizeWebBasePath } from "./web-base-path";
+import { apiPath, appHomePath, appPath, getAppRootPath, normalizeWebBasePath } from "./web-base-path";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -49,6 +49,26 @@ describe("web base path helpers", () => {
     it("normalizes the configured app root path", () => {
       vi.stubEnv("TRITREE_APP_ROOT_PATH", "chat/");
       expect(getAppRootPath()).toBe("/chat");
+    });
+  });
+
+  describe("appHomePath", () => {
+    it("returns '/' when app root path is not configured", () => {
+      expect(appHomePath()).toBe("/");
+    });
+
+    it("returns the configured app root path", () => {
+      vi.stubEnv("TRITREE_APP_ROOT_PATH", "/chat");
+      expect(appHomePath()).toBe("/chat");
+    });
+
+    it("appends query string to the app root path", () => {
+      vi.stubEnv("TRITREE_APP_ROOT_PATH", "/chat");
+      expect(appHomePath("?new=1")).toBe("/chat?new=1");
+    });
+
+    it("appends query string when no app root path configured", () => {
+      expect(appHomePath("?new=1")).toBe("/?new=1");
     });
   });
 });

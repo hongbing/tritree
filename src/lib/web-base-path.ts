@@ -40,3 +40,13 @@ export function appPath(path: string) {
 export function apiPath(path: string) {
   return appPath(path);
 }
+
+/**
+ * Returns the app home path, combining appRootPath and an optional query string.
+ * e.g. appHomePath() => "/chat", appHomePath("?new=1") => "/chat?new=1"
+ * Falls back to "/" when appRootPath is not configured.
+ */
+export function appHomePath(query?: string) {
+  const rootPath = getAppRootPath() || "/";
+  return query ? `${rootPath}${query}` : rootPath;
+}

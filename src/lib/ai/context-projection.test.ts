@@ -3,6 +3,7 @@ import type { Skill } from "@/lib/domain";
 import type { DirectorInputParts } from "./prompts";
 import {
   SUBAGENT_CONTEXT_POLICY,
+  type ContextViewPolicy,
   formatProjectedAgentContext,
   projectAgentContext
 } from "./context-projection";
@@ -56,6 +57,55 @@ describe("projectAgentContext", () => {
     expect(snapshot.selectedDirection).toBe("补论证：增加一个真实冲突。");
     expect(snapshot.enabledSkills.map((item) => item.title)).toEqual(["审稿"]);
     expect(snapshot.recentUserFeedback).toEqual(["用户补充：别写成教程。"]);
+  });
+
+  it("omits the draft body when draft projection is disabled", () => {
+    const policy = {
+      ...SUBAGENT_CONTEXT_POLICY,
+      artifacts: { draft: "none" }
+    } satisfies ContextViewPolicy;
+
+    const snapshot = projectAgentContext(parts(), policy);
+
+    expect(snapshot.currentArtifact).toBeNull();
+  });
+
+  it("omits recent user feedback when message projection is disabled", () => {
+    const policy = {
+      ...SUBAGENT_CONTEXT_POLICY,
+      messages: "none"
+    } satisfies ContextViewPolicy;
+
+    const snapshot = projectAgentContext(parts(), policy);
+
+    expect(snapshot.recentUserFeedback).toEqual([]);
+  });
+
+  it("omits enabled skills when skill projection is disabled", () => {
+    const policy = {
+      ...SUBAGENT_CONTEXT_POLICY,
+      skills: "none"
+    } satisfies ContextViewPolicy;
+
+    const snapshot = projectAgentContext(parts(), policy);
+
+    expect(snapshot.enabledSkills).toEqual([]);
+  });
+
+  it("includes only string user messages as recent feedback under the recent message policy", () => {
+    const snapshot = projectAgentContext(
+      parts({
+        messages: [
+          { role: "user", content: "用户反馈：保留冲突。" },
+          { role: "user", content: { text: "结构化用户反馈暂不投影。" } },
+          { role: "assistant", content: "助手内容不投影。" },
+          { role: "user", content: ["数组用户反馈暂不投影。"] }
+        ]
+      }),
+      SUBAGENT_CONTEXT_POLICY
+    );
+
+    expect(snapshot.recentUserFeedback).toEqual(["用户反馈：保留冲突。"]);
   });
 
   it("formats projected context with stable section labels", () => {

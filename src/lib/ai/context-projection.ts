@@ -3,9 +3,9 @@ import type { DirectorInputParts, DirectorMessage } from "./prompts";
 
 export type ContextViewPolicy = {
   artifacts: {
-    draft: "latest" | "summary" | "all" | "none";
+    draft: "latest" | "none";
   };
-  tree: "current-node" | "current-path-summary" | "all";
+  tree: "current-node";
   messages: "recent" | "none";
   skills: "enabled" | "none";
 };
@@ -47,7 +47,7 @@ export function projectAgentContext(
             value: currentDraft
           }
         : null,
-    currentNode: policy.tree === "current-node" ? source.pathSummary.trim() : source.pathSummary.trim(),
+    currentNode: source.pathSummary.trim(),
     currentRequest: source.rootSummary.trim(),
     enabledSkills: policy.skills === "enabled" ? source.enabledSkills : [],
     recentUserFeedback: policy.messages === "recent" ? recentUserMessages(source.messages ?? []) : [],

@@ -1448,7 +1448,7 @@ async function executionContextForDirectorParts(
   }
 
   const runtime = await createSkillRuntimeTools(baseContext.enabledSkills);
-  const subagentRuntime = createSubagentRuntimeTools({ env });
+  const subagentRuntime = createSubagentRuntimeTools({ contextSource: parts, env });
   const existingTools = {
     ...(runtime.tools ?? {}),
     ...(subagentRuntime.tools ?? {})

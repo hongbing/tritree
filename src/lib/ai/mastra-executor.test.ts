@@ -436,6 +436,49 @@ describe("tree director compatibility generators", () => {
     );
   });
 
+  it("passes director parts to subagent runtime tools as projection source", async () => {
+    const finalObject = {
+      decisionRationale: "需要让用户选择下一步。",
+      roundIntent: "选择下一步",
+      options: [
+        { id: "a", label: "A", description: "A desc", impact: "A impact", kind: "explore" },
+        { id: "b", label: "B", description: "B desc", impact: "B impact", kind: "deepen" },
+        { id: "c", label: "C", description: "C desc", impact: "C impact", kind: "reframe" }
+      ]
+    };
+    const stream = vi.fn(async () => ({
+      fullStream: async function* () {
+        yield {
+          type: "tool-call",
+          payload: {
+            toolName: "submit_tree_options",
+            args: finalObject
+          }
+        };
+      },
+      object: Promise.resolve(undefined)
+    }));
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream,
+        generate: vi.fn()
+      };
+    });
+
+    await streamTreeOptions({
+      parts: directorParts,
+      env: { KIMI_API_KEY: "token" }
+    });
+
+    expect(mocks.createSubagentRuntimeTools).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextSource: directorParts,
+        env: { KIMI_API_KEY: "token" }
+      })
+    );
+  });
+
   it("merges configured MCP tools with Skill runtime tools for real agents", async () => {
     const runSkillCommand = {
       id: "run_skill_command",
@@ -504,9 +547,12 @@ describe("tree director compatibility generators", () => {
       env: { KIMI_API_KEY: "token" }
     });
 
-    expect(mocks.createSubagentRuntimeTools).toHaveBeenCalledWith({
-      env: { KIMI_API_KEY: "token" }
-    });
+    expect(mocks.createSubagentRuntimeTools).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextSource: directorParts,
+        env: { KIMI_API_KEY: "token" }
+      })
+    );
     expect(mocks.createMcpRuntimeTools).toHaveBeenCalledWith(
       expect.objectContaining({
         existingTools: {

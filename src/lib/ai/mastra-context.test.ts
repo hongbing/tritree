@@ -63,8 +63,8 @@ const shellInput = {
   enabledSkills: [],
   subagentTemplateSummaries: ["research｜资料核查：核查一个具体事实。"],
   toolSummaries: [
-    "run_subagent_template：运行预创建子代理模板。",
-    "run_custom_subagent：运行自定义子代理。",
+    "run_subagent_template：运行预创建子代理模板；运行时会提供当前上下文视图。",
+    "run_custom_subagent：运行自定义子代理；运行时会提供当前上下文视图。",
     "submit_tree_draft：最终提交工具。",
     "submit_tree_next_step：最终提交工具。",
     "submit_tree_options：最终提交工具。"
@@ -113,6 +113,8 @@ describe("agent instructions", () => {
     expect(instructions).toContain("优先由主 agent 自己处理");
     expect(instructions).toContain("优先使用 run_subagent_template");
     expect(instructions).toContain("才使用 run_custom_subagent");
+    expect(instructions).toContain("调用 subagent 时给出短任务、期望输出和必要约束");
+    expect(instructions).toContain("运行时会为 subagent 提供当前上下文视图");
     expect(instructions).toContain("subagent 作为工具使用，其返回值不是最终判断");
     expect(instructions).toContain("必须检查工具返回值");
     expect(instructions).toContain("不要把“已调用工具或 subagent”当作本轮完成");

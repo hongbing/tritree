@@ -1173,7 +1173,6 @@ describe("tree director compatibility generators", () => {
     ).resolves.toMatchObject({ options: finalObject.options });
 
     expect(progressEvents.map((event) => event.delta)).toEqual([
-      "\n[工具] 准备调用 run_skill_command",
       "\n[工具] 调用 run_skill_command"
     ]);
     const visibleProgress = progressEvents.map((event) => event.accumulatedText).join("\n");

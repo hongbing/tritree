@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
-import { GitCompare, X } from "lucide-react";
+import { Check, GitCompare, X } from "lucide-react";
 import type { Artifact, TreeNode } from "@/lib/domain";
 import { getArtifactClientManifest, getArtifactRenderer } from "@/artifacts/client-registry";
 import { ArtifactFallback } from "./ArtifactFallback";
@@ -135,7 +135,13 @@ export function ArtifactWorkspace({
               <strong>{processTitle}</strong>
             </div>
             <div className="artifact-workspace__process-body" ref={processBodyRef}>
-              {trimmedThinkingText ? trimmedThinkingText : generationStage === "artifact" ? "正在生成草稿内容。" : "正在生成可选择方向。"}
+              {trimmedThinkingText ? (
+                <ThinkingTextLines text={trimmedThinkingText} />
+              ) : generationStage === "artifact" ? (
+                "正在生成草稿内容。"
+              ) : (
+                "正在生成可选择方向。"
+              )}
             </div>
           </div>
         ) : null}
@@ -171,6 +177,108 @@ export function ArtifactWorkspace({
         )}
       </div>
     </aside>
+  );
+}
+
+type ToolCallEntry = {
+  id: number;
+  kind: "tool" | "subagent";
+  label: string;
+  status: "calling" | "done" | "failed";
+};
+
+type OtherLine = { kind: "text"; text: string };
+
+type ThinkingLine = ToolCallEntry | OtherLine;
+
+function parseThinkingLines(text: string): ThinkingLine[] {
+  const rawLines = text.split("\n");
+  const result: ThinkingLine[] = [];
+  let idCounter = 0;
+
+  for (const raw of rawLines) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    const toolCallMatch = line.match(/^\[工具\] 调用 (.+)$/);
+    if (toolCallMatch) {
+      result.push({ id: idCounter++, kind: "tool", label: toolCallMatch[1], status: "calling" });
+      continue;
+    }
+
+    const toolDoneMatch = line.match(/^\[工具\] (.+) (完成|失败)$/);
+    if (toolDoneMatch) {
+      const label = toolDoneMatch[1];
+      const status = toolDoneMatch[2] === "完成" ? "done" : "failed";
+      // 找最早的同名 calling 条目
+      const pending = result.find(
+        (e): e is ToolCallEntry => e.kind === "tool" && e.label === label && e.status === "calling"
+      );
+      if (pending) {
+        pending.status = status;
+      } else {
+        result.push({ id: idCounter++, kind: "tool", label, status });
+      }
+      continue;
+    }
+
+    const subagentCallMatch = line.match(/^\[子代理\] 运行 (.+)$/);
+    if (subagentCallMatch) {
+      result.push({ id: idCounter++, kind: "subagent", label: subagentCallMatch[1], status: "calling" });
+      continue;
+    }
+
+    const subagentDoneMatch = line.match(/^\[子代理\] (.+) (完成，主 agent 正在检查返回值|失败)$/);
+    if (subagentDoneMatch) {
+      const label = subagentDoneMatch[1];
+      const status = subagentDoneMatch[2].startsWith("完成") ? "done" : "failed";
+      const pending = result.find(
+        (e): e is ToolCallEntry => e.kind === "subagent" && e.label === label && e.status === "calling"
+      );
+      if (pending) {
+        pending.status = status;
+      } else {
+        result.push({ id: idCounter++, kind: "subagent", label, status });
+      }
+      continue;
+    }
+
+    result.push({ kind: "text", text: line });
+  }
+
+  return result;
+}
+
+function ThinkingTextLines({ text }: { text: string }) {
+  const lines = parseThinkingLines(text);
+  return (
+    <ul className="artifact-workspace__thinking-lines">
+      {lines.map((line, index) => {
+        if (line.kind === "tool" || line.kind === "subagent") {
+          return (
+            <li
+              key={line.id}
+              className={`artifact-workspace__thinking-tool artifact-workspace__thinking-tool--${line.status}`}
+            >
+              {line.status === "done" ? (
+                <Check aria-hidden="true" size={12} />
+              ) : line.status === "failed" ? (
+                <span aria-hidden="true" className="artifact-workspace__thinking-x">✕</span>
+              ) : (
+                <span aria-hidden="true" className="artifact-workspace__thinking-spinner" />
+              )}
+              <span>{line.kind === "subagent" ? `[子代理] ${line.label}` : line.label}</span>
+            </li>
+          );
+        }
+        const textLine = line as OtherLine;
+        return (
+          <li key={index} className="artifact-workspace__thinking-text">
+            {textLine.text}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

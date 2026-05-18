@@ -1892,23 +1892,18 @@ function toolCallDeltaProgressFromStreamChunk(chunk: unknown, state: ToolCallDel
 
   if (chunkType === "tool-call-streaming-start") {
     state.argsById.set(toolCallId, "");
-    if (state.announcedIds.has(toolCallId)) return "";
-    state.announcedIds.add(toolCallId);
-    if (isSubagentToolName(toolName)) {
-      return `\n[子代理] 准备运行 ${subagentToolFallbackTitle(toolName)}`;
-    }
-
-    return `\n[工具] 准备调用 ${toolName}`;
+    return "";
   }
 
   const argsTextDelta = stringFromPayload(payload, "argsTextDelta", "delta", "text");
   if (!argsTextDelta) return "";
 
   state.argsById.set(toolCallId, `${state.argsById.get(toolCallId) ?? ""}${argsTextDelta}`);
-  if (state.announcedIds.has(toolCallId)) return "";
+  if (!state.announcedIds.has(toolCallId)) {
+    state.announcedIds.add(toolCallId);
+  }
 
-  state.announcedIds.add(toolCallId);
-  return `\n[工具] 准备调用 ${toolName}`;
+  return "";
 }
 
 function isSubagentToolName(toolName: string) {

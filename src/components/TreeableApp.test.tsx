@@ -3112,13 +3112,13 @@ describe("TreeableApp", () => {
     });
 
     act(() => {
-      artifactStream.push({ type: "thinking", nodeId: "node-2", stage: "options", text: "[工具] 正在查找素材" });
+      artifactStream.push({ type: "thinking", nodeId: "node-2", stage: "options", text: "[工具] 调用 正在查找素材" });
     });
 
     await vi.waitFor(() => {
       expect(screen.getByTestId("canvas-generation-stage")).toHaveTextContent("node-2:options");
       expect(screen.getByTestId("canvas-options")).toBeEmptyDOMElement();
-      expect(screen.getByTestId("live-artifact-generation-status")).toHaveTextContent("options:thinking:[工具] 正在查找素材");
+      expect(screen.getByTestId("live-artifact-generation-status")).toHaveTextContent("options:thinking:[工具] 调用 正在查找素材");
       expect(liveArtifactMock).toHaveBeenLastCalledWith(
         expect.objectContaining({
           generationStage: "options",

@@ -272,12 +272,11 @@ describe("ArtifactWorkspace", () => {
       isBusy: true,
       isGenerating: true,
       selectedArtifactId: social.id,
-      thinkingText: "[工具] 准备调用 search\n[工具] search 完成"
+      thinkingText: "[工具] 调用 search\n[工具] search 完成"
     });
 
     expect(screen.getByRole("status")).toHaveTextContent("AI 正在生成下一步选项...");
-    expect(screen.getByRole("status")).toHaveTextContent("[工具] 准备调用 search");
-    expect(screen.getByRole("status")).toHaveTextContent("[工具] search 完成");
+    expect(screen.getByRole("status")).toHaveTextContent("search");
     expect(screen.getByTestId("social-post-renderer")).toHaveTextContent("A short social post body.");
   });
 
@@ -293,9 +292,9 @@ describe("ArtifactWorkspace", () => {
       onSave: vi.fn(),
       selectedArtifactId: social.id
     };
-    const { rerender } = render(<ArtifactWorkspace {...baseProps} thinkingText="[工具] 准备调用 search" />);
+    const { rerender } = render(<ArtifactWorkspace {...baseProps} thinkingText="[工具] 调用 search" />);
     const progressBody = screen
-      .getByText("[工具] 准备调用 search")
+      .getByText("search")
       .closest(".artifact-workspace__process-body") as HTMLDivElement | null;
 
     expect(progressBody).not.toBeNull();
@@ -305,7 +304,7 @@ describe("ArtifactWorkspace", () => {
     rerender(
       <ArtifactWorkspace
         {...baseProps}
-        thinkingText={"[工具] 准备调用 search\n[工具] search 完成\n[工具] 汇总最新记录"}
+        thinkingText={"[工具] 调用 search\n[工具] search 完成\n[工具] 调用 汇总最新记录"}
       />
     );
 

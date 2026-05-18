@@ -3741,6 +3741,64 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.artifact-workspace__thinking-lines {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.artifact-workspace__thinking-tool {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  color: #075985;
+}
+
+.artifact-workspace__thinking-tool--calling {
+  color: #075985;
+}
+
+.artifact-workspace__thinking-tool--done {
+  color: #0f766e;
+}
+
+.artifact-workspace__thinking-tool--failed {
+  color: #9a3412;
+}
+
+.artifact-workspace__thinking-spinner {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(14, 116, 144, 0.24);
+  border-top-color: #0ea5e9;
+  border-radius: 999px;
+  animation: leaf-spin 700ms linear infinite;
+}
+
+.artifact-workspace__thinking-x {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  color: #9a3412;
+}
+
+.artifact-workspace__thinking-tool svg {
+  flex: 0 0 auto;
+  color: #0f766e;
+}
+
+.artifact-workspace__thinking-text {
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: #334155;
+}
+
 .artifact-workspace__empty p {
   margin: 0;
 }

@@ -24,7 +24,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   if (!user?.isActive) redirect("/login");
   const params = await searchParams;
   const initialSessionId = firstParam(params.sessionId);
-  const startNewDraft = firstParam(params.new) === "1";
+  const startNewWork = firstParam(params.new) === "1";
 
   return (
     <TreeableApp
@@ -36,7 +36,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
         isAdmin: user.role === "admin"
       }}
       initialSessionId={initialSessionId}
-      startNewDraft={startNewDraft}
+      startNewWork={startNewWork}
     />
   );
 }

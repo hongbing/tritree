@@ -17,6 +17,7 @@ const defaultSystemSkills: ConfiguredDefaults["systemSkills"] = [
     description: "负责生成草稿。",
     prompt: "写出下一版草稿。",
     appliesTo: "writer",
+    sortOrder: 0,
     defaultEnabled: true,
     isArchived: false
   }

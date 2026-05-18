@@ -2,14 +2,17 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-const CURRENT_SCHEMA_VERSION = 11;
-const TREEABLE_TABLES = [
-  "publish_packages",
+const CURRENT_SCHEMA_VERSION = 12;
+const CONTENT_RESET_SCHEMA_VERSION = 12;
+const TREEABLE_CONTENT_TABLES = [
+  "artifacts",
   "branch_history",
-  "draft_versions",
   "tree_nodes",
   "session_enabled_skills",
-  "sessions",
+  "sessions"
+];
+const TREEABLE_TABLES = [
+  ...TREEABLE_CONTENT_TABLES,
   "creation_request_options",
   "skills",
   "user_oidc_identities",
@@ -44,6 +47,10 @@ function migrate(sqlite: DatabaseSync) {
     throw new UnsupportedDatabaseVersionError(userVersion.user_version);
   }
 
+  if (userVersion.user_version < CONTENT_RESET_SCHEMA_VERSION) {
+    resetContentTables(sqlite);
+  }
+
   createSchema(sqlite);
   sqlite.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION};`);
 }
@@ -53,6 +60,14 @@ function hasTreeableTables(sqlite: DatabaseSync) {
     const row = sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
     return Boolean(row);
   });
+}
+
+function resetContentTables(sqlite: DatabaseSync) {
+  sqlite.exec("PRAGMA foreign_keys = OFF;");
+  for (const table of TREEABLE_CONTENT_TABLES) {
+    sqlite.exec(`DROP TABLE IF EXISTS ${table};`);
+  }
+  sqlite.exec("PRAGMA foreign_keys = ON;");
 }
 
 function createSchema(sqlite: DatabaseSync) {
@@ -98,6 +113,7 @@ function createSchema(sqlite: DatabaseSync) {
       description TEXT NOT NULL,
       prompt TEXT NOT NULL,
       applies_to TEXT NOT NULL DEFAULT 'both',
+      sort_order INTEGER NOT NULL DEFAULT 0,
       is_system INTEGER NOT NULL,
       default_enabled INTEGER NOT NULL,
       is_archived INTEGER NOT NULL,
@@ -140,6 +156,9 @@ function createSchema(sqlite: DatabaseSync) {
       session_id TEXT NOT NULL REFERENCES sessions(id),
       parent_id TEXT REFERENCES tree_nodes(id),
       parent_option_id TEXT,
+      kind TEXT NOT NULL DEFAULT 'decision' CHECK (kind IN ('decision', 'artifact', 'analysis', 'action')),
+      produced_artifact_id TEXT,
+      source_artifact_ids_json TEXT NOT NULL DEFAULT '[]',
       round_index INTEGER NOT NULL,
       round_intent TEXT NOT NULL,
       options_json TEXT NOT NULL,
@@ -150,16 +169,16 @@ function createSchema(sqlite: DatabaseSync) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
-    CREATE TABLE IF NOT EXISTS draft_versions (
+    CREATE TABLE IF NOT EXISTS artifacts (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL REFERENCES sessions(id),
       node_id TEXT NOT NULL REFERENCES tree_nodes(id),
-      round_index INTEGER NOT NULL,
-      title TEXT NOT NULL,
-      body TEXT NOT NULL,
-      hashtags_json TEXT NOT NULL,
-      image_prompt TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      type TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      payload_json TEXT NOT NULL,
+      source_artifact_ids_json TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS branch_history (
@@ -169,22 +188,15 @@ function createSchema(sqlite: DatabaseSync) {
       option_json TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
-
-    CREATE TABLE IF NOT EXISTS publish_packages (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id),
-      node_id TEXT NOT NULL REFERENCES tree_nodes(id),
-      title TEXT NOT NULL,
-      body TEXT NOT NULL,
-      hashtags_json TEXT NOT NULL,
-      image_prompt TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
   `);
   addColumnIfMissing(sqlite, "tree_nodes", "parent_option_id", "TEXT");
+  addColumnIfMissing(sqlite, "tree_nodes", "kind", "TEXT NOT NULL DEFAULT 'decision'");
+  addColumnIfMissing(sqlite, "tree_nodes", "produced_artifact_id", "TEXT");
+  addColumnIfMissing(sqlite, "tree_nodes", "source_artifact_ids_json", "TEXT NOT NULL DEFAULT '[]'");
   addColumnIfMissing(sqlite, "tree_nodes", "is_terminal", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(sqlite, "tree_nodes", "agent_messages_json", "TEXT NOT NULL DEFAULT '[]'");
   addColumnIfMissing(sqlite, "skills", "applies_to", "TEXT NOT NULL DEFAULT 'both'");
+  addColumnIfMissing(sqlite, "skills", "sort_order", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(sqlite, "root_memory", "user_id", "TEXT REFERENCES users(id)");
   addColumnIfMissing(sqlite, "sessions", "user_id", "TEXT REFERENCES users(id)");
   addColumnIfMissing(sqlite, "sessions", "is_archived", "INTEGER NOT NULL DEFAULT 0");
@@ -197,6 +209,8 @@ function createSchema(sqlite: DatabaseSync) {
   sqlite.exec("CREATE INDEX IF NOT EXISTS sessions_user_archived_updated_idx ON sessions(user_id, is_archived, updated_at, created_at);");
   sqlite.exec("CREATE INDEX IF NOT EXISTS skills_user_archived_idx ON skills(user_id, is_archived);");
   sqlite.exec("CREATE INDEX IF NOT EXISTS creation_request_options_user_sort_idx ON creation_request_options(user_id, sort_order);");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS artifacts_session_node_idx ON artifacts(session_id, node_id, updated_at, created_at);");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS artifacts_session_type_idx ON artifacts(session_id, type, updated_at, created_at);");
 }
 
 function addColumnIfMissing(sqlite: DatabaseSync, tableName: string, columnName: string, definition: string) {

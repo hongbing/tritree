@@ -25,7 +25,7 @@ import {
 } from "@/lib/domain";
 
 type TreeCanvasProps = {
-  changedDraftNodeIds?: string[];
+  changedArtifactNodeIds?: string[];
   comparisonNodeIds?: ComparisonNodeIds | null;
   currentNode: TreeNode | null;
   display?: "full" | "options" | "tree";
@@ -72,7 +72,7 @@ type Point2 = [number, number];
 type RouteSide = -1 | 1;
 type PendingBranch = { nodeId: string; optionId: BranchOption["id"] };
 type ComparisonNodeIds = { fromNodeId: string | null; toNodeId: string | null };
-type NodeGenerationStage = { nodeId: string; stage: "draft" | "options" };
+type NodeGenerationStage = { nodeId: string; stage: "artifact" | "options" };
 
 type OptionBranchLayout = {
   cardHeight: number;
@@ -92,12 +92,13 @@ export type ForceTreeNode = {
   focusDepth?: number;
   group: number;
   id: string;
-  isDraftChanged?: boolean;
-  isDraftFocused?: boolean;
+  isArtifactChanged?: boolean;
+  isArtifactFocused?: boolean;
   generationStage?: NodeGenerationStage["stage"];
   isInactiveRoute?: boolean;
   inactiveRouteSide?: RouteSide;
   isSeedRoot?: boolean;
+  isStageComplete?: boolean;
   isTerminal?: boolean;
   kind: ForceTreeNodeKind;
   label: string;
@@ -244,18 +245,17 @@ function useStableTreeGraphNode(node: TreeNode | null) {
   return stableNodeRef.current.node;
 }
 
-function canRepresentDraft(node: ForceTreeNode) {
+function canRepresentArtifact(node: ForceTreeNode) {
   return node.kind === "history";
 }
 
-type NodeBadgeKind = "draft" | "generation" | "compare" | "changed";
+type NodeBadgeKind = "generation" | "compare" | "changed";
 
 function nodeBadgeOrder(datum: ForceTreeNode) {
   const badges: NodeBadgeKind[] = [];
-  if (datum.isDraftFocused) badges.push("draft");
   if (datum.generationStage) badges.push("generation");
   if (datum.comparisonRole) badges.push("compare");
-  if (datum.isDraftChanged) badges.push("changed");
+  if (datum.isArtifactChanged) badges.push("changed");
   return badges;
 }
 
@@ -281,12 +281,12 @@ function shouldShowSpinner(
   );
 }
 
-function markDraftFocusedNodes(nodes: ForceTreeNode[], focusedNodeId: string | null) {
+function markArtifactFocusedNodes(nodes: ForceTreeNode[], focusedNodeId: string | null) {
   if (!focusedNodeId) return;
 
   nodes.forEach((node) => {
-    if (canRepresentDraft(node) && node.nodeId === focusedNodeId) {
-      node.isDraftFocused = true;
+    if (canRepresentArtifact(node) && node.nodeId === focusedNodeId) {
+      node.isArtifactFocused = true;
     }
   });
 }
@@ -295,7 +295,7 @@ function markComparisonNodes(nodes: ForceTreeNode[], comparisonNodeIds: Comparis
   if (!comparisonNodeIds) return;
 
   nodes.forEach((node) => {
-    if (!canRepresentDraft(node)) return;
+    if (!canRepresentArtifact(node)) return;
     if (node.nodeId === comparisonNodeIds.fromNodeId) {
       node.comparisonRole = "from";
       return;
@@ -306,13 +306,13 @@ function markComparisonNodes(nodes: ForceTreeNode[], comparisonNodeIds: Comparis
   });
 }
 
-function markChangedDraftNodes(nodes: ForceTreeNode[], changedDraftNodeIds: string[]) {
-  if (changedDraftNodeIds.length === 0) return;
-  const changedNodeIds = new Set(changedDraftNodeIds);
+function markChangedArtifactNodes(nodes: ForceTreeNode[], changedArtifactNodeIds: string[]) {
+  if (changedArtifactNodeIds.length === 0) return;
+  const changedNodeIds = new Set(changedArtifactNodeIds);
 
   nodes.forEach((node) => {
-    if (canRepresentDraft(node) && node.nodeId && changedNodeIds.has(node.nodeId)) {
-      node.isDraftChanged = true;
+    if (canRepresentArtifact(node) && node.nodeId && changedNodeIds.has(node.nodeId)) {
+      node.isArtifactChanged = true;
     }
   });
 }
@@ -321,7 +321,7 @@ function markGenerationStageNode(nodes: ForceTreeNode[], generationStage: NodeGe
   if (!generationStage) return;
 
   nodes.forEach((node) => {
-    if (canRepresentDraft(node) && node.nodeId === generationStage.nodeId) {
+    if (canRepresentArtifact(node) && node.nodeId === generationStage.nodeId) {
       node.generationStage = generationStage.stage;
     }
   });
@@ -331,12 +331,12 @@ function markGraphNodeStates(
   nodes: ForceTreeNode[],
   focusedNodeId: string | null,
   comparisonNodeIds: ComparisonNodeIds | null,
-  changedDraftNodeIds: string[],
+  changedArtifactNodeIds: string[],
   generationStage: NodeGenerationStage | null
 ) {
-  markDraftFocusedNodes(nodes, focusedNodeId);
+  markArtifactFocusedNodes(nodes, focusedNodeId);
   markComparisonNodes(nodes, comparisonNodeIds);
-  markChangedDraftNodes(nodes, changedDraftNodeIds);
+  markChangedArtifactNodes(nodes, changedArtifactNodeIds);
   markGenerationStageNode(nodes, generationStage);
 }
 
@@ -376,7 +376,7 @@ function estimateInactiveRouteDepth(
 }
 
 export function createForceTreeGraph({
-  changedDraftNodeIds = [],
+  changedArtifactNodeIds = [],
   comparisonNodeIds = null,
   currentNode,
   focusedNodeId = null,
@@ -389,7 +389,7 @@ export function createForceTreeGraph({
   treeNodes,
   visibleOptionCount = 3
 }: {
-  changedDraftNodeIds?: string[];
+  changedArtifactNodeIds?: string[];
   comparisonNodeIds?: ComparisonNodeIds | null;
   currentNode: TreeNode | null;
   focusedNodeId?: string | null;
@@ -443,7 +443,7 @@ export function createForceTreeGraph({
   const optionYSpread = historyCount >= DENSE_ROUTE_MIN_HISTORY_COUNT ? DENSE_ROUTE_OPTION_Y_SPREAD : optionVerticalSpread(layout);
   function finishGraph(): ForceTreeGraph {
     separateNearbyTreeLabels(nodes, layout.center[1]);
-    markGraphNodeStates(nodes, focusedNodeId, comparisonNodeIds, changedDraftNodeIds, generationStage);
+    markGraphNodeStates(nodes, focusedNodeId, comparisonNodeIds, changedArtifactNodeIds, generationStage);
     return { links, nodes };
   }
 
@@ -486,6 +486,7 @@ export function createForceTreeGraph({
       isInactiveRoute: !isActive,
       inactiveRouteSide,
       isSeedRoot,
+      isStageComplete: Boolean(node.selectedOptionId),
       isTerminal: node.isTerminal === true,
       kind: "history",
       label: compactBranchLabel(isSeedRoot ? SEED_ROOT_LABEL : incomingOption?.label ?? node.roundIntent),
@@ -637,7 +638,7 @@ export function createForceTreeGraph({
 }
 
 export function TreeCanvas({
-  changedDraftNodeIds = [],
+  changedArtifactNodeIds = [],
   comparisonNodeIds = null,
   currentNode,
   display = "full",
@@ -655,8 +656,7 @@ export function TreeCanvas({
   onChoose,
   onRegenerateOptions,
   onSelectComparisonNode,
-  onViewNode,
-  skills
+  onViewNode
 }: TreeCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const treeViewportRef = useRef<HTMLDivElement>(null);
@@ -712,7 +712,7 @@ export function TreeCanvas({
   const graph = useMemo(
     () =>
       createForceTreeGraph({
-        changedDraftNodeIds,
+        changedArtifactNodeIds,
         comparisonNodeIds,
         currentNode: stableGraphCurrentNode,
         focusedNodeId,
@@ -727,7 +727,7 @@ export function TreeCanvas({
       }),
     [
       branchLayout,
-      changedDraftNodeIds,
+      changedArtifactNodeIds,
       comparisonNodeIds,
       effectiveVisibleOptionCount,
       focusedNodeId,
@@ -1051,27 +1051,27 @@ export function TreeCanvas({
 
     node
       .select<SVGCircleElement>(".tree-node__core")
-      .attr("r", (datum) => datum.radius + (datum.isDraftFocused ? 1.5 : datum.isDraftChanged ? 0.8 : 0))
+      .attr("r", (datum) => datum.radius + (datum.isArtifactFocused ? 1.5 : datum.isArtifactChanged ? 0.8 : 0))
       .attr("fill", (datum) => nodeFill(datum, color))
       .attr("stroke", (datum) => {
         if (datum.comparisonRole === "from") return "#2563eb";
         if (datum.comparisonRole === "to") return "#16a34a";
-        if (datum.generationStage === "draft") return "#7c3aed";
+        if (datum.generationStage === "artifact") return "#7c3aed";
         if (datum.generationStage === "options") return "#0284c7";
-        if (datum.isDraftFocused) return "#ca8a04";
-        if (datum.isDraftChanged) return "#0d9488";
+        if (datum.isArtifactFocused) return "#ca8a04";
+        if (datum.isArtifactChanged) return "#0d9488";
         if (datum.kind === "loading") return "#64748b";
         return "#fff";
       })
       .attr("stroke-width", (datum) =>
-        datum.comparisonRole || datum.isDraftFocused || datum.generationStage ? 2.8 : datum.isDraftChanged ? 2.4 : 1.8
+        datum.comparisonRole || datum.isArtifactFocused || datum.generationStage ? 2.8 : datum.isArtifactChanged ? 2.4 : 1.8
       );
 
     node
-      .selectAll<SVGCircleElement, ForceTreeNode>("circle.tree-node__draft-halo")
-      .data((datum) => (datum.isDraftFocused === true ? [datum] : []))
+      .selectAll<SVGCircleElement, ForceTreeNode>("circle.tree-node__artifact-halo")
+      .data((datum) => (datum.isArtifactFocused === true ? [datum] : []))
       .join(
-        (enter) => enter.insert("circle", ".tree-node__core").attr("class", "tree-node__draft-halo"),
+        (enter) => enter.insert("circle", ".tree-node__core").attr("class", "tree-node__artifact-halo"),
         (update) => update,
         (exit) => exit.remove()
       )
@@ -1106,18 +1106,6 @@ export function TreeCanvas({
       .text((datum) => datum.label);
 
     node
-      .selectAll<SVGTextElement, ForceTreeNode>("text.tree-node__draft-badge")
-      .data((datum) => (datum.isDraftFocused === true ? [datum] : []))
-      .join(
-        (enter) => enter.append("text").attr("class", "tree-node__draft-badge"),
-        (update) => update,
-        (exit) => exit.remove()
-      )
-      .attr("dy", (datum) => nodeBadgeDy(datum, "draft"))
-      .attr("text-anchor", "middle")
-      .text("草稿");
-
-    node
       .selectAll<SVGTextElement, ForceTreeNode>("text.tree-node__generation-badge")
       .data((datum) => (datum.generationStage ? [datum] : []))
       .join(
@@ -1127,7 +1115,7 @@ export function TreeCanvas({
       )
       .attr("dy", (datum) => nodeBadgeDy(datum, "generation"))
       .attr("text-anchor", "middle")
-      .text((datum) => (datum.generationStage === "draft" ? "生成草稿" : "生成选项"));
+      .text((datum) => (datum.generationStage === "artifact" ? "写稿中" : "想方向中"));
 
     node
       .selectAll<SVGTextElement, ForceTreeNode>("text.tree-node__compare-badge")
@@ -1143,7 +1131,7 @@ export function TreeCanvas({
 
     node
       .selectAll<SVGTextElement, ForceTreeNode>("text.tree-node__changed-badge")
-      .data((datum) => (datum.isDraftChanged === true ? [datum] : []))
+      .data((datum) => (datum.isArtifactChanged === true ? [datum] : []))
       .join(
         (enter) => enter.append("text").attr("class", "tree-node__changed-badge"),
         (update) => update,
@@ -1246,7 +1234,6 @@ export function TreeCanvas({
           options={currentNode.options}
           pendingChoice={pendingChoice}
           question={currentNode.roundIntent}
-          skills={skills}
           visibleCount={effectiveVisibleOptionCount}
         />
       ) : null}
@@ -1301,7 +1288,7 @@ function TreeOperationHint({
 }
 
 function BranchCompletePanel({ message }: { message?: string }) {
-  const trimmedMessage = message?.trim() || "当前草稿已经收束。";
+  const trimmedMessage = message?.trim() || "当前作品已经收束。";
 
   return (
     <div aria-label="当前路径已完成" className="branch-complete-panel" role="status">
@@ -1324,7 +1311,6 @@ export function BranchOptionTray({
   options,
   pendingChoice,
   question,
-  skills = [],
   visibleCount = options.length
 }: {
   isBusy: boolean;
@@ -1375,7 +1361,7 @@ export function BranchOptionTray({
             onModeChange={setOptionMode}
             onRegenerateOptions={onRegenerateOptions}
           />
-          <MoreDirectionsCard disabled={isBusy} onAddCustomOption={onAddCustomOption} skills={skills} />
+          <MoreDirectionsCard disabled={isBusy} onAddCustomOption={onAddCustomOption} />
         </div>
       ) : null}
       {selectedOption && primaryAllVisible ? (
@@ -1700,12 +1686,10 @@ function BranchOptionComposer({
 
 function MoreDirectionsCard({
   disabled,
-  onAddCustomOption,
-  skills
+  onAddCustomOption
 }: {
   disabled: boolean;
   onAddCustomOption?: (option: BranchOption) => void;
-  skills: Skill[];
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [content, setContent] = useState("");
@@ -1759,30 +1743,6 @@ function MoreDirectionsCard({
           关闭
         </button>
       </div>
-      {skills.length > 0 ? (
-        <div className="more-directions__skills">
-          {skills.map((skill) => (
-            <button
-              aria-label={`使用技能 ${skill.title}`}
-              disabled={disabled}
-              key={skill.id}
-              onClick={() => {
-                onAddCustomOption?.({
-                  id: createCustomBranchOptionId(),
-                  label: deriveCustomOptionLabel(skill.title),
-                  description: `使用技能「${skill.title}」继续。`,
-                  impact: "按当前作品启用技能继续生成。",
-                  kind: "reframe"
-                });
-                closeCustomOption();
-              }}
-              type="button"
-            >
-              {skill.title}
-            </button>
-          ))}
-        </div>
-      ) : null}
       <label className="branch-card__field">
         <span>想让它怎么写？</span>
         <textarea
@@ -1824,12 +1784,13 @@ function nodeClassName(
     datum.kind === "option" && pendingChoice && datum.option?.id === pendingChoice && "tree-node--selected",
     datum.isSeedRoot && "tree-node--seed-root",
     isPendingBranchDatum(datum, pendingBranch) && "tree-node--selected",
-    datum.generationStage === "draft" && "tree-node--generating-draft",
+    datum.generationStage === "artifact" && "tree-node--generating-artifact",
     datum.generationStage === "options" && "tree-node--generating-options",
     datum.comparisonRole === "from" && "tree-node--compare-from",
     datum.comparisonRole === "to" && "tree-node--compare-to",
-    datum.isDraftChanged && "tree-node--draft-changed",
-    datum.isDraftFocused && "tree-node--draft-focused"
+    datum.isArtifactChanged && "tree-node--artifact-changed",
+    datum.isStageComplete && "tree-node--stage-complete",
+    datum.isArtifactFocused && "tree-node--artifact-focused"
   );
 }
 

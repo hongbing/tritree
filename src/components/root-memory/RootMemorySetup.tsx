@@ -15,6 +15,7 @@ import {
   type SkillUpsert
 } from "@/lib/domain";
 import { type ArtifactType, listArtifactTypes } from "@/lib/artifacts";
+import { orderSkillsForDisplay } from "@/lib/skills/skill-order";
 import { apiPath } from "@/lib/web-base-path";
 
 const defaultPreferences = {
@@ -102,7 +103,7 @@ export function RootMemorySetup({
   const trimmedCreationRequest = creationRequest.trim();
   const canSubmit = trimmedSeed.length > 0;
   const selectedSkills = useMemo(
-    () => skills.filter((skill) => selectedSkillIds.includes(skill.id)),
+    () => orderSkillsForDisplay(skills.filter((skill) => selectedSkillIds.includes(skill.id))),
     [selectedSkillIds, skills]
   );
   const summarySkills = selectedSkills.slice(0, 3);
@@ -275,9 +276,9 @@ export function RootMemorySetup({
         <div className="root-setup__topline">
           <p className="eyebrow">创作 Seed</p>
           <div className="root-setup__topline-actions">
-            <Link className="secondary-button root-setup__drafts-link" href="/drafts">
+            <Link className="secondary-button root-setup__works-link" href="/works">
               <FileText aria-hidden="true" size={16} strokeWidth={2.25} />
-              <span>我的草稿</span>
+              <span>我的作品</span>
             </Link>
             {onBack ? (
               <button className="secondary-button" disabled={isSaving} onClick={onBack} type="button">

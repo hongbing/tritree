@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { defaultDbPath } from "./client";
+import { createDatabase, defaultDbPath } from "./client";
 
 const originalEnv = { ...process.env };
 
@@ -23,5 +23,30 @@ describe("defaultDbPath", () => {
 
     delete process.env.TRITREE_DB_PATH;
     expect(defaultDbPath()).toBe("/tmp/old-treeable.sqlite");
+  });
+});
+
+describe("database schema", () => {
+  it("creates artifact storage in the active schema", () => {
+    const db = createDatabase(":memory:");
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>;
+    const names = tables.map((table) => table.name);
+
+    expect(names).toContain("artifacts");
+
+    const artifactColumns = db.prepare("PRAGMA table_info(artifacts)").all() as Array<{ name: string }>;
+    expect(artifactColumns.map((column) => column.name)).toEqual([
+      "id",
+      "session_id",
+      "node_id",
+      "type",
+      "version",
+      "payload_json",
+      "source_artifact_ids_json",
+      "created_at",
+      "updated_at"
+    ]);
+
+    db.close();
   });
 });

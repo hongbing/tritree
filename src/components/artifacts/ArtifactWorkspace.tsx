@@ -1,0 +1,359 @@
+"use client";
+
+import type { ReactNode } from "react";
+import { GitCompare, X } from "lucide-react";
+import type { Artifact, TreeNode } from "@/lib/domain";
+import { getArtifactClientManifest, getArtifactRenderer } from "@/artifacts/client-registry";
+import { ArtifactFallback } from "./ArtifactFallback";
+
+export type ProcessMaterialItem = {
+  meta?: string;
+  subtitle?: string;
+  title: string;
+  url?: string;
+};
+
+export type ProcessMaterial = {
+  items: ProcessMaterialItem[];
+  note?: string;
+  sourceToolCallIds: string[];
+  title: string;
+};
+
+const SHOW_PROCESS_DATA_TOOL_NAME = "show_process_data";
+
+export type ArtifactWorkspaceProps = {
+  artifacts: Artifact[];
+  canCompareArtifacts?: boolean;
+  comparisonArtifacts?: { from: Artifact; to: Artifact } | null;
+  comparisonLabels?: { from: string; to: string } | null;
+  comparisonSelectionCount?: number;
+  currentNode: TreeNode | null;
+  generationStage?: "artifact" | "options" | null;
+  headerActions?: ReactNode;
+  headerPanel?: ReactNode;
+  isBusy: boolean;
+  isComparisonMode?: boolean;
+  isGenerating: boolean;
+  onAction: (actionId: string, artifact: Artifact, input?: unknown) => void | Promise<void>;
+  onCancelComparison?: () => void;
+  onSave: (artifact: Artifact) => void | Promise<void>;
+  onStartComparison?: () => void;
+  selectedArtifactId: string | null;
+  streamingProcessMaterials?: ProcessMaterial[];
+  thinkingText?: string;
+};
+
+export function ArtifactWorkspace({
+  artifacts,
+  canCompareArtifacts = false,
+  comparisonArtifacts = null,
+  comparisonLabels = null,
+  comparisonSelectionCount = 0,
+  currentNode,
+  generationStage = null,
+  headerActions,
+  headerPanel,
+  isBusy,
+  isComparisonMode = false,
+  isGenerating,
+  onAction,
+  onCancelComparison,
+  onSave,
+  onStartComparison,
+  selectedArtifactId,
+  streamingProcessMaterials = [],
+  thinkingText
+}: ArtifactWorkspaceProps) {
+  const selectedArtifact = selectedArtifactId
+    ? artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? null
+    : null;
+  const previousArtifact = selectedArtifact ? previousArtifactForRenderer(selectedArtifact, artifacts, currentNode) : null;
+  const selectedManifest = selectedArtifact ? getArtifactClientManifest(selectedArtifact.type) : null;
+  const SelectedRenderer = selectedManifest ? getArtifactRenderer(selectedManifest.rendererKey) : null;
+  const trimmedThinkingText = thinkingText?.trim() ?? "";
+  const hasNoArtifactForCurrentNode = currentNode ? currentNode.producedArtifactId === null : false;
+  const canUseComparison = canCompareArtifacts || isComparisonMode;
+  const processMaterials = [...streamingProcessMaterials, ...processMaterialsForNode(currentNode)];
+  const processTitle =
+    generationStage === "artifact"
+      ? "AI 正在思考下一版产物..."
+      : generationStage === "options"
+        ? "AI 正在生成下一步选项..."
+        : "";
+
+  return (
+    <aside
+      aria-busy={isGenerating}
+      aria-labelledby="artifact-workspace-title"
+      className={`artifact-workspace${isGenerating ? " module--generating" : ""}`}
+    >
+      <header className="artifact-workspace__header">
+        <h2 id="artifact-workspace-title">产物</h2>
+        <div className="artifact-workspace__header-actions">
+          {canUseComparison ? (
+            <button
+              aria-pressed={isComparisonMode}
+              className="artifact-workspace__compare-button"
+              disabled={isBusy && !isComparisonMode}
+              onClick={isComparisonMode ? onCancelComparison : onStartComparison}
+              type="button"
+            >
+              {isComparisonMode ? <X aria-hidden="true" size={14} /> : <GitCompare aria-hidden="true" size={14} />}
+              <span>{isComparisonMode ? "退出对比" : "对比"}</span>
+            </button>
+          ) : null}
+          {headerActions}
+        </div>
+      </header>
+      {headerPanel}
+
+      <div className="artifact-workspace__body">
+        {hasNoArtifactForCurrentNode ? (
+          <div className="artifact-workspace__status" role="status">
+            本步未生成产物
+          </div>
+        ) : null}
+
+        {isBusy && generationStage ? (
+          <div aria-live="polite" className="artifact-workspace__process" role="status">
+            <div className="artifact-workspace__process-header">
+              <span className="artifact-workspace__process-dot" aria-hidden="true" />
+              <strong>{processTitle}</strong>
+            </div>
+            <div className="artifact-workspace__process-body">
+              {trimmedThinkingText ? trimmedThinkingText : generationStage === "artifact" ? "正在生成草稿内容。" : "正在生成可选择方向。"}
+            </div>
+          </div>
+        ) : null}
+
+        {processMaterials.length > 0 ? <ProcessMaterials materials={processMaterials} /> : null}
+
+        {isComparisonMode ? (
+          <ArtifactComparisonView
+            comparisonArtifacts={comparisonArtifacts}
+            comparisonLabels={comparisonLabels}
+            comparisonSelectionCount={comparisonSelectionCount}
+            isBusy={isBusy}
+          />
+        ) : selectedArtifact ? (
+          SelectedRenderer ? (
+            <SelectedRenderer
+              artifact={selectedArtifact}
+              isBusy={isBusy}
+              onAction={(actionId, input) => onAction(actionId, selectedArtifact, input)}
+              onSave={(payload) => onSave({ ...selectedArtifact, payload: payload ?? selectedArtifact.payload })}
+              previousArtifact={previousArtifact}
+            />
+          ) : (
+            <ArtifactFallback artifact={selectedArtifact} />
+          )
+        ) : (
+          <div className="artifact-workspace__empty">
+            <p>还没有产物。</p>
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function previousArtifactForRenderer(selectedArtifact: Artifact, artifacts: Artifact[], currentNode: TreeNode | null) {
+  const sourceIds = [
+    ...(selectedArtifact.sourceArtifactIds ?? []),
+    ...(currentNode?.sourceArtifactIds ?? [])
+  ].filter((sourceId, index, all) => sourceId !== selectedArtifact.id && all.indexOf(sourceId) === index);
+
+  for (const sourceId of sourceIds) {
+    const sourceArtifact = artifacts.find((artifact) => artifact.id === sourceId);
+    if (sourceArtifact && sourceArtifact.type === selectedArtifact.type) return sourceArtifact;
+  }
+
+  return null;
+}
+
+function ProcessMaterials({ materials }: { materials: ProcessMaterial[] }) {
+  const totalItemCount = materials.reduce((count, material) => count + material.items.length, 0);
+
+  return (
+    <section className="artifact-workspace__materials" aria-labelledby="artifact-workspace-materials-title">
+      <div className="artifact-workspace__materials-header">
+        <h3 id="artifact-workspace-materials-title">过程材料</h3>
+        <span>{totalItemCount > 0 ? `${totalItemCount} 条` : `${materials.length} 个工具结果`}</span>
+      </div>
+      <div className="artifact-workspace__materials-list">
+        {materials.map((material, index) => (
+          <article className="artifact-workspace__material" key={`${material.title}-${index}`}>
+            <header className="artifact-workspace__material-header">
+              <h4>{material.title}</h4>
+              {material.sourceToolCallIds.length > 0 ? <span>{material.sourceToolCallIds.length} 个来源</span> : null}
+            </header>
+            {material.note ? <p className="artifact-workspace__material-note">{material.note}</p> : null}
+            <ol className="artifact-workspace__material-items">
+              {material.items.map((item, itemIndex) => (
+                <li className="artifact-workspace__material-item" key={`${item.title}-${itemIndex}`}>
+                  <div className="artifact-workspace__material-item-title">
+                    {item.url ? (
+                      <a href={item.url} rel="noreferrer" target="_blank">
+                        {item.title}
+                      </a>
+                    ) : (
+                      item.title
+                    )}
+                  </div>
+                  {item.subtitle ? <p>{item.subtitle}</p> : null}
+                  {item.meta ? <span>{item.meta}</span> : null}
+                </li>
+              ))}
+            </ol>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ArtifactComparisonView({
+  comparisonArtifacts,
+  comparisonLabels,
+  comparisonSelectionCount,
+  isBusy
+}: {
+  comparisonArtifacts: { from: Artifact; to: Artifact } | null;
+  comparisonLabels: { from: string; to: string } | null;
+  comparisonSelectionCount: number;
+  isBusy: boolean;
+}) {
+  if (!comparisonArtifacts) {
+    return (
+      <div className="artifact-comparison__status" role="status">
+        {comparisonSelectionCount === 1 ? "继续选择另一个节点" : "点选两个节点开始对比"}
+      </div>
+    );
+  }
+
+  return (
+    <div className="artifact-comparison">
+      {comparisonLabels ? (
+        <div className="artifact-comparison__status" role="status">
+          {comparisonLabels.from}
+          {" -> "}
+          {comparisonLabels.to}
+        </div>
+      ) : null}
+      <div className="artifact-comparison__grid">
+        <section className="artifact-comparison__pane">
+          <h3>{comparisonLabels?.from ?? "起点"}</h3>
+          <ArtifactPreview artifact={comparisonArtifacts.from} isBusy={isBusy} />
+        </section>
+        <section className="artifact-comparison__pane">
+          <h3>{comparisonLabels?.to ?? "终点"}</h3>
+          <ArtifactPreview artifact={comparisonArtifacts.to} isBusy={isBusy} />
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function ArtifactPreview({ artifact, isBusy }: { artifact: Artifact; isBusy: boolean }) {
+  const manifest = getArtifactClientManifest(artifact.type);
+  const Renderer = manifest ? getArtifactRenderer(manifest.rendererKey) : null;
+
+  return Renderer ? <Renderer artifact={artifact} isBusy={isBusy} /> : <ArtifactFallback artifact={artifact} />;
+}
+
+function processMaterialsForNode(node: TreeNode | null): ProcessMaterial[] {
+  if (!node) return [];
+
+  return node.agentMessages
+    .flatMap((message) => {
+      if (message.role !== "tool") return [];
+
+      return structuredParts(message.content).flatMap((part) => {
+        const result = processDataToolResultFromPart(part);
+        if (!result) return [];
+
+        const material = processMaterialFromValue(unwrapToolOutput(result.output));
+        return material ? [material] : [];
+      });
+    })
+    .slice(0, 6);
+}
+
+function structuredParts(content: TreeNode["agentMessages"][number]["content"]): unknown[] {
+  return Array.isArray(content) ? content : [content];
+}
+
+function processDataToolResultFromPart(part: unknown): { output: unknown } | null {
+  if (!isRecord(part)) return null;
+
+  const type = stringField(part, "type");
+  const toolName = stringField(part, "toolName") ?? stringField(part, "name") ?? stringField(part, "tool");
+  if (toolName !== SHOW_PROCESS_DATA_TOOL_NAME) return null;
+
+  const hasResultShape = type?.includes("tool-result") || Object.prototype.hasOwnProperty.call(part, "output") || Object.prototype.hasOwnProperty.call(part, "result");
+  if (!hasResultShape) return null;
+
+  return {
+    output: Object.prototype.hasOwnProperty.call(part, "output") ? part.output : part.result
+  };
+}
+
+function unwrapToolOutput(output: unknown): unknown {
+  if (!isRecord(output)) return output;
+
+  const type = stringField(output, "type");
+  if (type === "json" && Object.prototype.hasOwnProperty.call(output, "value")) {
+    return output.value;
+  }
+
+  return output;
+}
+
+function processMaterialFromValue(value: unknown): ProcessMaterial | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const title = stringField(value, "title");
+  if (!title) return null;
+
+  const rawItems = Array.isArray(value.items) ? value.items : [];
+  const items = rawItems.map(processMaterialItemFromValue).filter((item): item is ProcessMaterialItem => Boolean(item));
+  if (items.length === 0) return null;
+
+  return {
+    items,
+    note: stringField(value, "note"),
+    sourceToolCallIds: stringArrayField(value, "sourceToolCallIds"),
+    title
+  };
+}
+
+function processMaterialItemFromValue(value: unknown): ProcessMaterialItem | null {
+  if (!isRecord(value)) return null;
+
+  const title = stringField(value, "title");
+  if (!title) return null;
+
+  return {
+    title,
+    ...(stringField(value, "subtitle") ? { subtitle: stringField(value, "subtitle") } : {}),
+    ...(stringField(value, "meta") ? { meta: stringField(value, "meta") } : {}),
+    ...(stringField(value, "url") ? { url: stringField(value, "url") } : {})
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function stringArrayField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+}

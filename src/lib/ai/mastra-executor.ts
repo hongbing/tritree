@@ -1,32 +1,33 @@
 import {
   type AgentMessage,
   type BranchOption,
-  DirectorDraftOutputSchema,
+  type DirectorArtifactOutput,
+  DirectorArtifactOutputSchema,
   DirectorNextStepOutputSchema,
   DirectorOptionsOutputSchema,
-  type Draft,
-  type DirectorDraftOutput,
+  type GeneratedArtifact,
   type DirectorNextStepOutput,
   type DirectorOptionsOutput,
-  type Skill,
-  skillsForTarget
+  type Skill
 } from "@/lib/domain";
 import type { ToolsInput } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
-import { ZodError, type ZodIssue } from "zod";
+import { z, ZodError, type ZodIssue } from "zod";
 import { createSkillRuntimeTools } from "@/lib/skills/skill-runtime";
-import { createTreeDraftAgent, createTreeNextStepAgent, createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-agents";
+import { createTreeArtifactAgent, createTreeNextStepAgent, createTreeOptionsAgent, createTreeableAnthropicModel } from "./mastra-agents";
 import { compactDirectorMessagesForModel } from "./model-context";
 import {
-  buildTreeDraftInstructions,
+  buildTreeArtifactInstructions,
   buildTreeNextStepInstructions,
   buildTreeOptionsInstructions,
   type SharedAgentContextInput
 } from "./mastra-context";
 import { logTritreeAiDebug, logTritreeAiResponse, logTritreeAiStream } from "./debug-log";
-import { buildDirectorInput, parseDirectorJsonObject } from "./director";
+import { buildDirectorInput } from "./director";
 import { createMcpRuntimeTools, type McpRuntimeTools } from "./mcp-runtime";
 import type { DirectorInputParts } from "./prompts";
+import { createSubagentRuntimeTools } from "./subagent-runtime";
+import { getSubagentTemplate } from "./subagent-templates";
 
 export type MastraConversationMessage = {
   role: "assistant" | "tool" | "user";
@@ -38,7 +39,7 @@ export type MemoryScope = {
   thread: string;
 };
 
-type TreeDraftAgentLike = {
+type TreeArtifactAgentLike = {
   generate: (
     messages: MastraConversationMessage[],
     options: {
@@ -99,7 +100,7 @@ type StreamSource<T> = AsyncIterable<T> | ReadableStream<T> | (() => AsyncIterab
 
 type AgentExecutionContextOverride = Pick<
   SharedAgentContextInput,
-  "availableSkillSummaries" | "longTermMemory" | "toolSummaries"
+  "availableSkillSummaries" | "longTermMemory" | "subagentTemplateSummaries" | "toolSummaries"
 >;
 
 export type TreeDirectorExecutionInput = {
@@ -110,8 +111,8 @@ export type TreeDirectorExecutionInput = {
   context?: Partial<AgentExecutionContextOverride>;
 };
 
-type TreeDraftPartial = Partial<Omit<DirectorDraftOutput, "draft">> & {
-  draft?: Partial<Draft>;
+type TreeArtifactPartial = Partial<Omit<DirectorArtifactOutput, "artifact">> & {
+  artifact?: Partial<GeneratedArtifact> | null;
 };
 
 type TreeOptionsPartial = Partial<Omit<DirectorOptionsOutput, "options">> & {
@@ -119,7 +120,8 @@ type TreeOptionsPartial = Partial<Omit<DirectorOptionsOutput, "options">> & {
 };
 
 type TreeNextStepPartial = {
-  action?: "draft" | "options";
+  action?: "artifact" | "complete" | "options";
+  artifact?: Partial<GeneratedArtifact> | null;
   options?: Array<Partial<BranchOption>>;
   roundIntent?: string;
 };
@@ -128,6 +130,8 @@ type ReasoningTextEvent = {
   delta: string;
   accumulatedText: string;
 };
+
+export type ProcessDataDisplay = z.infer<typeof ShowProcessDataInputSchema>;
 
 type ParseableOutputSchema<TOutput> = {
   parse(value: unknown): TOutput;
@@ -182,7 +186,7 @@ type AgentMessageHistoryState = {
 };
 
 type ProgressSegmentKind = "debug" | "text" | "tool";
-type RuntimeSubmitTarget = "draft" | "next-step" | "options";
+type RuntimeSubmitTarget = "artifact" | "next-step" | "options";
 
 type ProgressSegment = {
   delta: string;
@@ -191,46 +195,73 @@ type ProgressSegment = {
 
 const MAX_STRUCTURED_OUTPUT_RETRIES = 2;
 const MASTRA_STRUCTURED_OUTPUT_VALIDATION_ID = "STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED";
-const SUBMIT_TREE_DRAFT_TOOL_NAME = "submit_tree_draft";
+const SUBMIT_TREE_ARTIFACT_TOOL_NAME = "submit_tree_artifact";
 const SUBMIT_TREE_NEXT_STEP_TOOL_NAME = "submit_tree_next_step";
 const SUBMIT_TREE_OPTIONS_TOOL_NAME = "submit_tree_options";
+const SHOW_PROCESS_DATA_TOOL_NAME = "show_process_data";
+const RUN_SUBAGENT_TEMPLATE_TOOL_NAME = "run_subagent_template";
+const RUN_CUSTOM_SUBAGENT_TOOL_NAME = "run_custom_subagent";
+const ACTUAL_WORK_RETRY_MESSAGE =
+  "You must complete a meaningful ReAct step before ending this turn. Handle the task yourself when possible, inspect any tool or subagent result you use, call the required final submit tool, or submit three user-facing options only when a real user decision is blocked.";
+
+const ProcessDataDisplayItemSchema = z
+  .object({
+    title: z.string().trim().min(1).max(160),
+    subtitle: z.string().trim().max(400).optional(),
+    meta: z.string().trim().max(160).optional(),
+    url: z.string().trim().max(1000).optional()
+  })
+  .strict();
+
+const ShowProcessDataInputSchema = z
+  .object({
+    title: z.string().trim().min(1).max(80),
+    sourceToolCallIds: z.array(z.string().trim().min(1)).max(20).default([]),
+    items: z.array(ProcessDataDisplayItemSchema).min(1).max(30),
+    note: z.string().trim().max(500).optional()
+  })
+  .strict();
 
 type TreeNextStepAgentLike = TreeOptionsAgentLike;
 
-export async function generateTreeDraft({
+type DirectorRuntimeToolPolicy = {
+  includeSubagentTools?: boolean;
+};
+
+export async function generateTreeArtifact({
   parts,
   signal,
   env,
   memory,
   context,
-  treeDraftAgent,
+  treeArtifactAgent,
   suppressResponseLog
 }: TreeDirectorExecutionInput & {
-  treeDraftAgent?: TreeDraftAgentLike;
+  treeArtifactAgent?: TreeArtifactAgentLike;
   suppressResponseLog?: boolean;
-}): Promise<DirectorDraftOutput> {
-  const executionContext = await executionContextForDirectorParts(parts, "writer", context, Boolean(treeDraftAgent));
+}): Promise<DirectorArtifactOutput> {
+  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeArtifactAgent));
   const { agentContext, tools } = executionContext;
   try {
     const messages = directorMessagesForParts(parts, env);
-    logMastraPrompt("draft", agentContext, messages);
-    const agent = treeDraftAgent ?? (createTreeDraftAgent(agentContext, env, tools) as unknown as TreeDraftAgentLike);
-    const output = await withStructuredOutputRetries(messages, "draft", async (attemptMessages) => {
-      let result: Awaited<ReturnType<TreeDraftAgentLike["generate"]>>;
+    logMastraPrompt("artifact", agentContext, messages);
+    const agent = treeArtifactAgent ?? (createTreeArtifactAgent(agentContext, env, tools) as unknown as TreeArtifactAgentLike);
+    const output = await withStructuredOutputRetries(messages, "artifact", async (attemptMessages) => {
+      let result: Awaited<ReturnType<TreeArtifactAgentLike["generate"]>>;
       try {
         result = await agent.generate(attemptMessages, {
           abortSignal: signal,
           ...executionOptionsForTools(tools),
           memory: memory ?? memoryScopeForDirectorParts(parts),
-          structuredOutput: structuredOutputForDirector(DirectorDraftOutputSchema, env, tools, "generate")
+          structuredOutput: structuredOutputForDirector(DirectorArtifactOutputSchema, env, tools, "generate")
         });
       } catch (error) {
-        return DirectorDraftOutputSchema.parse(recoverMastraStructuredOutputValidationValue(error));
+        return DirectorArtifactOutputSchema.parse(recoverMastraStructuredOutputValidationValue(error));
       }
 
-      return DirectorDraftOutputSchema.parse(unwrapMastraToolInput(result.object ?? result.output));
+      return DirectorArtifactOutputSchema.parse(unwrapMastraToolInput(result.object ?? result.output));
     });
-    if (!suppressResponseLog) logAiResponse("draft", "generate", output);
+    if (!suppressResponseLog) logAiResponse("artifact", "generate", output);
     return output;
   } finally {
     await executionContext.disconnect();
@@ -249,7 +280,9 @@ export async function generateTreeNextStep({
   treeNextStepAgent?: TreeNextStepAgentLike;
   suppressResponseLog?: boolean;
 }): Promise<DirectorNextStepOutput> {
-  const executionContext = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeNextStepAgent));
+  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeNextStepAgent), {
+    includeSubagentTools: false
+  });
   const { agentContext, tools } = executionContext;
   try {
     const messages = directorMessagesForParts(parts, env);
@@ -285,18 +318,26 @@ export async function streamTreeNextStep({
   context,
   treeNextStepAgent,
   onPartialObject,
+  onProcessData,
   onReasoningText
 }: TreeDirectorExecutionInput & {
   treeNextStepAgent?: TreeNextStepAgentLike;
   onPartialObject?: (partial: TreeNextStepPartial) => void;
+  onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorNextStepOutput & DirectorAgentTrace> {
-  const executionContext = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeNextStepAgent));
+  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeNextStepAgent), {
+    includeSubagentTools: false
+  });
   const { agentContext, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
-    const agentContextWithSubmit = runtimeHasTools ? withFinalSubmitToolSummary(agentContext, "next-step") : agentContext;
-    const agentTools = runtimeHasTools ? withFinalSubmitTool(tools, "next-step") : tools;
+    let agentContextWithSubmit = agentContext;
+    let agentTools = tools;
+    if (runtimeHasTools) {
+      agentContextWithSubmit = withFinalSubmitToolSummary(withProcessDataDisplayToolSummary(agentContext), "next-step");
+      agentTools = withFinalSubmitTool(withProcessDataDisplayTool(tools), "next-step");
+    }
     const messages = directorMessagesForParts(parts, env);
     logMastraPrompt("next-step", agentContextWithSubmit, messages);
     const agent = treeNextStepAgent ?? (createTreeNextStepAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeNextStepAgentLike);
@@ -308,6 +349,7 @@ export async function streamTreeNextStep({
         memory: memory ?? memoryScopeForDirectorParts(parts),
         messages,
         onPartialObject,
+        onProcessData,
         onReasoningText,
         schema: DirectorNextStepOutputSchema,
         signal,
@@ -374,66 +416,74 @@ export async function streamTreeNextStep({
   }
 }
 
-export async function streamTreeDraft({
+export async function streamTreeArtifact({
   parts,
   signal,
   env,
   memory,
   context,
-  treeDraftAgent,
+  treeArtifactAgent,
   onPartialObject,
+  onProcessData,
   onReasoningText
 }: TreeDirectorExecutionInput & {
-  treeDraftAgent?: TreeDraftAgentLike;
-  onPartialObject?: (partial: TreeDraftPartial) => void;
+  treeArtifactAgent?: TreeArtifactAgentLike;
+  onPartialObject?: (partial: TreeArtifactPartial) => void;
+  onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
-}): Promise<DirectorDraftOutput & DirectorAgentTrace> {
-  const executionContext = await executionContextForDirectorParts(parts, "writer", context, Boolean(treeDraftAgent));
+}): Promise<DirectorArtifactOutput & DirectorAgentTrace> {
+  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeArtifactAgent));
   const { agentContext, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
-    const agentContextWithSubmit = runtimeHasTools ? withFinalSubmitToolSummary(agentContext, "draft") : agentContext;
-    const agentTools = runtimeHasTools ? withFinalSubmitTool(tools, "draft") : tools;
+    let agentContextWithSubmit = agentContext;
+    let agentTools = tools;
+    if (runtimeHasTools) {
+      agentContextWithSubmit = withFinalSubmitToolSummary(withProcessDataDisplayToolSummary(agentContext), "artifact");
+      agentTools = withFinalSubmitTool(withProcessDataDisplayTool(tools), "artifact");
+    }
     const messages = directorMessagesForParts(parts, env);
-    logMastraPrompt("draft", agentContextWithSubmit, messages);
-    const agent = treeDraftAgent ?? (createTreeDraftAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeDraftAgentLike);
+    logMastraPrompt("artifact", agentContextWithSubmit, messages);
+    const agent =
+      treeArtifactAgent ?? (createTreeArtifactAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeArtifactAgentLike);
     if (runtimeHasTools) {
       const runtimeTools = agentTools as ToolsInput;
-      const output = await streamRuntimeToolsThenStructure<TreeDraftPartial, DirectorDraftOutput>({
+      const output = await streamRuntimeToolsThenStructure<TreeArtifactPartial, DirectorArtifactOutput>({
         agent,
         env,
         memory: memory ?? memoryScopeForDirectorParts(parts),
         messages,
         onPartialObject,
+        onProcessData,
         onReasoningText,
-        schema: DirectorDraftOutputSchema,
+        schema: DirectorArtifactOutputSchema,
         signal,
-        target: "draft",
+        target: "artifact",
         tools: runtimeTools
       });
-      logAiResponse("draft", "stream", output);
+      logAiResponse("artifact", "stream", output);
       return output;
     }
 
     let bestPartial: unknown = null;
-    const output = await withStructuredOutputRetries(messages, "draft", async (attemptMessages) => {
+    const output = await withStructuredOutputRetries(messages, "artifact", async (attemptMessages) => {
       const stream = agent.stream
         ? await agent.stream(attemptMessages, {
             abortSignal: signal,
             ...executionOptionsForTools(tools),
             memory: memory ?? memoryScopeForDirectorParts(parts),
-            structuredOutput: structuredOutputForDirector(DirectorDraftOutputSchema, env, tools, "stream")
+            structuredOutput: structuredOutputForDirector(DirectorArtifactOutputSchema, env, tools, "stream")
           })
         : null;
 
       if (!stream) {
-        const output = await generateTreeDraft({
+        const output = await generateTreeArtifact({
           parts: { ...parts, messages: attemptMessages },
           signal,
           env,
           memory,
           context,
-          treeDraftAgent: agent,
+          treeArtifactAgent: agent,
           suppressResponseLog: true
         });
         onPartialObject?.(output);
@@ -442,29 +492,29 @@ export async function streamTreeDraft({
 
       let latestPartial: unknown = null;
       if (stream.fullStream) {
-        latestPartial = await consumeStructuredFullStream<TreeDraftPartial>(stream.fullStream, {
-          logTarget: "draft",
+        latestPartial = await consumeStructuredFullStream<TreeArtifactPartial>(stream.fullStream, {
+          logTarget: "artifact",
           onPartialObject,
           onReasoningText
         });
       } else if (stream.objectStream) {
         for await (const partial of toAsyncIterable(stream.objectStream)) {
-          logAiStream("draft", "partial", partial);
+          logAiStream("artifact", "partial", partial);
           latestPartial = partial;
-          onPartialObject?.(partial as TreeDraftPartial);
+          onPartialObject?.(partial as TreeArtifactPartial);
         }
       }
 
       if (latestPartial !== null) bestPartial = latestPartial;
       const output = await resolveStructuredStreamOutput(stream, latestPartial ?? bestPartial);
       try {
-        return DirectorDraftOutputSchema.parse(output);
+        return DirectorArtifactOutputSchema.parse(output);
       } catch (parseError) {
-        logAiResponse("draft", "stream-parse-failed", output);
+        logAiResponse("artifact", "stream-parse-failed", output);
         throw parseError;
       }
     });
-    logAiResponse("draft", "stream", output);
+    logAiResponse("artifact", "stream", output);
     return output;
   } finally {
     await executionContext.disconnect();
@@ -479,18 +529,24 @@ export async function streamTreeOptions({
   context,
   treeOptionsAgent,
   onPartialObject,
+  onProcessData,
   onReasoningText
 }: TreeDirectorExecutionInput & {
   treeOptionsAgent?: TreeOptionsAgentLike;
   onPartialObject?: (partial: TreeOptionsPartial) => void;
+  onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorOptionsOutput & DirectorAgentTrace> {
-  const executionContext = await executionContextForDirectorParts(parts, "editor", context, Boolean(treeOptionsAgent));
+  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeOptionsAgent));
   const { agentContext, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
-    const agentContextWithSubmit = runtimeHasTools ? withFinalSubmitToolSummary(agentContext, "options") : agentContext;
-    const agentTools = runtimeHasTools ? withFinalSubmitTool(tools, "options") : tools;
+    let agentContextWithSubmit = agentContext;
+    let agentTools = tools;
+    if (runtimeHasTools) {
+      agentContextWithSubmit = withFinalSubmitToolSummary(withProcessDataDisplayToolSummary(agentContext), "options");
+      agentTools = withFinalSubmitTool(withProcessDataDisplayTool(tools), "options");
+    }
     const messages = directorMessagesForParts(parts, env);
     logMastraPrompt("options", agentContextWithSubmit, messages);
     const agent = treeOptionsAgent ?? (createTreeOptionsAgent(agentContextWithSubmit, env, agentTools) as unknown as TreeOptionsAgentLike);
@@ -502,6 +558,7 @@ export async function streamTreeOptions({
         memory: memory ?? memoryScopeForDirectorParts(parts),
         messages,
         onPartialObject,
+        onProcessData,
         onReasoningText,
         schema: DirectorOptionsOutputSchema,
         signal,
@@ -558,15 +615,15 @@ export async function streamTreeOptions({
 
 function contextForDirectorParts(
   parts: DirectorInputParts,
-  target: "writer" | "editor",
   context: Partial<AgentExecutionContextOverride> = {}
 ): SharedAgentContextInput {
   return {
     rootSummary: parts.rootSummary,
     learnedSummary: parts.learnedSummary,
-    enabledSkills: skillsForTarget(parts.enabledSkills.map(normalizeSkill), target),
+    enabledSkills: parts.enabledSkills.map(normalizeSkill),
     longTermMemory: context.longTermMemory,
     availableSkillSummaries: context.availableSkillSummaries,
+    subagentTemplateSummaries: context.subagentTemplateSummaries,
     toolSummaries: context.toolSummaries
   };
 }
@@ -577,8 +634,8 @@ function withFinalSubmitToolSummary(
 ): SharedAgentContextInput {
   const toolName = finalSubmitToolName(target);
   const finalShape =
-    target === "draft"
-      ? draftOutputShapeSummary()
+    target === "artifact"
+      ? artifactOutputShapeSummary()
       : target === "next-step"
         ? nextStepOutputShapeSummary()
         : optionsOutputShapeSummary();
@@ -586,8 +643,31 @@ function withFinalSubmitToolSummary(
     ...context,
     toolSummaries: [
       ...(context.toolSummaries ?? []),
-      `${toolName}：最终提交工具，也是本轮任务唯一完成方式。完成必要的外部查询和分析后，必须调用此工具提交 Tritree 固定目标结果；调用 ${toolName} 后必须立即停止，不要继续输出 thinking、解释、总结、Markdown、JSON 文本或普通自然语言，也不要再调用其他工具。${finalShape}`
+      `${toolName}：最终提交工具，也是本轮任务唯一完成方式。完成必要的工具调用和结果检查后，必须调用此工具提交本轮结构化结果；调用 ${toolName} 后必须立即停止，不要继续输出 thinking、解释、总结、Markdown、JSON 文本或普通自然语言，也不要再调用其他工具。${finalSubmitRoutingGuidance(target)}${finalShape}`
     ]
+  };
+}
+
+function withProcessDataDisplayToolSummary(context: SharedAgentContextInput): SharedAgentContextInput {
+  return {
+    ...context,
+    toolSummaries: [
+      ...(context.toolSummaries ?? []),
+      `${SHOW_PROCESS_DATA_TOOL_NAME}：向用户展示本轮工具调用后值得看见的过程数据。调用其他工具并检查返回值后，如果资料、搜索结果、参考清单或证据摘要会影响用户选择或理解，可在最终提交前调用；只提交通用展示结构 { title, sourceToolCallIds, items, note }，不要把原始工具输出或业务专用字段直接塞给 UI。`
+    ]
+  };
+}
+
+function withProcessDataDisplayTool(tools: ToolsInput): ToolsInput {
+  return {
+    ...tools,
+    [SHOW_PROCESS_DATA_TOOL_NAME]: createTool({
+      id: SHOW_PROCESS_DATA_TOOL_NAME,
+      description:
+        "Display user-facing process data from already inspected tool results during this ReAct turn. Use before the final submit tool when the user should see source material or evidence. The UI renders exactly this generic display shape.",
+      inputSchema: ShowProcessDataInputSchema,
+      execute: async (input) => input
+    })
   };
 }
 
@@ -598,14 +678,14 @@ function withFinalSubmitTool(tools: ToolsInput, target: RuntimeSubmitTarget): To
     [toolName]: createTool({
       id: toolName,
       description:
-        target === "draft"
-          ? "Submit the final Tritree draft output. This is the last step after runtime skill tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls."
+        target === "artifact"
+          ? "Submit the final artifact output. This is the last step after runtime tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls."
           : target === "next-step"
-            ? "Submit the final Tritree next-step routing decision. This is the last step after runtime tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls."
-            : "Submit the final Tritree branch options output. This is the last step after runtime skill tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls.",
+            ? "Submit the final next-step routing decision. Use options after research, reference gathering, analysis, review, or comparison when the user should choose how to proceed; use artifact when the next work result is already clear; use complete only when the current request can be closed without another user choice or work result. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls."
+            : "Submit the final branch options output. This is the last step after runtime tools finish. After calling it, stop immediately and do not emit more text, thinking, Markdown, JSON, or tool calls.",
       inputSchema:
-        target === "draft"
-          ? DirectorDraftOutputSchema
+        target === "artifact"
+          ? DirectorArtifactOutputSchema
           : target === "next-step"
             ? DirectorNextStepOutputSchema
             : DirectorOptionsOutputSchema,
@@ -614,22 +694,33 @@ function withFinalSubmitTool(tools: ToolsInput, target: RuntimeSubmitTarget): To
   };
 }
 
+function finalSubmitRoutingGuidance(target: RuntimeSubmitTarget) {
+  if (target !== "next-step") return "";
+
+  return [
+    "\nnext-step action 选择：",
+    "action=options 用于需要用户继续选择的本轮结果，尤其是资料、搜索、参考、素材收集、分析、审稿或比较之后。",
+    "action=artifact 用于下一步已经明确、可以直接生成或更新作品。",
+    "action=complete 用于当前请求已经可以收束，适合用户明确要求结束、发布、交付、停止继续澄清，或当前目标已经没有可行动下一步。"
+  ].join("\n");
+}
+
 function finalSubmitToolName(target: RuntimeSubmitTarget) {
-  return target === "draft"
-    ? SUBMIT_TREE_DRAFT_TOOL_NAME
+  return target === "artifact"
+    ? SUBMIT_TREE_ARTIFACT_TOOL_NAME
     : target === "next-step"
       ? SUBMIT_TREE_NEXT_STEP_TOOL_NAME
       : SUBMIT_TREE_OPTIONS_TOOL_NAME;
 }
 
-function logAiResponse(target: "draft" | "next-step" | "options", mode: "generate" | "stream" | "stream-parse-failed", response: unknown) {
+function logAiResponse(target: "artifact" | "next-step" | "options", mode: "generate" | "stream" | "stream-parse-failed", response: unknown) {
   logTritreeAiResponse("ai-response", target, {
     mode,
     response
   });
 }
 
-function logAiStream(target: "draft" | "next-step" | "options", event: "chunk" | "partial", value: unknown) {
+function logAiStream(target: "artifact" | "next-step" | "options", event: "chunk" | "partial", value: unknown) {
   logTritreeAiStream("ai-stream", `${target}-${event}`, {
     value
   });
@@ -641,17 +732,19 @@ async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
   memory,
   messages,
   onPartialObject,
+  onProcessData,
   onReasoningText,
   schema,
   signal,
   target,
   tools
 }: {
-  agent: TreeDraftAgentLike | TreeOptionsAgentLike;
+  agent: TreeArtifactAgentLike | TreeOptionsAgentLike;
   env: Record<string, string | undefined> | undefined;
   memory: MemoryScope;
   messages: MastraConversationMessage[];
   onPartialObject?: (partial: TPartial) => void;
+  onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
   schema: ParseableOutputSchema<TOutput>;
   signal?: AbortSignal;
@@ -665,6 +758,7 @@ async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
       env,
       memory,
       onPartialObject,
+      onProcessData,
       onReasoningText,
       schema,
       signal,
@@ -689,17 +783,19 @@ async function streamRuntimeToolsOnce<TPartial, TOutput>({
   env,
   memory,
   onPartialObject,
+  onProcessData,
   onReasoningText,
   schema,
   signal,
   target,
   tools
 }: {
-  agent: TreeDraftAgentLike | TreeOptionsAgentLike;
+  agent: TreeArtifactAgentLike | TreeOptionsAgentLike;
   attemptMessages: MastraConversationMessage[];
   env: Record<string, string | undefined> | undefined;
   memory: MemoryScope;
   onPartialObject?: (partial: TPartial) => void;
+  onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
   schema: ParseableOutputSchema<TOutput>;
   signal?: AbortSignal;
@@ -731,6 +827,7 @@ async function streamRuntimeToolsOnce<TPartial, TOutput>({
 
   const summary = await consumeRuntimeReActStream<TPartial>(stream, {
     onPartialObject,
+    onProcessData,
     onReasoningText,
     signal,
     target
@@ -745,6 +842,7 @@ async function consumeRuntimeReActStream<TPartial>(
   stream: StructuredObjectStreamResult,
   options: {
     onPartialObject?: (partial: TPartial) => void;
+    onProcessData?: (data: ProcessDataDisplay) => void;
     onReasoningText?: (event: ReasoningTextEvent) => void;
     signal?: AbortSignal;
     target: RuntimeSubmitTarget;
@@ -771,6 +869,7 @@ async function consumeRuntimeReActStream<TPartial>(
     argsById: new Map(),
     submittedOutputById: new Map()
   };
+  const emittedProcessDataIds = new Set<string>();
 
   if (stream.fullStream) {
     for await (const chunk of toAsyncIterable(stream.fullStream)) {
@@ -779,6 +878,7 @@ async function consumeRuntimeReActStream<TPartial>(
       const textDelta = textDeltaFromStreamChunk(chunk);
       const submittedDeltaOutput = submittedOutputDeltaFromStreamChunk(chunk, toolCallDeltaState);
       const submittedChunkOutput = submittedOutputFromStreamChunk(chunk);
+      const processData = processDataDisplayFromStreamChunk(chunk, emittedProcessDataIds);
       const reasoningDelta = hasSeenFinalSubmitOutput ? "" : reasoningDeltaFromStreamChunk(chunk);
       const toolProgressDelta =
         toolProgressDeltaFromStreamChunk(chunk) || toolCallDeltaProgressFromStreamChunk(chunk, toolCallDeltaState);
@@ -829,6 +929,10 @@ async function consumeRuntimeReActStream<TPartial>(
           delta: visibleDelta,
           accumulatedText: accumulatedProgressText
         });
+      }
+
+      if (processData) {
+        options.onProcessData?.(processData);
       }
 
       if (hiddenTextDebugDelta) {
@@ -926,6 +1030,7 @@ async function parseRuntimeReActStreamOutput<TOutput>(
   if (summary.submittedOutput !== undefined) {
     try {
       const parsed = schema.parse(summary.submittedOutput);
+      assertMeaningfulRuntimeAction({ output: parsed, summary, target });
       logTritreeAiDebug("react-stream", "parse-submit-success", {
         target,
         output: summarizePartialObjectForLog(parsed)
@@ -940,7 +1045,7 @@ async function parseRuntimeReActStreamOutput<TOutput>(
         target,
         error: summarizeErrorForLog(error)
       });
-      logAiResponse(target as "draft" | "next-step" | "options", "stream-parse-failed", summary.submittedOutput);
+      logAiResponse(target as "artifact" | "next-step" | "options", "stream-parse-failed", summary.submittedOutput);
       logZodIssues(target, "submit", error);
       throw error;
     }
@@ -958,6 +1063,7 @@ async function parseRuntimeReActStreamOutput<TOutput>(
   try {
     const output = await resolveStructuredStreamOutput(stream, summary.latestPartial);
     const parsed = schema.parse(output);
+    assertMeaningfulRuntimeAction({ output: parsed, summary, target });
     logTritreeAiDebug("react-stream", "parse-structured-success", {
       target,
       output: summarizePartialObjectForLog(parsed)
@@ -972,7 +1078,7 @@ async function parseRuntimeReActStreamOutput<TOutput>(
     logZodIssues(target, "structured", error);
   }
 
-  if (summary.rawText.trim()) {
+  if (summary.rawText.trim() && !isActualWorkRetryError(streamError)) {
     streamError = finalSubmitToolRequiredError(target);
     logTritreeAiDebug("react-stream", "parse-final-submit-missing", {
       target,
@@ -986,8 +1092,64 @@ async function parseRuntimeReActStreamOutput<TOutput>(
     error: summarizeErrorForLog(streamError)
   });
   logRuntimeStreamParseFailure(target, summary, streamError);
-  logAiResponse(target as "draft" | "next-step" | "options", "stream-parse-failed", summary.latestPartial);
+  logAiResponse(target as "artifact" | "next-step" | "options", "stream-parse-failed", summary.latestPartial);
   throw streamError;
+}
+
+function assertMeaningfulRuntimeAction({
+  output,
+  summary,
+  target
+}: {
+  output: unknown;
+  summary: RuntimeToolStreamSummary;
+  target: RuntimeSubmitTarget;
+}) {
+  if (target === "artifact") return;
+  if (hasNonFinalToolActivity(summary)) return;
+  if (target === "next-step" && isObjectRecord(output) && (output.action === "artifact" || output.action === "complete")) {
+    return;
+  }
+  if ((target === "options" || target === "next-step") && hasUserFacingOptions(output)) {
+    return;
+  }
+  if (hasDecisionRationale(output)) return;
+
+  throw new ZodError([
+    {
+      code: "custom",
+      path: ["decisionRationale"],
+      message: ACTUAL_WORK_RETRY_MESSAGE
+    }
+  ]);
+}
+
+function hasNonFinalToolActivity(summary: RuntimeToolStreamSummary) {
+  return summary.streamChunks.some((chunk) => chunk.toolName && !isFinalSubmitToolName(chunk.toolName));
+}
+
+function hasDecisionRationale(output: unknown) {
+  return isObjectRecord(output) && typeof output.decisionRationale === "string" && output.decisionRationale.trim().length > 0;
+}
+
+function hasUserFacingOptions(output: unknown) {
+  if (!isObjectRecord(output) || typeof output.roundIntent !== "string" || !output.roundIntent.trim()) return false;
+  if (!Array.isArray(output.options) || output.options.length !== 3) return false;
+
+  return output.options.every(
+    (option) =>
+      isObjectRecord(option) &&
+      typeof option.label === "string" &&
+      option.label.trim().length > 0 &&
+      typeof option.description === "string" &&
+      option.description.trim().length > 0
+  );
+}
+
+function isActualWorkRetryError(error: unknown) {
+  return zodIssuesFromError(error).some(
+    (issue) => issue.path.join(".") === "decisionRationale" && issue.message === ACTUAL_WORK_RETRY_MESSAGE
+  );
 }
 
 function shouldTreatRuntimeStreamAsAborted(summary: RuntimeToolStreamSummary) {
@@ -1022,7 +1184,7 @@ function logZodIssues(target: RuntimeSubmitTarget, stage: string, error: unknown
   const issues = zodIssuesFromError(error);
   if (issues.length === 0) return;
   console.info(
-    `[treeable:generate-draft-stream:zod-issues:${target}:${stage}]`,
+    `[treeable:generate-artifact-stream:zod-issues:${target}:${stage}]`,
     JSON.stringify(
       issues.map((issue) => ({
         path: issue.path.length > 0 ? issue.path.join(".") : "root",
@@ -1113,118 +1275,6 @@ function stringifyDiagnosticValue(value: unknown) {
   return text ?? String(value);
 }
 
-function parseRuntimeRawTextJson(rawText: string) {
-  try {
-    return parseDirectorJsonObject(rawText);
-  } catch (error) {
-    const roundIntentIndex = rawText.lastIndexOf('"roundIntent"');
-    if (roundIntentIndex >= 0) {
-      const objectStart = rawText.lastIndexOf("{", roundIntentIndex);
-      if (objectStart >= 0) {
-        return parseDirectorJsonObject(rawText.slice(objectStart));
-      }
-    }
-
-    const fencedJsonIndex = rawText.toLowerCase().lastIndexOf("```json");
-    if (fencedJsonIndex >= 0) {
-      return parseDirectorJsonObject(rawText.slice(fencedJsonIndex));
-    }
-
-    throw error;
-  }
-}
-
-function parseRuntimeMarkdownOutput(rawText: string, target: "draft" | "options") {
-  if (target === "options") return parseRuntimeOptionsMarkdown(rawText);
-  return parseRuntimeDraftMarkdown(rawText);
-}
-
-function parseRuntimeOptionsMarkdown(rawText: string) {
-  const options = (["A", "B", "C"] as const).map((letter, index) => {
-    const block = runtimeOptionBlock(rawText, letter);
-    const fields = markdownFields(block);
-    const id = ["a", "b", "c"][index] as BranchOption["id"];
-    return {
-      id,
-      label: fields.label || runtimeOptionHeadingLabel(block, letter) || `选项${letter}`,
-      description: fields.description || fields.label || `选择选项${letter}继续。`,
-      impact: fields.impact || fields.description || "帮助下一步创作更清楚。",
-      kind: normalizeOptionKind(fields.kind, index)
-    };
-  });
-
-  if (options.some((option) => !option.label || !option.description || !option.impact)) {
-    throw new Error("Runtime markdown options are incomplete.");
-  }
-
-  return {
-    roundIntent: markdownLineField(rawText, "roundIntent") || "选择下一步",
-    options
-  };
-}
-
-function parseRuntimeDraftMarkdown(rawText: string) {
-  const hashtags = markdownLineField(rawText, "hashtags") || markdownLineField(rawText, "话题");
-  return {
-    roundIntent: markdownLineField(rawText, "roundIntent") || "继续完善",
-    draft: {
-      title: markdownLineField(rawText, "title") || markdownLineField(rawText, "标题") || "未命名",
-      body: markdownLineField(rawText, "body") || markdownLineField(rawText, "正文") || rawText.trim(),
-      hashtags: hashtags ? hashtags.split(/[、,\s]+/).filter(Boolean) : [],
-      imagePrompt: markdownLineField(rawText, "imagePrompt") || markdownLineField(rawText, "配图提示") || ""
-    }
-  };
-}
-
-function runtimeOptionBlock(rawText: string, letter: "A" | "B" | "C") {
-  const pattern = new RegExp(
-    `(?:^|\\n)\\s*(?:\\*\\*)?选项\\s*${letter}[\\s\\S]*?(?=(?:\\n\\s*(?:\\*\\*)?选项\\s*[ABC]|$))`,
-    "i"
-  );
-  return pattern.exec(rawText)?.[0] ?? "";
-}
-
-function runtimeOptionHeadingLabel(block: string, letter: "A" | "B" | "C") {
-  const heading = new RegExp(`选项\\s*${letter}(?:[（(][^)）]+[)）])?\\s*(?:\\*\\*)?\\s*([^\\n]+)?`, "i").exec(block)?.[1];
-  return cleanMarkdownValue(heading ?? "");
-}
-
-function markdownLineField(text: string, field: string) {
-  const escaped = escapeRegExp(field);
-  const match = new RegExp(`(?:^|\\n)\\s*(?:[-*]\\s*)?(?:\\*\\*)?${escaped}(?:\\*\\*)?\\s*[：:]\\s*([^\\n]+)`, "i").exec(text);
-  return cleanMarkdownValue(match?.[1] ?? "");
-}
-
-function markdownFields(text: string) {
-  const fields: Record<string, string> = {};
-  const pattern = /\*\*(id|label|description|impact|kind|mode)\*\*\s*[：:]\s*/gi;
-  const matches = Array.from(text.matchAll(pattern));
-
-  matches.forEach((match, index) => {
-    const field = match[1]?.toLowerCase();
-    if (!field) return;
-    const valueStart = (match.index ?? 0) + match[0].length;
-    const valueEnd = matches[index + 1]?.index ?? text.length;
-    fields[field] = cleanMarkdownValue(text.slice(valueStart, valueEnd));
-  });
-
-  for (const field of ["id", "label", "description", "impact", "kind", "mode"]) {
-    fields[field] ||= markdownLineField(text, field);
-  }
-
-  return fields;
-}
-
-function cleanMarkdownValue(value: string) {
-  return value
-    .replace(/\s+/g, " ")
-    .replace(/^[：:\-–—\s]+/, "")
-    .replace(/[\-–—\s]+$/, "")
-    .replace(/^\*+|\*+$/g, "")
-    .replace(/^["“”]+|["“”]+$/g, "")
-    .trim();
-}
-
 function normalizeOptionKind(value: string | undefined, index: number): BranchOption["kind"] {
   if (value?.startsWith("explore")) return "explore";
   if (value?.startsWith("deepen")) return "deepen";
@@ -1249,7 +1299,7 @@ async function resolveLooseStreamOutput(stream: StructuredObjectStreamResult) {
 
 async function withStructuredOutputRetries<T>(
   messages: MastraConversationMessage[],
-  target: "draft" | "next-step" | "options",
+  target: "artifact" | "next-step" | "options",
   run: (messages: MastraConversationMessage[]) => Promise<T>,
   options?: { hasRuntimeTools?: boolean }
 ): Promise<T> {
@@ -1286,7 +1336,7 @@ function structuredOutputRepairMessage({
 }: {
   error: unknown;
   retryNumber: number;
-  target: "draft" | "next-step" | "options";
+  target: "artifact" | "next-step" | "options";
   hasRuntimeTools?: boolean;
 }): MastraConversationMessage {
   const submitToolName = finalSubmitToolName(target);
@@ -1301,8 +1351,8 @@ function structuredOutputRepairMessage({
       "结构问题：",
       structuredOutputIssueSummary(error),
       "最终结构要求：",
-      target === "draft"
-        ? draftOutputShapeSummary()
+      target === "artifact"
+        ? artifactOutputShapeSummary()
         : target === "next-step"
           ? nextStepOutputShapeSummary()
           : optionsOutputShapeSummary()
@@ -1360,10 +1410,10 @@ function summarizeInvalidStructuredValue(value: unknown) {
   return text.length > 240 ? `${text.slice(0, 237)}...` : text;
 }
 
-function draftOutputShapeSummary() {
+function artifactOutputShapeSummary() {
   return [
-    "必须返回对象：{ roundIntent, draft }。",
-    "draft 必须包含 { title, body, hashtags, imagePrompt }；title/body/imagePrompt 是字符串，hashtags 是字符串数组。"
+    "必须返回对象：{ roundIntent, artifact }。",
+    "artifact 可以是 null；如果产生产物，必须包含 { type, payload }，payload 结构由对应产物插件决定。"
   ].join("\n");
 }
 
@@ -1378,20 +1428,23 @@ function optionsOutputShapeSummary() {
 function nextStepOutputShapeSummary() {
   return [
     "必须返回对象：{ action, roundIntent }。",
-    "action 只能是 draft、options 或 complete。",
-    "当 action=draft 时不要返回 options。",
-    "当 action=complete 时不要返回 options。",
+    "action 只能是 artifact、options 或 complete。",
+    "资料、搜索、参考、素材收集、分析、审稿或比较之后，通常用 action=options 让用户决定如何继续，或用 action=artifact 直接生成已明确的作品更新。",
+    "action=complete 表示当前请求已经可以收束，适合用户明确要求结束、发布、交付、停止继续澄清，或当前目标已经没有可行动下一步。",
+    "当 action=artifact 时只返回 action 和 roundIntent，后续 artifact 阶段负责生成作品内容。",
+    "当 action=complete 时不要返回 options；如果包含 artifact，只能是 null。",
     "当 action=options 时必须返回 options 正好 3 项；每项只需要包含 { label, description, impact }，系统会自动补 id 和 kind。"
   ].join("\n");
 }
 
 async function executionContextForDirectorParts(
   parts: DirectorInputParts,
-  target: "writer" | "editor",
+  env: Record<string, string | undefined> | undefined,
   context: Partial<AgentExecutionContextOverride> = {},
-  skipRuntimeTools = false
+  skipRuntimeTools = false,
+  toolPolicy: DirectorRuntimeToolPolicy = {}
 ) {
-  const baseContext = contextForDirectorParts(parts, target, context);
+  const baseContext = contextForDirectorParts(parts, context);
   if (skipRuntimeTools) {
     return {
       agentContext: baseContext,
@@ -1406,9 +1459,14 @@ async function executionContextForDirectorParts(
   const runtimeAvailableSkillSummaries = Array.isArray(runtime.availableSkillSummaries)
     ? runtime.availableSkillSummaries
     : [];
+  const includeSubagentTools = toolPolicy.includeSubagentTools ?? true;
+  const subagentRuntime = includeSubagentTools
+    ? createSubagentRuntimeTools({ contextSource: parts, env })
+    : { subagentTemplateSummaries: [], toolSummaries: [], tools: {} };
   const tools = {
     ...(runtime.tools ?? {}),
-    ...(mcpRuntime.tools ?? {})
+    ...(mcpRuntime.tools ?? {}),
+    ...subagentRuntime.tools
   };
   return {
     agentContext: {
@@ -1418,7 +1476,16 @@ async function executionContextForDirectorParts(
         ...runtimeAvailableSkillSummaries
       ],
       enabledSkills: runtimeEnabledSkills,
-      toolSummaries: [...(baseContext.toolSummaries ?? []), ...runtime.toolSummaries, ...mcpRuntime.toolSummaries]
+      subagentTemplateSummaries: [
+        ...(baseContext.subagentTemplateSummaries ?? []),
+        ...subagentRuntime.subagentTemplateSummaries
+      ],
+      toolSummaries: [
+        ...(baseContext.toolSummaries ?? []),
+        ...runtime.toolSummaries,
+        ...mcpRuntime.toolSummaries,
+        ...subagentRuntime.toolSummaries
+      ]
     },
     disconnect: () => disconnectRuntimeTools(mcpRuntime),
     tools
@@ -1468,7 +1535,7 @@ function normalizeSkill(skill: Skill): Skill {
 }
 
 function memoryScopeForDirectorParts(parts: DirectorInputParts): MemoryScope {
-  const basis = parts.pathSummary || parts.currentDraft || parts.rootSummary || "default";
+  const basis = parts.pathSummary || parts.currentArtifact || parts.rootSummary || "default";
   return {
     resource: "treeable-director",
     thread: encodeURIComponent(basis).slice(0, 128) || "default"
@@ -1493,7 +1560,7 @@ function hasRuntimeTools(tools: ToolsInput | undefined): tools is ToolsInput {
 async function consumeStructuredFullStream<TPartial>(
   fullStream: StreamSource<unknown>,
   options: {
-    logTarget: "draft" | "next-step" | "options";
+    logTarget: "artifact" | "next-step" | "options";
     onPartialObject?: (partial: TPartial) => void;
     onReasoningText?: (event: ReasoningTextEvent) => void;
   }
@@ -1645,7 +1712,7 @@ function looksLikeStructuredRuntimeText(text: string) {
   if (!trimmed) return false;
   if (trimmed.startsWith("```")) return true;
   if (trimmed.startsWith("{") || trimmed.startsWith("[") || trimmed.startsWith('"')) return true;
-  if (/"(roundIntent|options|draft)"\s*:/.test(trimmed)) return true;
+  if (/"(roundIntent|options|artifact)"\s*:/.test(trimmed)) return true;
   if (/(^|\n)\s*(?:\*\*)?(roundIntent|description|impact|kind|选项\s*[a-cA-C])(?:\*\*)?\s*[：:]/.test(trimmed)) {
     return true;
   }
@@ -1667,18 +1734,33 @@ function toolProgressDeltaFromStreamChunk(chunk: unknown): string {
   const toolName = toolNameFromPayload(payload);
   if (!toolName) return "";
   if (isFinalSubmitToolName(toolName)) return "";
+  if (isProcessDataDisplayToolName(toolName)) return "";
 
   if (chunkType === "tool-call" || chunkType === "tool-execution-start") {
+    if (isSubagentToolName(toolName)) {
+      return `\n[子代理] 运行 ${subagentCallLabel(toolName, toolInputFromPayload(payload))}`;
+    }
+
     return `\n[工具] 调用 ${toolName}`;
   }
 
   if (chunkType === "tool-result" || chunkType === "tool-output" || chunkType === "tool-execution-end") {
     const output = toolOutputFromPayload(payload);
     const verb = isFailedToolOutput(output, payload) ? "失败" : "完成";
+    if (isSubagentToolName(toolName)) {
+      return `\n[子代理] ${subagentResultTitle(toolName, output)} ${
+        verb === "失败" ? "失败" : "完成，主 agent 正在检查返回值"
+      }`;
+    }
+
     return `\n[工具] ${toolName} ${verb}`;
   }
 
   if (chunkType === "tool-error" || chunkType === "tool-execution-abort") {
+    if (isSubagentToolName(toolName)) {
+      return `\n[子代理] ${subagentToolFallbackTitle(toolName)} 失败`;
+    }
+
     return `\n[工具] ${toolName} 失败`;
   }
 
@@ -1698,12 +1780,17 @@ function toolCallDeltaProgressFromStreamChunk(chunk: unknown, state: ToolCallDel
   const toolName = toolNameFromPayload(payload);
   if (!toolName) return "";
   if (isFinalSubmitToolName(toolName)) return "";
+  if (isProcessDataDisplayToolName(toolName)) return "";
 
   const toolCallId = stringFromPayload(payload, "toolCallId", "id") || toolName;
   if (chunkType === "tool-call-streaming-start") {
     state.argsById.set(toolCallId, "");
     if (state.announcedIds.has(toolCallId)) return "";
     state.announcedIds.add(toolCallId);
+    if (isSubagentToolName(toolName)) {
+      return `\n[子代理] 准备运行 ${subagentToolFallbackTitle(toolName)}`;
+    }
+
     return `\n[工具] 准备调用 ${toolName}`;
   }
 
@@ -1715,6 +1802,76 @@ function toolCallDeltaProgressFromStreamChunk(chunk: unknown, state: ToolCallDel
 
   state.announcedIds.add(toolCallId);
   return `\n[工具] 准备调用 ${toolName}`;
+}
+
+function isSubagentToolName(toolName: string) {
+  return toolName === RUN_SUBAGENT_TEMPLATE_TOOL_NAME || toolName === RUN_CUSTOM_SUBAGENT_TOOL_NAME;
+}
+
+function isProcessDataDisplayToolName(toolName: string) {
+  return toolName === SHOW_PROCESS_DATA_TOOL_NAME;
+}
+
+function processDataDisplayFromStreamChunk(chunk: unknown, emittedIds: Set<string>): ProcessDataDisplay | null {
+  if (!isObjectRecord(chunk)) return null;
+
+  const nestedAgentChunk = nestedAgentExecutionChunk(chunk);
+  if (nestedAgentChunk) return processDataDisplayFromStreamChunk(nestedAgentChunk, emittedIds);
+
+  const chunkType = typeof chunk.type === "string" ? chunk.type : "";
+  if (!chunkType.includes("tool")) return null;
+
+  const payload = isObjectRecord(chunk.payload) ? chunk.payload : chunk;
+  const toolName = toolNameFromPayload(payload);
+  if (!isProcessDataDisplayToolName(toolName)) return null;
+
+  const toolCallId = stringFromPayload(payload, "toolCallId", "id") || "";
+  const rawValue =
+    chunkType === "tool-call" || chunkType === "tool-execution-start"
+      ? toolInputFromPayload(payload)
+      : chunkType === "tool-result" || chunkType === "tool-output" || chunkType === "tool-execution-end"
+        ? unwrapToolOutputValue(toolOutputFromPayload(payload))
+        : null;
+  const parsed = ShowProcessDataInputSchema.safeParse(rawValue);
+  if (!parsed.success) return null;
+
+  const emitKey = toolCallId || JSON.stringify(parsed.data);
+  if (emittedIds.has(emitKey)) return null;
+  emittedIds.add(emitKey);
+  return parsed.data;
+}
+
+function unwrapToolOutputValue(output: unknown) {
+  if (!isObjectRecord(output)) return output;
+  if (output.type === "json" && Object.prototype.hasOwnProperty.call(output, "value")) return output.value;
+  return output;
+}
+
+function subagentCallLabel(toolName: string, input: unknown) {
+  const parsedInput = parseMaybeJson(input);
+  if (!isObjectRecord(parsedInput)) return subagentToolFallbackTitle(toolName);
+
+  const templateId = typeof parsedInput.templateId === "string" ? parsedInput.templateId : "";
+  const templateTitle = templateId ? getSubagentTemplate(templateId)?.title : "";
+  const customTitle = typeof parsedInput.title === "string" ? parsedInput.title.trim() : "";
+  const title = templateTitle || customTitle || subagentToolFallbackTitle(toolName);
+  const task = typeof parsedInput.task === "string" ? truncateText(parsedInput.task, 80) : "";
+  return task ? `${title}：${task}` : title;
+}
+
+function subagentResultTitle(toolName: string, output: unknown) {
+  const parsedOutput = parseMaybeJson(output);
+  if (!isObjectRecord(parsedOutput)) return subagentToolFallbackTitle(toolName);
+
+  const title = typeof parsedOutput.title === "string" ? parsedOutput.title.trim() : "";
+  if (title) return title;
+
+  const templateId = typeof parsedOutput.templateId === "string" ? parsedOutput.templateId : "";
+  return (templateId ? getSubagentTemplate(templateId)?.title : "") || subagentToolFallbackTitle(toolName);
+}
+
+function subagentToolFallbackTitle(toolName: string) {
+  return toolName === RUN_SUBAGENT_TEMPLATE_TOOL_NAME ? "预定义子代理" : "自定义子代理";
 }
 
 function collectAgentMessageFromStreamChunk(chunk: unknown, state: AgentMessageHistoryState) {
@@ -1863,7 +2020,7 @@ function partialSubmitToolOutputFromArgsText(toolName: string, argsText: string)
 
   if (toolName === SUBMIT_TREE_OPTIONS_TOOL_NAME) return partialOptionsSubmitOutputFromArgsText(argsText);
   if (toolName === SUBMIT_TREE_NEXT_STEP_TOOL_NAME) return partialNextStepSubmitOutputFromArgsText(argsText);
-  if (toolName === SUBMIT_TREE_DRAFT_TOOL_NAME) return partialDraftSubmitOutputFromArgsText(argsText);
+  if (toolName === SUBMIT_TREE_ARTIFACT_TOOL_NAME) return partialArtifactSubmitOutputFromArgsText(argsText);
   return undefined;
 }
 
@@ -1906,51 +2063,53 @@ function partialOptionsSubmitOutputFromArgsText(argsText: string) {
   return Object.keys(output).length > 0 ? output : undefined;
 }
 
-function partialDraftSubmitOutputFromArgsText(argsText: string) {
+function partialArtifactSubmitOutputFromArgsText(argsText: string) {
   const output: Record<string, unknown> = {};
   const roundIntent = extractVisibleJsonStringField(argsText, "roundIntent");
   if (roundIntent) output.roundIntent = roundIntent;
 
-  const draftMatch = /"draft"\s*:\s*\{/.exec(argsText);
-  if (draftMatch) {
-    const draftText = argsText.slice(draftMatch.index);
-    const draft: Record<string, unknown> = {};
-    const title = extractVisibleJsonStringField(draftText, "title");
-    const body = extractVisibleJsonStringField(draftText, "body");
-    const imagePrompt = extractVisibleJsonStringField(draftText, "imagePrompt");
-    const hashtags = extractVisibleJsonStringArrayField(draftText, "hashtags");
-    if (title) draft.title = title;
-    if (body) draft.body = body;
-    if (hashtags.length > 0) draft.hashtags = hashtags;
-    if (imagePrompt) draft.imagePrompt = imagePrompt;
-    if (Object.keys(draft).length > 0) output.draft = draft;
+  const artifactMatch = /"artifact"\s*:\s*\{/.exec(argsText);
+  if (artifactMatch) {
+    const artifactText = argsText.slice(artifactMatch.index);
+    const type = extractVisibleJsonStringField(artifactText, "type");
+    const payload = extractVisibleJsonObjectField(artifactText, "payload");
+    if (type || Object.keys(payload).length > 0) {
+      output.artifact = {
+        ...(type ? { type } : {}),
+        ...(Object.keys(payload).length > 0 ? { payload } : {})
+      };
+    }
   }
 
   return Object.keys(output).length > 0 ? output : undefined;
 }
 
-function extractVisibleJsonStringField(text: string, fieldName: string) {
-  const match = new RegExp(`"${escapeRegExp(fieldName)}"\\s*:\\s*"`).exec(text);
-  if (!match) return "";
-  const parsed = readVisibleJsonString(text, match.index + match[0].length);
-  return parseJsonStringValue(parsed.rawValue);
+function extractVisibleJsonObjectField(text: string, fieldName: string) {
+  const match = new RegExp(`"${escapeRegExp(fieldName)}"\\s*:\\s*\\{`).exec(text);
+  if (!match) return {};
+
+  const objectStart = match.index + match[0].lastIndexOf("{");
+  const objectEnd = findMatchingJsonObjectEnd(text, objectStart);
+  const objectText = objectEnd === -1 ? text.slice(objectStart) : text.slice(objectStart, objectEnd + 1);
+  return extractVisibleJsonObjectFields(objectText);
 }
 
-function extractVisibleJsonStringArrayField(text: string, fieldName: string) {
-  const match = new RegExp(`"${escapeRegExp(fieldName)}"\\s*:\\s*\\[`).exec(text);
-  if (!match) return [];
+function extractVisibleJsonObjectFields(text: string): Record<string, unknown> {
+  const objectStart = text.indexOf("{");
+  if (objectStart === -1) return {};
 
-  const arrayStart = match.index + match[0].lastIndexOf("[");
-  const arrayEnd = findMatchingJsonArrayEnd(text, arrayStart);
-  if (arrayEnd !== -1) {
-    const parsed = parseMaybeJson(text.slice(arrayStart, arrayEnd + 1));
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  const objectEnd = findMatchingJsonObjectEnd(text, objectStart);
+  if (objectEnd !== -1) {
+    const parsed = parseMaybeJson(text.slice(objectStart, objectEnd + 1));
+    return isObjectRecord(parsed) ? parsed : {};
   }
 
-  const values: string[] = [];
-  let index = arrayStart + 1;
+  const fields: Record<string, unknown> = {};
+  let index = objectStart + 1;
+
   while (index < text.length) {
     const char = text[index];
+    if (char === "}") break;
     if (char === "," || /\s/.test(char)) {
       index += 1;
       continue;
@@ -1961,12 +2120,105 @@ function extractVisibleJsonStringArrayField(text: string, fieldName: string) {
       continue;
     }
 
+    const key = readVisibleJsonString(text, index + 1);
+    const fieldName = parseJsonStringValue(key.rawValue);
+    index = skipJsonWhitespace(text, key.nextIndex);
+    if (!fieldName || text[index] !== ":") {
+      index += 1;
+      continue;
+    }
+
+    const value = readVisibleJsonValue(text, skipJsonWhitespace(text, index + 1));
+    if (value.found) {
+      fields[fieldName] = value.value;
+    }
+    index = value.nextIndex > index ? value.nextIndex : index + 1;
+  }
+
+  return fields;
+}
+
+function readVisibleJsonValue(
+  text: string,
+  startIndex: number
+): { found: true; nextIndex: number; value: unknown } | { found: false; nextIndex: number } {
+  const index = skipJsonWhitespace(text, startIndex);
+  const char = text[index];
+  if (!char) return { found: false, nextIndex: index };
+
+  if (char === '"') {
     const parsed = readVisibleJsonString(text, index + 1);
-    values.push(parseJsonStringValue(parsed.rawValue));
-    index = parsed.nextIndex;
+    return { found: true, nextIndex: parsed.nextIndex, value: parseJsonStringValue(parsed.rawValue) };
+  }
+
+  if (char === "{") {
+    const objectEnd = findMatchingJsonObjectEnd(text, index);
+    if (objectEnd !== -1) {
+      return { found: true, nextIndex: objectEnd + 1, value: parseMaybeJson(text.slice(index, objectEnd + 1)) };
+    }
+    return { found: true, nextIndex: text.length, value: extractVisibleJsonObjectFields(text.slice(index)) };
+  }
+
+  if (char === "[") {
+    const arrayEnd = findMatchingJsonArrayEnd(text, index);
+    if (arrayEnd !== -1) {
+      return { found: true, nextIndex: arrayEnd + 1, value: parseMaybeJson(text.slice(index, arrayEnd + 1)) };
+    }
+    return { found: true, nextIndex: text.length, value: extractVisibleJsonArrayItems(text, index) };
+  }
+
+  const primitive = readVisibleJsonPrimitive(text, index);
+  return primitive.found ? primitive : { found: false, nextIndex: primitive.nextIndex };
+}
+
+function extractVisibleJsonArrayItems(text: string, startIndex: number) {
+  const values: unknown[] = [];
+  let index = startIndex + 1;
+
+  while (index < text.length) {
+    const char = text[index];
+    if (char === "]") break;
+    if (char === "," || /\s/.test(char)) {
+      index += 1;
+      continue;
+    }
+
+    const value = readVisibleJsonValue(text, index);
+    if (value.found) values.push(value.value);
+    index = value.nextIndex > index ? value.nextIndex : index + 1;
   }
 
   return values;
+}
+
+function readVisibleJsonPrimitive(
+  text: string,
+  startIndex: number
+): { found: true; nextIndex: number; value: unknown } | { found: false; nextIndex: number } {
+  let index = startIndex;
+  while (index < text.length && !/[,\]}\s]/.test(text[index])) {
+    index += 1;
+  }
+
+  const rawValue = text.slice(startIndex, index).trim();
+  if (!rawValue) return { found: false, nextIndex: index };
+  const parsed = parseMaybeJson(rawValue);
+  return parsed !== rawValue ? { found: true, nextIndex: index, value: parsed } : { found: false, nextIndex: index };
+}
+
+function skipJsonWhitespace(text: string, startIndex: number) {
+  let index = startIndex;
+  while (index < text.length && /\s/.test(text[index])) {
+    index += 1;
+  }
+  return index;
+}
+
+function extractVisibleJsonStringField(text: string, fieldName: string) {
+  const match = new RegExp(`"${escapeRegExp(fieldName)}"\\s*:\\s*"`).exec(text);
+  if (!match) return "";
+  const parsed = readVisibleJsonString(text, match.index + match[0].length);
+  return parseJsonStringValue(parsed.rawValue);
 }
 
 function extractVisibleJsonObjectBlocks(text: string) {
@@ -2083,7 +2335,7 @@ function unwrapSubmitToolOutput(output: unknown) {
 
 function isFinalSubmitToolName(toolName: string) {
   return (
-    toolName === SUBMIT_TREE_DRAFT_TOOL_NAME ||
+    toolName === SUBMIT_TREE_ARTIFACT_TOOL_NAME ||
     toolName === SUBMIT_TREE_NEXT_STEP_TOOL_NAME ||
     toolName === SUBMIT_TREE_OPTIONS_TOOL_NAME
   );
@@ -2104,7 +2356,7 @@ function summarizePartialObjectForLog(value: unknown) {
   if (!isObjectRecord(value)) return typeof value;
 
   const options = Array.isArray(value.options) ? value.options : [];
-  const draft = isObjectRecord(value.draft) ? value.draft : null;
+  const artifact = isObjectRecord(value.artifact) ? value.artifact : null;
   return {
     keys: Object.keys(value),
     roundIntent: typeof value.roundIntent === "string" ? value.roundIntent : "",
@@ -2112,7 +2364,8 @@ function summarizePartialObjectForLog(value: unknown) {
     optionLabels: options.flatMap((option) =>
       isObjectRecord(option) && typeof option.label === "string" ? [option.label] : []
     ),
-    draftFields: draft ? Object.keys(draft) : []
+    artifactFields: artifact ? Object.keys(artifact) : [],
+    artifactPayloadFields: artifact && isObjectRecord(artifact.payload) ? Object.keys(artifact.payload) : []
   };
 }
 
@@ -2204,13 +2457,13 @@ function structuredObjectFromStreamChunk(chunk: unknown) {
 }
 
 function logMastraPrompt(
-  kind: "draft" | "next-step" | "options",
+  kind: "artifact" | "next-step" | "options",
   context: SharedAgentContextInput,
   messages: MastraConversationMessage[]
 ) {
   const instructions =
-    kind === "draft"
-      ? buildTreeDraftInstructions(context)
+    kind === "artifact"
+      ? buildTreeArtifactInstructions(context)
       : kind === "next-step"
         ? buildTreeNextStepInstructions(context)
         : buildTreeOptionsInstructions(context);

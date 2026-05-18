@@ -109,6 +109,31 @@ function renderRootMemorySetup(props: Partial<ComponentProps<typeof RootMemorySe
   );
 }
 
+function contentTeamSkill(id: string, title: string): Skill {
+  const sortOrders = new Map([
+    ["system-planner", 0],
+    ["system-researcher", 1],
+    ["system-writer", 2],
+    ["system-reviewer", 3],
+    ["system-publisher", 4]
+  ]);
+
+  return {
+    id,
+    title,
+    category: "content-team",
+    description: `${title}说明。`,
+    prompt: `${title} prompt`,
+    appliesTo: "both",
+    isSystem: true,
+    sortOrder: sortOrders.get(id),
+    defaultEnabled: true,
+    isArchived: false,
+    createdAt: "2026-05-01T00:00:00.000Z",
+    updatedAt: "2026-05-01T00:00:00.000Z"
+  };
+}
+
 describe("RootMemorySetup", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
@@ -136,7 +161,7 @@ describe("RootMemorySetup", () => {
     expect(artifactTypeGroup.compareDocumentPosition(seedField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("places an unset expanded style setup in the seed field header", () => {
+  it("places an unset style setup prompt in the seed field header", async () => {
     const { container } = renderRootMemorySetup({
       onCreateSkill: vi.fn(),
       onUpdateSkill: vi.fn(),
@@ -149,8 +174,12 @@ describe("RootMemorySetup", () => {
     expect(seedField).toContainElement(screen.getByRole("textbox", { name: "创作 seed" }));
     expect(styleProfile).toHaveClass("style-profile-setup--inline");
     expect(styleProfile).toHaveClass("style-profile-setup--unset");
-    expect(styleProfile).toHaveClass("style-profile-setup--expanded");
+    expect(styleProfile).not.toHaveClass("style-profile-setup--expanded");
     expect(within(styleProfile).getByText(/建议先设置/)).toBeInTheDocument();
+    expect(within(styleProfile).getByRole("button", { name: "立即设置" })).toBeInTheDocument();
+
+    await userEvent.click(within(styleProfile).getByRole("button", { name: "立即设置" }));
+
     expect(within(styleProfile).getByRole("button", { name: "粘贴代表作生成" })).toBeInTheDocument();
     expect(within(styleProfile).getByRole("button", { name: "手动填写" })).toBeInTheDocument();
   });
@@ -195,17 +224,19 @@ describe("RootMemorySetup", () => {
     expect(css).toContain("grid-column: 1 / -1");
     expect(inlineRule).toContain("padding: 8px 10px");
     expect(inlineRule).toContain("box-shadow: none");
-    expect(inlineUnsetRule).toContain("background: rgba(240, 253, 250, 0.58)");
-    expect(inlineUnsetRule).toContain("border-color: rgba(20, 184, 166, 0.2)");
+    expect(inlineUnsetRule).toContain(
+      "background: linear-gradient(135deg, rgba(255, 251, 235, 0.96), rgba(255, 247, 237, 0.92))"
+    );
+    expect(inlineUnsetRule).toContain("border-color: rgba(217, 119, 6, 0.5)");
     expect(inlineMethodsRule).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
     expect(compactButtonRule).toContain("min-height: 28px");
     expect(compactButtonRule).toContain("border-radius: 999px");
   });
 
-  it("links to draft management from the seed screen", () => {
+  it("links to work management from the seed screen", () => {
     renderRootMemorySetup();
 
-    expect(screen.getByRole("link", { name: "我的草稿" })).toHaveAttribute("href", "/drafts");
+    expect(screen.getByRole("link", { name: "我的作品" })).toHaveAttribute("href", "/works");
   });
 
   it("keeps the inspiration list hidden when no inspirations are configured", () => {
@@ -303,7 +334,7 @@ describe("RootMemorySetup", () => {
     renderRootMemorySetup({ onSubmit });
 
     await userEvent.click(screen.getByRole("button", { name: "PRD 文档" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "创作 seed" }), "移动端草稿管理");
+    await userEvent.type(screen.getByRole("textbox", { name: "创作 seed" }), "移动端作品管理");
     await userEvent.click(screen.getByRole("button", { name: "用这个念头开始" }));
 
     expect(screen.getByRole("group", { name: "作品类型" })).toBeInTheDocument();
@@ -312,7 +343,7 @@ describe("RootMemorySetup", () => {
     expect(onSubmit).toHaveBeenCalledWith({
       preferences: expect.objectContaining({
         artifactTypeId: "prd",
-        seed: "移动端草稿管理"
+        seed: "移动端作品管理"
       }),
       enabledSkillIds: ["system-analysis"]
     });
@@ -327,13 +358,13 @@ describe("RootMemorySetup", () => {
 
     expect(screen.queryByRole("group", { name: "作品类型" })).not.toBeInTheDocument();
 
-    await userEvent.type(screen.getByRole("textbox", { name: "创作 seed" }), "移动端草稿管理");
+    await userEvent.type(screen.getByRole("textbox", { name: "创作 seed" }), "移动端作品管理");
     await userEvent.click(screen.getByRole("button", { name: "用这个念头开始" }));
 
     expect(onSubmit).toHaveBeenCalledWith({
       preferences: expect.objectContaining({
         artifactTypeId: "prd",
-        seed: "移动端草稿管理"
+        seed: "移动端作品管理"
       }),
       enabledSkillIds: ["system-analysis"]
     });
@@ -610,6 +641,7 @@ describe("RootMemorySetup", () => {
       styleProfileExternalAvailable: false
     });
 
+    await userEvent.click(screen.getByRole("button", { name: "立即设置" }));
     await userEvent.click(screen.getByRole("button", { name: "粘贴代表作生成" }));
     await userEvent.type(screen.getByRole("textbox", { name: "代表作 1" }), "第一段代表作。\n\n内部空行。");
     await userEvent.click(screen.getByRole("button", { name: "添加一段代表作" }));
@@ -758,12 +790,12 @@ describe("RootMemorySetup", () => {
 
     expect(screen.getByText("已启用 1 个技能")).toBeInTheDocument();
     expect(screen.getByText("分析")).toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "审稿重点" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "判断工作" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "技能库" })).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "展开技能列表" }));
 
-    expect(screen.getByRole("group", { name: "审稿重点" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "判断工作" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "技能库" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "收起技能列表" })).toBeInTheDocument();
   });
@@ -803,8 +835,41 @@ describe("RootMemorySetup", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "还有 1 个" }));
 
-    expect(screen.getByRole("group", { name: "审稿重点" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "判断工作" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "技能库" })).toBeInTheDocument();
+  });
+
+  it("summarizes default content team skills in creation workflow order", async () => {
+    const contentTeamSkills: Skill[] = [
+      contentTeamSkill("system-writer", "写手"),
+      contentTeamSkill("system-publisher", "发布编辑"),
+      contentTeamSkill("system-reviewer", "审稿"),
+      contentTeamSkill("system-planner", "策划"),
+      contentTeamSkill("system-researcher", "资料员")
+    ];
+    renderRootMemorySetup({ skills: contentTeamSkills });
+
+    const summary = screen.getByLabelText("已启用技能摘要");
+    expect(within(summary).getByText("策划")).toBeInTheDocument();
+    expect(within(summary).getByText("资料员")).toBeInTheDocument();
+    expect(within(summary).getByText("写手")).toBeInTheDocument();
+    expect(within(summary).getByRole("button", { name: "还有 2 个" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "还有 2 个" }));
+
+    const contentTeamGroup = screen.getByRole("group", { name: "内容团队" });
+    const labels = within(contentTeamGroup).getAllByRole("checkbox").map((checkbox) => checkbox.closest("label")?.textContent);
+
+    expect(labels).toEqual([
+      expect.stringContaining("策划"),
+      expect.stringContaining("资料员"),
+      expect.stringContaining("写手"),
+      expect.stringContaining("审稿"),
+      expect.stringContaining("发布编辑")
+    ]);
+    expect(within(contentTeamGroup).getAllByRole("checkbox").every((checkbox) => checkbox instanceof HTMLInputElement && checkbox.checked)).toBe(
+      true
+    );
   });
 
   it("disables submit while saving", async () => {

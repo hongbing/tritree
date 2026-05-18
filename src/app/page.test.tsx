@@ -27,7 +27,7 @@ describe("HomePage", () => {
     vi.clearAllMocks();
   });
 
-  it("passes draft query params to the workspace app", async () => {
+  it("passes work query params to the workspace app", async () => {
     getRepositoryMock.mockReturnValue({
       getUser: vi.fn(() => ({
         id: "user-1",
@@ -48,7 +48,7 @@ describe("HomePage", () => {
     })) as ReactElement<{
       currentUser: { id: string; isAdmin: boolean; role: string };
       initialSessionId?: string;
-      startNewDraft?: boolean;
+      startNewWork?: boolean;
     }>;
 
     expect(element.props.currentUser).toEqual(
@@ -59,6 +59,6 @@ describe("HomePage", () => {
       })
     );
     expect(element.props.initialSessionId).toBe("session-1");
-    expect(element.props.startNewDraft).toBe(true);
+    expect(element.props.startNewWork).toBe(true);
   });
 });

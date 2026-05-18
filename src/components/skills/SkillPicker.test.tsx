@@ -51,16 +51,56 @@ describe("SkillPicker", () => {
     const onChange = vi.fn();
     render(<SkillPicker skills={skills} selectedSkillIds={["editor-logic"]} onChange={onChange} />);
 
-    expect(screen.getByRole("group", { name: "写作方式" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "审稿重点" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "发布约束" })).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "写作方式" })).getByText("影响：草稿")).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "审稿重点" })).getByText("影响：建议")).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "发布约束" })).getByText("影响：全程")).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "审稿重点" })).getByRole("checkbox", { name: /逻辑链审查/ })).toBeChecked();
+    expect(screen.getByRole("group", { name: "草稿工作" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "判断工作" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "内容团队" })).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "草稿工作" })).getByText("作用：内容更新")).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "判断工作" })).getByText("作用：方向与检查")).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "内容团队" })).getByText("作用：全程")).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "判断工作" })).getByRole("checkbox", { name: /逻辑链审查/ })).toBeChecked();
 
     await userEvent.click(screen.getByRole("checkbox", { name: /标题不要夸张/ }));
 
     expect(onChange).toHaveBeenCalledWith(["editor-logic", "shared-title"]);
   });
+
+  it("orders content team skills by the creation workflow", () => {
+    const contentTeamSkills: Skill[] = [
+      contentTeamSkill("system-writer", "写手", 2),
+      contentTeamSkill("system-publisher", "发布编辑", 4),
+      contentTeamSkill("system-reviewer", "审稿", 3),
+      contentTeamSkill("system-planner", "策划", 0),
+      contentTeamSkill("system-researcher", "资料员", 1)
+    ];
+
+    render(<SkillPicker skills={contentTeamSkills} selectedSkillIds={contentTeamSkills.map((skill) => skill.id)} onChange={vi.fn()} />);
+
+    const contentTeamGroup = screen.getByRole("group", { name: "内容团队" });
+    const labels = within(contentTeamGroup).getAllByRole("checkbox").map((checkbox) => checkbox.closest("label")?.textContent);
+
+    expect(labels).toEqual([
+      expect.stringContaining("策划"),
+      expect.stringContaining("资料员"),
+      expect.stringContaining("写手"),
+      expect.stringContaining("审稿"),
+      expect.stringContaining("发布编辑")
+    ]);
+  });
 });
+
+function contentTeamSkill(id: string, title: string, sortOrder: number): Skill {
+  return {
+    id,
+    title,
+    category: "content-team",
+    description: `${title}说明。`,
+    prompt: `${title} prompt`,
+    appliesTo: "both",
+    isSystem: true,
+    sortOrder,
+    defaultEnabled: true,
+    isArchived: false,
+    createdAt: "2026-05-01T00:00:00.000Z",
+    updatedAt: "2026-05-01T00:00:00.000Z"
+  };
+}

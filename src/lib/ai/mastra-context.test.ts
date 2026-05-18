@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSharedAgentContext,
-  buildTreeDraftInstructions,
+  buildTreeArtifactInstructions,
+  buildTreeNextStepInstructions,
   buildTreeOptionsInstructions,
   type SharedAgentContextInput
 } from "./mastra-context";
@@ -12,11 +13,11 @@ const input = {
   longTermMemory: "用户常写朋友圈短文。",
   enabledSkills: [
     {
-      id: "system-workflow",
-      title: "内容创作流程",
-      category: "方向",
-      description: "判断内容所处阶段，并控制改动幅度。",
-      prompt: "种子或零散想法阶段可以大幅组织材料；当任务是设计澄清问题和答案时，基本成稿阶段应避免所有答案都给重构。",
+      id: "system-researcher",
+      title: "资料员",
+      category: "content-team",
+      description: "负责判断资料缺口，并建议是否委托检索或核查。",
+      prompt: "先识别当前内容中最影响可信度的事实缺口；必要时建议委托资料型 subagent 做最小范围核查。",
       appliesTo: "both",
       isSystem: true,
       defaultEnabled: true,
@@ -36,144 +37,151 @@ const input = {
       isArchived: false,
       createdAt: "2026-04-29T00:00:00.000Z",
       updatedAt: "2026-04-29T00:00:00.000Z"
+    },
+    {
+      id: "logic-reviewer",
+      title: "结构审读",
+      category: "检查",
+      description: "判断当前内容的主线和结构风险。",
+      prompt: "优先指出最影响下一步方向判断的结构问题。",
+      appliesTo: "editor",
+      isSystem: false,
+      defaultEnabled: false,
+      isArchived: false,
+      createdAt: "2026-04-29T00:00:00.000Z",
+      updatedAt: "2026-04-29T00:00:00.000Z"
     }
   ],
   availableSkillSummaries: ["小红书标题：生成适合小红书的标题。"],
+  subagentTemplateSummaries: ["资料核查模板：核查一个具体事实，并返回来源、结论和不确定性。"],
   toolSummaries: ["get_weather：查询指定地点天气。"]
 } satisfies SharedAgentContextInput;
 
+const shellInput = {
+  rootSummary: "",
+  learnedSummary: "",
+  enabledSkills: [],
+  subagentTemplateSummaries: ["research｜资料核查：核查一个具体事实。"],
+  toolSummaries: [
+    "run_subagent_template：运行预创建子代理模板；运行时会提供当前上下文视图。",
+    "run_custom_subagent：运行自定义子代理；运行时会提供当前上下文视图。",
+    "submit_tree_artifact：最终提交工具。",
+    "submit_tree_next_step：最终提交工具。",
+    "submit_tree_options：最终提交工具。"
+  ]
+} satisfies SharedAgentContextInput;
+
 describe("buildSharedAgentContext", () => {
-  it("loads every enabled skill prompt as active instructions", () => {
+  it("presents enabled skills as a selectable skill library without injecting session data", () => {
     const context = buildSharedAgentContext(input);
 
-    expect(context).toContain("# 已启用 Skills");
-    expect(context).toContain("以下 Skills 已加载为本轮任务指令");
-    expect(context).toContain("每个 Skill 的「要求」都必须遵守");
-    expect(context).toContain("如果 Skill 之间出现冲突");
-    expect(context).toContain("## Skill: 内容创作流程");
-    expect(context).toContain("说明：判断内容所处阶段，并控制改动幅度。");
-    expect(context).toContain("要求：种子或零散想法阶段可以大幅组织材料；当任务是设计澄清问题和答案时，基本成稿阶段应避免所有答案都给重构。");
+    expect(context).toContain("# 可用 Skills");
+    expect(context).toContain("以下 Skills 是本作品可用能力库");
+    expect(context).toContain("主 agent 每轮先判断本轮目标应加载哪个或哪些 Skill");
+    expect(context).toContain("通常选择一个主要角色或步骤 Skill");
+    expect(context).toContain("被本轮选中的 Skill 的要求作为 active instructions");
+    expect(context).toContain("load_skill_document");
+    expect(context).toContain("## Skill: 资料员");
+    expect(context).toContain("适用目标：全程");
+    expect(context).toContain("说明：负责判断资料缺口，并建议是否委托检索或核查。");
+    expect(context).toContain("要求：先识别当前内容中最影响可信度的事实缺口；必要时建议委托资料型 subagent 做最小范围核查。");
     expect(context).toContain("## Skill: 朋友圈语气");
-    expect(context).toContain("说明：更像自然分享。");
-    expect(context).toContain("要求：使用自然、轻松、不过度修饰的朋友圈语气。");
-    expect(context).not.toContain("内容创作流程（方向）");
-    expect(context).not.toContain("朋友圈语气（风格）");
+    expect(context).toContain("适用目标：artifact");
+    expect(context).toContain("## Skill: 结构审读");
+    expect(context).toContain("适用目标：options/next-step");
     expect(context).toContain("小红书标题：生成适合小红书的标题。");
+    expect(context).toContain("# 可用 Subagent 模板");
+    expect(context).toContain("资料核查模板：核查一个具体事实，并返回来源、结论和不确定性。");
     expect(context).toContain("get_weather：查询指定地点天气。");
+    expect(context.indexOf("# 可用 Subagent 模板")).toBeGreaterThan(context.indexOf("# 可加载 Skill 摘要"));
+    expect(context.indexOf("# 可用 Subagent 模板")).toBeLessThan(context.indexOf("# 可用工具和 MCP 能力"));
     expect(context).not.toContain("Seed：写一段天气文字");
     expect(context).not.toContain("用户喜欢具体、自然的表达。");
     expect(context).not.toContain("用户常写朋友圈短文。");
-    expect(context).not.toContain("Tritree");
-    expect(context).not.toContain("AI 调用");
+    expect(context).not.toContain("# 内容工作流阶段");
+    expect(context).not.toContain("AI Director");
   });
 });
 
 describe("agent instructions", () => {
-  it("asks the director to turn diagnosis into one question and three answers", () => {
-    const instructions = buildTreeOptionsInstructions(input);
+  it("keeps the main prompt as a generic ReAct shell", () => {
+    const instructions = [
+      buildTreeArtifactInstructions(shellInput),
+      buildTreeOptionsInstructions(shellInput),
+      buildTreeNextStepInstructions(shellInput)
+    ].join("\n\n---\n\n");
 
-    expect(instructions).toContain("先诊断当前内容最需要用户决定的一个问题");
-    expect(instructions).toContain("三个答案不是三个问题");
-    expect(instructions).toContain("按当前内容的问题程度和后续生成收益决定这个问题的优先级");
-    expect(instructions).toContain("不要预设必须询问某一类问题");
-    expect(instructions).toContain("文案表达、断句和分段整理是任何阶段都可以成为可选答案");
-    expect(instructions).toContain("表达本身已经承载了主要信息，只是长段、口语散、层次不清或局部不顺");
-    expect(instructions).toContain("可以给保留原意的表达优化答案");
-    expect(instructions).toContain("不要因为内容还没到发布前就排除这类答案");
-    expect(instructions).toContain("三个答案都要回应 roundIntent 里的同一个问题");
-    expect(instructions).toContain("description 写这个答案代表的取舍");
-    expect(instructions).toContain("impact 写选择后会让后续生成获得什么确定性");
-    expect(instructions).toContain("不要返回独立审查报告");
+    expect(instructions).toContain("你是通用 ReAct agent");
+    expect(instructions).toContain("系统提示词只定义执行边界、工具协议和最终提交契约");
+    expect(instructions).toContain("开始实际工作前，先判断本轮应加载哪些 Skill");
+    expect(instructions).toContain("被选中 Skill 的职责和标准");
+    expect(instructions).toContain("优先由主 agent 负责推进");
+    expect(instructions).toContain("当本轮目标明确要求查找、核查、补充证据、找来源或确认外部信息时");
+    expect(instructions).toContain("优先使用可用工具获取或核验材料");
+    expect(instructions).toContain("优先使用 run_subagent_template");
+    expect(instructions).toContain("才使用 run_custom_subagent");
+    expect(instructions).toContain("调用 subagent 时给出短任务、期望输出和必要约束");
+    expect(instructions).toContain("运行时会为 subagent 提供当前上下文视图");
+    expect(instructions).toContain("subagent 作为工具使用，其返回值不是最终判断");
+    expect(instructions).toContain("必须检查工具返回值");
+    expect(instructions).toContain("不要把“已调用工具或 subagent”当作本轮完成");
+    expect(instructions).toContain("submit_tree_options");
+    expect(instructions).not.toContain("临时");
+    expect(instructions).not.toContain("# 内容工作流阶段");
+    expect(instructions).not.toContain("# 总导演任务");
+    expect(instructions).not.toContain("# 产物生成任务");
+
+    for (const businessPhrase of [
+      "创作状态",
+      "创作 seed",
+      "当前作品",
+      "读者",
+      "主线",
+      "事实缺口",
+      "审稿材料",
+      "发散：",
+      "平衡：",
+      "专注：",
+      "发布前",
+      "写作者"
+    ]) {
+      expect(instructions).not.toContain(businessPhrase);
+    }
   });
 
-  it("uses separate writer and director roles without leaking the tree choice mechanic", () => {
-    const draftInstructions = buildTreeDraftInstructions(input);
-    const optionsInstructions = buildTreeOptionsInstructions(input);
+  it("keeps target differences limited to final tool contracts", () => {
+    const artifactInstructions = buildTreeArtifactInstructions(shellInput);
+    const optionsInstructions = buildTreeOptionsInstructions(shellInput);
+    const nextStepInstructions = buildTreeNextStepInstructions(shellInput);
 
-    expect(draftInstructions.startsWith("# 作者任务")).toBe(true);
-    expect(draftInstructions).toContain("作者");
-    expect(draftInstructions).toContain("用户想要完成的写作意图");
-    expect(draftInstructions).toContain("只生成新的内容版本");
-    expect(draftInstructions).toContain("对话中已形成的草稿");
-    expect(draftInstructions).toContain("以最新已形成的草稿作为本轮改写对象");
-    expect(draftInstructions).toContain("用户明确确认过的表达");
-    expect(draftInstructions).not.toContain("当前内容是唯一写作基线");
-    expect(draftInstructions).not.toContain("不可改动的用户原文");
-    expect(draftInstructions).not.toContain("用户本轮意图和补充要求优先于上一版草稿");
-    expect(draftInstructions).toContain("必须遵守已启用 Skills");
-    expect(draftInstructions).toContain("# 本任务执行规则");
-    expect(draftInstructions).toContain("# 输出要求");
-    expect(draftInstructions).toContain("# 输出前检查");
-    expect(draftInstructions).toContain("要求：种子或零散想法阶段可以大幅组织材料");
-    expect(draftInstructions).toContain("如果本轮列出了可用工具和 MCP 能力，可以按需调用");
-    expect(draftInstructions).toContain("未列出时不要假设可以查询外部信息");
-    expect(draftInstructions).toContain("本任务产出的用户可见字段包括：roundIntent、draft.title、draft.body、draft.hashtags 和 draft.imagePrompt");
-    expect(draftInstructions).toContain("如果 Skill 要求固定文本、格式、语气或其他可观察结果，最终返回字段里必须能直接看见对应结果");
-    expect(draftInstructions).toContain("这里的输出要求指结构化结果或最终提交工具参数里的字段，不是额外自然语言消息");
-    expect(draftInstructions).toContain("最终结构化结果必须覆盖：本轮意图、标题、正文、话题和配图提示");
-    expect(draftInstructions).toContain("已启用 Skills 明确要求的非中文文本除外");
-    expect(draftInstructions).toContain("确认每个已启用 Skill 的要求已落实");
-    expect(draftInstructions.indexOf("# 已启用 Skills")).toBeGreaterThan(draftInstructions.indexOf("# 作者任务"));
-    expect(draftInstructions.indexOf("# 已启用 Skills")).toBeLessThan(draftInstructions.indexOf("# 本任务执行规则"));
-    expect(draftInstructions.indexOf("# 本任务执行规则")).toBeLessThan(draftInstructions.indexOf("# 输出要求"));
-    expect(draftInstructions.indexOf("# 输出要求")).toBeLessThan(draftInstructions.indexOf("# 输出前检查"));
-    expect(draftInstructions).not.toContain("所有面向用户的字段都必须使用简体中文。");
-    expect(draftInstructions).not.toContain("Treeable");
-    expect(draftInstructions).not.toContain("Tritree");
-    expect(draftInstructions).not.toContain("产品机制");
-    expect(draftInstructions).not.toContain("AI Director");
-    expect(draftInstructions).not.toContain("三选一");
-    expect(draftInstructions).not.toContain("one-of-three");
-    expect(draftInstructions).not.toContain("AI 调用");
-    expect(draftInstructions).not.toContain("返回内容需要包含");
-    expect(draftInstructions).not.toContain("Seed：写一段天气文字");
-    expect(draftInstructions).not.toContain("用户喜欢具体、自然的表达。");
+    expect(artifactInstructions.startsWith("# ReAct Agent")).toBe(true);
+    expect(artifactInstructions).toContain("本轮固定目标：提交 artifact 结果");
+    expect(artifactInstructions).toContain("submit_tree_artifact");
+    expect(artifactInstructions).toContain("artifact.type、artifact.payload 和 artifact.sourceArtifactIds");
+    expect(artifactInstructions).not.toContain("# 三选一交互协议");
 
-    expect(optionsInstructions.startsWith("# 总导演任务")).toBe(true);
-    expect(optionsInstructions).toContain("澄清问题设计者");
-    expect(optionsInstructions).toContain("初始内容");
-    expect(optionsInstructions).toContain("修改历程");
-    expect(optionsInstructions).toContain("当前内容");
-    expect(optionsInstructions).toContain("一个当前最值得让用户回答的问题");
-    expect(optionsInstructions).not.toContain("已出现过的建议标题");
-    expect(optionsInstructions).toContain("三个答案的标题和处理角度要有明显区别");
-    expect(optionsInstructions).toContain("如果审稿材料里包含“方向范围”");
-    expect(optionsInstructions).toContain("把它当作本轮创作发散度");
-    expect(optionsInstructions).toContain("发散：同一个问题下");
-    expect(optionsInstructions).toContain("平衡：同一个问题下");
-    expect(optionsInstructions).toContain("专注：同一个问题下");
-    expect(optionsInstructions).not.toContain("先按它决定三个建议之间的距离");
-    expect(optionsInstructions).not.toContain("近、中、远的推进梯度");
-    expect(optionsInstructions).not.toContain("近距离处理办法");
-    expect(optionsInstructions).toContain("必须遵守已启用 Skills");
-    expect(optionsInstructions).toContain("# 本任务执行规则");
-    expect(optionsInstructions).toContain("# 输出要求");
-    expect(optionsInstructions).toContain("# 输出前检查");
-    expect(optionsInstructions).toContain("要求：种子或零散想法阶段可以大幅组织材料");
-    expect(optionsInstructions).toContain("如果本轮列出了可用工具和 MCP 能力，可以按需调用");
-    expect(optionsInstructions).toContain("未列出时不要假设可以查询外部信息");
-    expect(optionsInstructions).toContain("本任务产出的用户可见字段包括：roundIntent、options[].label、options[].description 和 options[].impact");
-    expect(optionsInstructions).toContain("如果 Skill 要求固定文本、格式、语气或其他可观察结果，最终返回字段里必须能直接看见对应结果");
-    expect(optionsInstructions).toContain("这里的输出要求指结构化结果或最终提交工具参数里的字段，不是额外自然语言消息");
-    expect(optionsInstructions).toContain("最终结构化结果还必须覆盖一句本轮问题判断");
-    expect(optionsInstructions).toContain("已启用 Skills 明确要求的非中文文本除外");
-    expect(optionsInstructions).toContain("确认每个已启用 Skill 的要求已落实");
-    expect(optionsInstructions.indexOf("# 已启用 Skills")).toBeGreaterThan(optionsInstructions.indexOf("# 责任编辑任务"));
-    expect(optionsInstructions.indexOf("# 已启用 Skills")).toBeLessThan(optionsInstructions.indexOf("# 本任务执行规则"));
-    expect(optionsInstructions.indexOf("# 本任务执行规则")).toBeLessThan(optionsInstructions.indexOf("# 输出要求"));
-    expect(optionsInstructions.indexOf("# 输出要求")).toBeLessThan(optionsInstructions.indexOf("# 输出前检查"));
-    expect(optionsInstructions).not.toContain("所有面向用户的字段都必须使用简体中文。");
-    expect(optionsInstructions).not.toContain("Treeable");
-    expect(optionsInstructions).not.toContain("Tritree");
-    expect(optionsInstructions).not.toContain("产品机制");
-    expect(optionsInstructions).not.toContain("options array");
-    expect(optionsInstructions).not.toContain("Option ids");
-    expect(optionsInstructions).not.toContain("AI Director");
-    expect(optionsInstructions).not.toContain("三选一");
-    expect(optionsInstructions).not.toContain("one-of-three");
-    expect(optionsInstructions).not.toContain("AI 调用");
-    expect(optionsInstructions).not.toContain("返回内容还需要包含");
-    expect(optionsInstructions).not.toContain("Seed：写一段天气文字");
-    expect(optionsInstructions).not.toContain("用户喜欢具体、自然的表达。");
+    expect(optionsInstructions.startsWith("# ReAct Agent")).toBe(true);
+    expect(optionsInstructions).toContain("本轮固定目标：提交 options 结果");
+    expect(optionsInstructions).toContain("# 三选一交互协议");
+    expect(optionsInstructions).toContain("三个 option 都必须回答同一个 roundIntent");
+    expect(optionsInstructions).toContain("submit_tree_options");
+    expect(optionsInstructions).toContain("options[].label、options[].description 和 options[].impact");
+
+    expect(nextStepInstructions.startsWith("# ReAct Agent")).toBe(true);
+    expect(nextStepInstructions).toContain("本轮固定目标：提交 next-step 路由结果");
+    expect(nextStepInstructions).toContain("action 只能是 options、artifact 或 complete");
+    expect(nextStepInstructions).toContain("流程和阶段标签用于帮助理解本轮任务所处位置");
+    expect(nextStepInstructions).toContain("不是单向状态机");
+    expect(nextStepInstructions).toContain("先判断本轮任务产出了什么、用户接下来是否需要选择");
+    expect(nextStepInstructions).toContain("资料、搜索、参考、素材收集、分析、审稿或比较之后");
+    expect(nextStepInstructions).toContain("后续 artifact 阶段负责生成作品内容");
+    expect(nextStepInstructions).not.toContain("刚完成的阶段");
+    expect(nextStepInstructions).not.toContain("中间阶段");
+    expect(nextStepInstructions).toContain("submit_tree_next_step");
+
+    expect(artifactInstructions.indexOf("# 可用 Skills")).toBeGreaterThan(artifactInstructions.indexOf("# ReAct Agent"));
+    expect(artifactInstructions.indexOf("# ReAct 执行协议")).toBeGreaterThan(artifactInstructions.indexOf("# 可用 Skills"));
+    expect(artifactInstructions.indexOf("# 本轮固定目标")).toBeGreaterThan(artifactInstructions.indexOf("# ReAct 执行协议"));
+    expect(artifactInstructions.indexOf("# 输出契约")).toBeGreaterThan(artifactInstructions.indexOf("# 本轮固定目标"));
   });
 });

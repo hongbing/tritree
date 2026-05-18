@@ -1,6 +1,6 @@
 import { logTritreeAiDebug } from "@/lib/ai/debug-log";
 import { streamDirectorOptions } from "@/lib/ai/director-stream";
-import { summarizeCurrentDraftOptionsForDirector } from "@/lib/app-state";
+import { summarizeCurrentArtifactOptionsForDirector } from "@/lib/app-state";
 import type { getRepository } from "@/lib/db/repository";
 import type { OptionGenerationMode, SessionState } from "@/lib/domain";
 
@@ -35,11 +35,14 @@ export async function streamOptionsForNode({
     optionMode
   });
 
-  const output = await streamDirectorOptions(summarizeCurrentDraftOptionsForDirector(state, optionMode), {
+  const output = await streamDirectorOptions(summarizeCurrentArtifactOptionsForDirector(state, optionMode), {
     memory: { resource: rootMemoryId, thread: sessionId },
     signal,
     onReasoningText(event) {
       send({ type: "thinking", nodeId, text: event.accumulatedText });
+    },
+    onProcessData(data) {
+      send({ type: "process_data", nodeId, data });
     },
     onText(event) {
       if (!event.partialOptions) return;

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MAX_SKILL_PROMPT_LENGTH, type Skill, type SkillCategory, type SkillUpsert } from "@/lib/domain";
+import { orderSkillsForDisplay } from "@/lib/skills/skill-order";
 
 const emptyForm: SkillUpsert = {
   title: "",
@@ -12,6 +13,7 @@ const emptyForm: SkillUpsert = {
   defaultEnabled: false,
   isArchived: false
 };
+const skillCategoryOptions = ["方向", "约束", "风格", "平台", "检查"] as const satisfies readonly SkillCategory[];
 
 type EditingState =
   | { mode: "create"; skillId: null }
@@ -177,6 +179,21 @@ export function SkillLibraryPanel({
               value={form.title}
             />
           </label>
+          <label>
+            <span>分类</span>
+            <select
+              aria-label="分类"
+              disabled={isSaving}
+              onChange={(event) => setForm((current) => ({ ...current, category: event.target.value as SkillCategory }))}
+              value={form.category}
+            >
+              {skillCategoryOptions.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </label>
           <fieldset aria-label="作用方式" className="skill-editor__effect">
             <legend>作用方式</legend>
             <label className="skill-editor__check">
@@ -186,7 +203,7 @@ export function SkillLibraryPanel({
                 onChange={(event) => toggleAppliesTo("writer", event.target.checked)}
                 type="checkbox"
               />
-              <span>影响草稿</span>
+              <span>影响内容更新</span>
             </label>
             <label className="skill-editor__check">
               <input
@@ -195,7 +212,7 @@ export function SkillLibraryPanel({
                 onChange={(event) => toggleAppliesTo("editor", event.target.checked)}
                 type="checkbox"
               />
-              <span>影响建议</span>
+              <span>影响方向判断</span>
             </label>
           </fieldset>
           <label>
@@ -281,20 +298,20 @@ export function SkillLibraryPanel({
 }
 
 function effectLabelFor(appliesTo: Skill["appliesTo"]) {
-  if (appliesTo === "writer") return "影响：草稿";
-  if (appliesTo === "editor") return "影响：建议";
-  return "影响：草稿、建议";
+  if (appliesTo === "writer") return "作用：内容更新";
+  if (appliesTo === "editor") return "作用：方向判断";
+  return "作用：全程";
 }
 
 function groupSkills(skills: Skill[]) {
   const groups = [
-    ["影响草稿", "writer"],
-    ["影响建议", "editor"],
-    ["影响草稿和建议", "both"]
+    ["内容更新", "writer"],
+    ["方向判断", "editor"],
+    ["全程", "both"]
   ] as const;
 
   return groups
-    .map(([label, appliesTo]) => [label, skills.filter((skill) => skill.appliesTo === appliesTo)] as const)
+    .map(([label, appliesTo]) => [label, orderSkillsForDisplay(skills.filter((skill) => skill.appliesTo === appliesTo))] as const)
     .filter(([, groupSkills]) => groupSkills.length > 0);
 }
 

@@ -37,9 +37,9 @@ export function summarizeTritreeStreamEventForLog(value: unknown) {
     );
   }
 
-  if (isDebugRecord(value.draft)) {
-    summary.draftTitle = typeof value.draft.title === "string" ? value.draft.title : "";
-    summary.draftBodyChars = typeof value.draft.body === "string" ? value.draft.body.length : 0;
+  if (isDebugRecord(value.artifact)) {
+    summary.artifactType = typeof value.artifact.type === "string" ? value.artifact.type : "";
+    summary.artifactId = typeof value.artifact.id === "string" ? value.artifact.id : "";
   }
 
   if (isDebugRecord(value.state)) {

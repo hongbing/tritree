@@ -3,14 +3,45 @@ import {
   DEFAULT_KIMI_BASE_URL,
   DEFAULT_KIMI_MODEL,
   buildDirectorInput,
+  DirectorArtifactOutputSchema,
+  DirectorNextStepOutputSchema,
   getDirectorAuthToken,
   getDirectorBaseUrl,
   getDirectorModel,
-  parseDirectorDraftText,
+  parseDirectorArtifactText,
   parseDirectorOptionsOutput,
   parseDirectorOptionsText,
   parseDirectorOutput
 } from "./director";
+import { DIRECTOR_ARTIFACT_SYSTEM_PROMPT, DIRECTOR_OPTIONS_SYSTEM_PROMPT, type DirectorInputParts } from "./prompts";
+
+describe("director artifact schemas", () => {
+  it("parses artifact output and no-artifact output", () => {
+    expect(DirectorArtifactOutputSchema.parse({
+      roundIntent: "形成微博",
+      artifact: { type: "social-post", payload: { title: "T", body: "B", hashtags: [], imagePrompt: "" } }
+    }).artifact?.type).toBe("social-post");
+
+    expect(DirectorNextStepOutputSchema.parse({
+      action: "artifact",
+      roundIntent: "进入成稿"
+    }).action).toBe("artifact");
+
+    expect(() =>
+      DirectorNextStepOutputSchema.parse({
+        action: "artifact",
+        roundIntent: "进入成稿",
+        artifact: { type: "social-post", payload: { title: "T", body: "B", hashtags: [], imagePrompt: "" } }
+      })
+    ).toThrow();
+
+    expect(DirectorNextStepOutputSchema.parse({
+      action: "complete",
+      roundIntent: "这一步只判断",
+      artifact: null
+    }).artifact).toBeNull();
+  });
+});
 
 describe("parseDirectorOutput", () => {
   it("requires exactly three options", () => {
@@ -18,9 +49,8 @@ describe("parseDirectorOutput", () => {
       parseDirectorOutput({
         roundIntent: "Start",
         options: [],
-        draft: { title: "", body: "", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
+        artifact: { type: "social-post", payload: { title: "", body: "", hashtags: [], imagePrompt: "" } },
+        finishAvailable: false
       })
     ).toThrow("AI suggestions must include exactly three items.");
   });
@@ -30,7 +60,7 @@ describe("parseDirectorOutput", () => {
       id: "a",
       label: "Explore",
       description: "Open a fresh direction.",
-      impact: "The next draft will add range.",
+      impact: "The next work will add range.",
       kind: "explore"
     };
 
@@ -42,9 +72,8 @@ describe("parseDirectorOutput", () => {
           { ...option, label: "Deepen" },
           { ...option, label: "Reframe" }
         ],
-        draft: { title: "", body: "", hashtags: [], imagePrompt: "" },
-        finishAvailable: false,
-        publishPackage: null
+        artifact: { type: "social-post", payload: { title: "", body: "", hashtags: [], imagePrompt: "" } },
+        finishAvailable: false
       })
     ).toThrow("AI suggestions must include IDs a, b, and c exactly once.");
   });
@@ -62,7 +91,7 @@ describe("parseDirectorOptionsOutput", () => {
     });
 
     expect(parsed.roundIntent).toBe("生成下一步");
-    expect(parsed).not.toHaveProperty("draft");
+    expect(parsed).not.toHaveProperty("work");
   });
 
   it("rejects duplicated option IDs in an options-only response", () => {
@@ -101,35 +130,59 @@ describe("parseDirectorOptionsText", () => {
 });
 
 describe("buildDirectorInput", () => {
-  it("includes root memory, selected option, and draft without tree path context", () => {
-    const input = buildDirectorInput({
+  it("keeps base director prompt language artifact-generic", () => {
+    const promptText = [
+      DIRECTOR_OPTIONS_SYSTEM_PROMPT,
+      DIRECTOR_ARTIFACT_SYSTEM_PROMPT,
+      buildTestDirectorInput({
+        rootSummary: "Seed：一个内容念头",
+        learnedSummary: "",
+        currentArtifact: "",
+        pathSummary: "",
+        foldedSummary: "",
+        selectedOptionLabel: "",
+        enabledSkills: []
+      })
+    ].join("\n");
+
+    expect(promptText).not.toContain("social media work");
+    expect(promptText).not.toContain("current work");
+    expect(promptText).not.toContain("work result");
+    expect(promptText).not.toContain("社媒内容。按默认社交媒体作品结构输出");
+    expect(promptText).not.toContain("作品生成");
+    expect(promptText).toContain("# Current Visible Result");
+  });
+
+  it("includes root memory, selected option, and work without tree path context", () => {
+    const input = buildTestDirectorInput({
       rootSummary: "Seed：我想写 AI 产品经理的真实困境",
       learnedSummary: "Prefers practical choices.",
-      currentDraft: "Draft body",
+      currentArtifact: "Work body",
       pathSummary: "Round 1: selected A",
       foldedSummary: "Round 1: folded B, C",
       selectedOptionLabel: "Make it sharper",
       enabledSkills: []
     });
 
-    expect(input).toContain("创作 seed");
+    expect(input).toContain("# Initial Input");
     expect(input).toContain("我想写 AI 产品经理的真实困境");
     expect(input).toContain("Make it sharper");
-    expect(input).toContain("Draft body");
+    expect(input).toContain("Work body");
     expect(input).not.toContain("Round 1: selected A");
     expect(input).not.toContain("Round 1: folded B, C");
     expect(input).not.toContain("已选路径");
     expect(input).not.toContain("未选方向");
-    expect(input).toContain("暂无已选技能。");
-    expect(input).toContain("所有面向用户的字段都必须使用简体中文");
+    expect(input).toContain("暂无已选 Skills。");
+    expect(input).toContain("本消息只提供上下文数据，不定义业务策略");
+    expect(input).not.toContain("所有面向用户的字段都必须使用简体中文");
     expect(input).not.toContain("根系记忆");
   });
 
   it("uses no-selected-direction fallback text when context is empty", () => {
-    const input = buildDirectorInput({
+    const input = buildTestDirectorInput({
       rootSummary: "Seed：一个内容念头",
       learnedSummary: "",
-      currentDraft: "",
+      currentArtifact: "",
       pathSummary: "",
       foldedSummary: "",
       selectedOptionLabel: "",
@@ -137,18 +190,18 @@ describe("buildDirectorInput", () => {
     });
 
     expect(input).toContain("暂无已学习偏好。");
-    expect(input).toContain("暂无已选技能。请基于 seed、草稿和用户选择继续判断创作下一步。");
-    expect(input).toContain("还没有选择答案。请先判断 seed 和当前草稿最需要创作者澄清、选择或推进什么");
-    expect(input).toContain("暂无草稿。");
+    expect(input).toContain("暂无已选 Skills。");
+    expect(input).toContain("本轮没有用户已选答案。");
+    expect(input).toContain("暂无。");
     expect(input).not.toContain("暂无已选路径。");
     expect(input).not.toContain("暂无未选方向。");
   });
 
   it("includes enabled skills in the director input", () => {
-    const input = buildDirectorInput({
+    const input = buildTestDirectorInput({
       rootSummary: "Seed：写作为什么重要",
       learnedSummary: "",
-      currentDraft: "",
+      currentArtifact: "",
       pathSummary: "",
       foldedSummary: "",
       selectedOptionLabel: "",
@@ -169,7 +222,7 @@ describe("buildDirectorInput", () => {
       ]
     });
 
-    expect(input).toContain("已选技能");
+    expect(input).toContain("# Active Skills");
     expect(input).toContain("理清主线");
     expect(input).toContain("帮助创作者判断这篇作品最重要的表达主线、写作动机和取舍边界。");
     expect(input).not.toContain("候选池包括");
@@ -177,10 +230,10 @@ describe("buildDirectorInput", () => {
   });
 
   it("organizes selected skills as a usable protocol instead of a flat dump", () => {
-    const input = buildDirectorInput({
+    const input = buildTestDirectorInput({
       rootSummary: "Seed：写作为什么重要",
       learnedSummary: "",
-      currentDraft: "标题：写作为什么重要\n正文：写作让我想清楚事情。",
+      currentArtifact: "标题：写作为什么重要\n正文：写作让我想清楚事情。",
       pathSummary: "",
       foldedSummary: "",
       selectedOptionLabel: "继续完善",
@@ -214,9 +267,8 @@ describe("buildDirectorInput", () => {
       ]
     });
 
-    expect(input).toContain("# 已选技能");
-    expect(input).toContain("已选技能是创作判断镜头");
-    expect(input).toContain("按需要使用相关技能");
+    expect(input).toContain("# Active Skills");
+    expect(input).toContain("以下 Skills 是本轮 active instructions");
     expect(input).toContain("技能 1：理清主线");
     expect(input).toContain("说明：判断作品真正要表达什么。");
     expect(input).toContain("提示词：\n帮助创作者判断这篇作品最重要的表达主线、写作动机和取舍边界。");
@@ -225,10 +277,10 @@ describe("buildDirectorInput", () => {
   });
 
   it("does not force solution-level option wording when using selected skills", () => {
-    const input = buildDirectorInput({
+    const input = buildTestDirectorInput({
       rootSummary: "Seed：一个 AI 工具名字的双关念头",
       learnedSummary: "",
-      currentDraft: "标题：种子念头\n正文：这个名字有个双关。",
+      currentArtifact: "标题：种子念头\n正文：这个名字有个双关。",
       pathSummary: "",
       foldedSummary: "",
       selectedOptionLabel: "",
@@ -262,18 +314,18 @@ describe("buildDirectorInput", () => {
       ]
     });
 
-    expect(input).toContain("按当前作品需要使用已选技能");
+    expect(input).toContain("以下 Skills 是本轮 active instructions");
     expect(input).not.toContain("标题要直接呈现要做的事");
     expect(input).not.toContain("会怎么改");
     expect(input).not.toContain("处理方式");
   });
 
-  it("asks for branch-level options without repeating previous labels or over-splitting details", () => {
-    const input = buildDirectorInput({
+  it("keeps option strategy out of the context packet", () => {
+    const input = buildTestDirectorInput({
       rootSummary: "Seed：写值班带来的变化",
       learnedSummary: "",
-      currentDraft: "标题：值班改变了我\n正文：先写了一个值班现场。",
-      pathSummary: "第 1 轮：先完成草稿；选择 b\n第 2 轮：补充值班现场；选择 a",
+      currentArtifact: "标题：值班改变了我\n正文：先写了一个值班现场。",
+      pathSummary: "第 1 轮：先完成作品；选择 b\n第 2 轮：补充值班现场；选择 a",
       foldedSummary: "补充个人经验\n回应常见质疑",
       selectedOptionLabel: "写值班现场细节: 继续补现场画面",
       enabledSkills: []
@@ -281,25 +333,28 @@ describe("buildDirectorInput", () => {
 
     expect(input).not.toContain("已选路径");
     expect(input).not.toContain("未选方向");
-    expect(input).toContain("选项以创作决策或回答口径为主");
-    expect(input).toContain("可以包含轻量收尾项");
-    expect(input).toContain("避免三个答案都变成同一段内容里的局部细节");
-    expect(input).toContain("三个答案在关键词和动作上保持差异");
+    expect(input).toContain("# Runtime Input");
+    expect(input).toContain("写值班现场细节: 继续补现场画面");
+    expect(input).not.toContain("选项以创作决策或回答口径为主");
+    expect(input).not.toContain("可以包含轻量收尾项");
+    expect(input).not.toContain("避免三个答案都变成同一段内容里的局部细节");
+    expect(input).not.toContain("三个答案在关键词和动作上保持差异");
   });
 
-  it("frames options as creator decisions rather than editing tasks", () => {
-    const input = buildDirectorInput({
+  it("does not encode creator workflow rules in the context packet", () => {
+    const input = buildTestDirectorInput({
       rootSummary: "Seed：解释 Tritree 命名为什么让我想把项目做出来",
       learnedSummary: "",
-      currentDraft: "标题：Tritree 的命名\n正文：这个名字同时有三叉树和 try tree 的双关。",
+      currentArtifact: "标题：Tritree 的命名\n正文：这个名字同时有三叉树和 try tree 的双关。",
       pathSummary: "",
       foldedSummary: "",
       selectedOptionLabel: "",
       enabledSkills: []
     });
 
-    expect(input).toContain("创作者澄清、选择或推进什么");
-    expect(input).toContain("创作决策或回答口径");
+    expect(input).toContain("本消息只提供上下文数据，不定义业务策略");
+    expect(input).not.toContain("创作者澄清、选择或推进什么");
+    expect(input).not.toContain("创作决策或回答口径");
     expect(input).not.toContain("重组表达顺序");
     expect(input).not.toContain("补充个人经验");
     expect(input).not.toContain("回应常见质疑");
@@ -316,6 +371,10 @@ describe("getDirectorModel", () => {
     expect(getDirectorModel({ KIMI_MODEL: "kimi-custom" })).toBe("kimi-custom");
   });
 });
+
+function buildTestDirectorInput(parts: Omit<DirectorInputParts, "artifactContext" | "messages"> & Partial<Pick<DirectorInputParts, "artifactContext" | "messages">>) {
+  return buildDirectorInput({ artifactContext: "", messages: [], ...parts });
+}
 
 describe("getDirectorBaseUrl", () => {
   it("defaults to Moonshot's Anthropic-compatible endpoint", () => {
@@ -336,17 +395,17 @@ describe("getDirectorAuthToken", () => {
   });
 });
 
-describe("parseDirectorDraftText", () => {
-  it("parses a complete draft JSON string", () => {
-    const parsed = parseDirectorDraftText(
+describe("parseDirectorArtifactText", () => {
+  it("parses a complete artifact JSON string", () => {
+    const parsed = parseDirectorArtifactText(
       JSON.stringify({
         roundIntent: "扩写",
-        draft: { title: "新标题", body: "新正文", hashtags: ["#AI"], imagePrompt: "新图" },
+        artifact: { type: "social-post", payload: { title: "新标题", body: "新正文", hashtags: ["#AI"], imagePrompt: "新图" } },
       })
     );
 
-    expect(parsed.draft.body).toBe("新正文");
+    expect(parsed.artifact?.payload).toMatchObject({ body: "新正文" });
     expect(parsed).not.toHaveProperty("finishAvailable");
-    expect(parsed).not.toHaveProperty("publishPackage");
+    expect(parsed).not.toHaveProperty("deliveryBundle");
   });
 });

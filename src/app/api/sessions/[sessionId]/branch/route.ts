@@ -68,7 +68,8 @@ export async function POST(request: Request, context: { params: Promise<{ sessio
       return NextResponse.json({ error: "没有找到这个历史分支。" }, { status: 400 });
     }
 
-    const nextState = repository.createHistoricalDraftChild({
+    const nextState = repository.createArtifactChild({
+      artifact: null,
       userId: user.id,
       customOption: body.customOption,
       optionMode: body.optionMode,

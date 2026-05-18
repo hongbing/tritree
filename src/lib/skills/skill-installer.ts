@@ -260,9 +260,11 @@ function isStoredRuntimeMetadataLine(line: string) {
     trimmed.startsWith("此 Skill 已安装在：") ||
     trimmed.startsWith("来源：") ||
     trimmed === "Tritree 是当前 agent runtime。生成选项或草稿时，请按以下 SKILL.md 指令判断是否需要调用可用工具。" ||
+    trimmed === "Tritree 是当前 agent runtime。请按以下 SKILL.md 指令判断是否需要调用可用工具。" ||
     trimmed === "子 Skill 文档不会预先展开；需要更具体的平台流程、命令说明或风格规则时，先调用 load_skill_document 渐进加载对应 SKILL.md。" ||
     trimmed === "如果需要外部平台参考资料、账号状态或登录流程，可以调用 run_skill_command；命令会由 Tritree runtime 按当前 Skill execution mode 隔离运行。" ||
-    trimmed === "生成草稿或选项时，只调用与当前任务直接相关的命令；除非用户明确要求发布或互动，不要主动执行发布、评论、点赞、收藏等平台动作。"
+    trimmed === "生成草稿或选项时，只调用与当前任务直接相关的命令；除非用户明确要求发布或互动，不要主动执行发布、评论、点赞、收藏等平台动作。" ||
+    trimmed === "只调用与当前任务直接相关的命令；除非用户明确要求执行外部动作，否则只做读取、检查或整理类操作。"
   );
 }
 

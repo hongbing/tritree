@@ -6,20 +6,24 @@ export type SharedAgentContextInput = {
   longTermMemory?: string;
   enabledSkills: Skill[];
   availableSkillSummaries?: string[];
+  subagentTemplateSummaries?: string[];
   toolSummaries?: string[];
 };
 
-const SUBMIT_TREE_DRAFT_TOOL_NAME = "submit_tree_draft";
+const SUBMIT_TREE_ARTIFACT_TOOL_NAME = "submit_tree_artifact";
 const SUBMIT_TREE_NEXT_STEP_TOOL_NAME = "submit_tree_next_step";
 const SUBMIT_TREE_OPTIONS_TOOL_NAME = "submit_tree_options";
 
 export function buildSharedAgentContext(input: SharedAgentContextInput) {
   return [
-    "# 已启用 Skills",
+    "# 可用 Skills",
     formatSkillUsageInstructions(),
     input.enabledSkills.length > 0 ? formatEnabledSkills(input.enabledSkills) : "暂无已启用 Skills。",
     input.availableSkillSummaries?.length
       ? ["# 可加载 Skill 摘要", input.availableSkillSummaries.join("\n")].join("\n")
+      : "",
+    input.subagentTemplateSummaries?.length
+      ? ["# 可用 Subagent 模板", input.subagentTemplateSummaries.join("\n")].join("\n")
       : "",
     input.toolSummaries?.length ? ["# 可用工具和 MCP 能力", input.toolSummaries.join("\n")].join("\n") : ""
   ]
@@ -27,29 +31,24 @@ export function buildSharedAgentContext(input: SharedAgentContextInput) {
     .join("\n\n");
 }
 
-export function buildTreeDraftInstructions(input: SharedAgentContextInput) {
+export function buildTreeArtifactInstructions(input: SharedAgentContextInput) {
   return [
-    "# 作者任务",
-    "你是一位写作者/内容生成器。",
-    "你的任务是基于初始内容、对话中已形成的草稿、历史写作意图和用户想要完成的写作意图，生成新的内容版本。",
+    "# ReAct Agent",
+    formatGenericReactAgentRole(),
     buildSharedAgentContext(input),
-    "# 本任务执行规则",
-    "把用户想要完成的写作意图当作本轮写作目标，不需要解释它的来源。",
-    "把历史当作一路写作版本的演进：理解每一轮为什么改、改成了什么，再决定本轮应该怎样写。",
-    "以最新已形成的草稿作为本轮改写对象；历史只用于理解演进和偏好，不要回退、合并或恢复旧版本，除非用户明确要求。",
-    "必须遵守已启用 Skills；它们是本轮任务指令，不是可选参考资料。",
-    "如果本轮列出了可用工具和 MCP 能力，可以按需调用；未列出时不要假设可以查询外部信息。",
-    ...finalSubmitExecutionRules(input, "draft"),
-    "保留已形成草稿中已经成立的材料和用户明确确认过的表达，只改动对本轮写作意图有帮助的部分。",
-    "使用日常、清楚、有作品感的表达，避开抽象隐喻、玄学化前缀或未解释的行业黑话。",
-    "# 输出要求",
-    "只生成新的内容版本，不要给编辑建议。",
+    actualWorkExecutionProtocol(input),
+    "# 本轮固定目标",
+    "本轮固定目标：提交 artifact 结果。",
+    "根据输入上下文、已启用 Skills 和可用工具完成目标；具体领域判断由 Skills 提供。",
+    ...finalSubmitExecutionRules(input, "artifact"),
+    "# 输出契约",
     "这里的输出要求指结构化结果或最终提交工具参数里的字段，不是额外自然语言消息。",
-    "本任务产出的用户可见字段包括：roundIntent、draft.title、draft.body、draft.hashtags 和 draft.imagePrompt。",
+    "本轮用户可见字段包括：roundIntent、artifact.type、artifact.payload 和 artifact.sourceArtifactIds。",
+    "artifact.type 必须是本轮作品类型对应的产物类型；artifact.payload 必须遵守作品类型与输出结构里的字段、格式和交付要求。",
     "如果 Skill 要求固定文本、格式、语气或其他可观察结果，最终返回字段里必须能直接看见对应结果。",
-    "最终结构化结果必须覆盖：本轮意图、标题、正文、话题和配图提示。",
+    "最终结构化结果必须包含完整 artifact 对象。",
     "所有面向用户的字段默认使用简体中文；用户原文、专有名词、代码、品牌名和已启用 Skills 明确要求的非中文文本除外。",
-    "# 输出前检查",
+    "# 提交前检查",
     "确认每个已启用 Skill 的要求已落实到本任务产出的用户可见字段；不要因为结构化输出字段而忽略 Skill 要求。"
   ]
     .filter(Boolean)
@@ -58,42 +57,22 @@ export function buildTreeDraftInstructions(input: SharedAgentContextInput) {
 
 export function buildTreeOptionsInstructions(input: SharedAgentContextInput) {
   return [
-    "# 总导演任务",
-    "你是一位经验丰富的澄清问题设计者。",
-    "你的任务不是续写正文，而是阅读初始内容、修改历程和当前内容，提出一个当前最值得让用户回答的问题，并给出三个可选择答案。",
+    "# ReAct Agent",
+    formatGenericReactAgentRole(),
     buildSharedAgentContext(input),
-    "# 本任务执行规则",
-    "把历史当作一篇文章的编辑记录：初始内容是什么，经过了哪些修改，现在的内容走到了哪里。",
-    "先诊断当前内容最需要用户决定的一个问题，再把这个问题写进 roundIntent。",
-    "三个答案不是三个问题，而是对同一个问题的三个可选答案或解决口径。",
-    "按当前内容的问题程度和后续生成收益决定这个问题的优先级，不要预设必须询问某一类问题。",
-    "文案表达、断句和分段整理是任何阶段都可以成为可选答案；当表达本身已经承载了主要信息，只是长段、口语散、层次不清或局部不顺时，可以给保留原意的表达优化答案。",
-    "如果主线、读者、事实或结构问题更影响作品，就把问题聚焦在澄清、补信息、换角度或重组上；不要因为内容还没到发布前就排除这类答案。",
-    "问题和答案要帮助用户判断下一步最值得处理的表达、主线、信息、读者、结构或收尾问题。",
-    "三个答案都要回应 roundIntent 里的同一个问题，避免变成三个彼此无关的方向。",
-    "诊断要服务用户选择，不要返回独立审查报告。",
-    "必须遵守已启用 Skills；它们是本轮任务指令，不是可选参考资料。",
-    "如果本轮列出了可用工具和 MCP 能力，可以按需调用；未列出时不要假设可以查询外部信息。",
+    actualWorkExecutionProtocol(input),
+    threeChoiceProtocol(),
+    "# 本轮固定目标",
+    "本轮固定目标：提交 options 结果。",
+    "根据输入上下文、已启用 Skills 和可用工具完成目标；具体领域判断由 Skills 提供。",
     ...finalSubmitExecutionRules(input, "options"),
-    "如果审稿材料里包含“方向范围”，把它当作本轮创作发散度来理解。",
-    "发散：同一个问题下，三个答案可以覆盖更大胆的切入、结构、表达形式或读者场景，但仍要能从当前内容生长出来。",
-    "平衡：同一个问题下，给稳妥、自然、可执行的三个答案，不刻意跳远，也不只盯局部字句。",
-    "专注：同一个问题下，沿着当前稿已经成立的思路继续推进，优先补清楚、写顺、写实，不主动改换主题、读者、前提或基本结构。",
-    "三个答案的标题和处理角度要有明显区别，避免同义重复。",
-    "使用日常、清楚、可判断的表达，避开抽象隐喻、玄学化前缀或未解释的行业黑话。",
-    "# 输出要求",
-    "只给一个问题和三个答案，不改写正文。",
+    "# 输出契约",
     "这里的输出要求指结构化结果或最终提交工具参数里的字段，不是额外自然语言消息。",
-    "本任务产出的用户可见字段包括：roundIntent、options[].label、options[].description 和 options[].impact。",
+    "本轮用户可见字段包括：roundIntent、options[].label、options[].description 和 options[].impact。",
     "如果 Skill 要求固定文本、格式、语气或其他可观察结果，最终返回字段里必须能直接看见对应结果。",
-    "roundIntent 必须是一个用户可以直接回答的问题。",
-    "options[].label 写这个答案的短标题。",
-    "options[].description 写这个答案代表的取舍、事实口径或处理方式。",
-    "options[].impact 写选择后会让后续生成获得什么确定性，例如更清楚、更可信、更有读者感、更可执行或更接近交付。",
-    "每个答案都要有短标题、具体说明和预计影响。",
-    "最终结构化结果还必须覆盖一句本轮问题判断。",
+    "最终结构化结果必须包含一个 roundIntent 和正好三个 options。",
     "所有面向用户的字段默认使用简体中文；用户原文、专有名词、代码、品牌名和已启用 Skills 明确要求的非中文文本除外。",
-    "# 输出前检查",
+    "# 提交前检查",
     "确认每个已启用 Skill 的要求已落实到本任务产出的用户可见字段；不要因为结构化输出字段而忽略 Skill 要求。"
   ]
     .filter(Boolean)
@@ -102,37 +81,86 @@ export function buildTreeOptionsInstructions(input: SharedAgentContextInput) {
 
 export function buildTreeNextStepInstructions(input: SharedAgentContextInput) {
   return [
-    "# 总导演任务",
-    "你负责在用户选择一个答案之后，决定下一步是继续澄清，还是授权生成草稿。",
-    "你不写正文，也不生成草稿内容；你只做路由决策。",
+    "# ReAct Agent",
+    formatGenericReactAgentRole(),
     buildSharedAgentContext(input),
-    "# 本任务执行规则",
-    "阅读初始内容、当前内容、历史写作意图、用户刚刚选择的答案和用户补充说明。",
-    "如果当前信息已经足够让写作者执行用户选择，返回 action=draft。",
-    "如果用户选择的是停在当前版本、无需继续、已经完成、直接交付，或当前最近草稿已经满足目标且不需要再写新版本，返回 action=complete。",
-    "如果用户选择的是补背景、补目标、补需求、确认范围、确认指标等需要事实判断的答案，但上下文没有对应事实，返回 action=options。",
-    "action=options 时，生成一个新的澄清问题和三个真正可选的答案，让用户继续做选择；不要把缺失事实写成已确认内容。",
-    "action=draft 时，只说明本轮写作意图，不要提供三个答案。",
-    "action=complete 时，只说明完成判断，不要提供三个答案，也不要生成草稿。",
-    "必须遵守已启用 Skills；它们是本轮任务指令，不是可选参考资料。",
-    "如果本轮列出了可用工具和 MCP 能力，可以按需调用；未列出时不要假设可以查询外部信息。",
+    actualWorkExecutionProtocol(input),
+    threeChoiceProtocol(),
+    "# 本轮固定目标",
+    "本轮固定目标：提交 next-step 路由结果。",
+    "根据输入上下文、已启用 Skills 和可用工具决定 action；具体领域判断由 Skills 提供。",
+    "# next-step 路由准则",
+    "流程和阶段标签用于帮助理解本轮任务所处位置；它们是交互提示，不是单向状态机。用户可以在任意时刻回到任一已启用 Skill 能处理的任务。",
+    "先判断本轮任务产出了什么、用户接下来是否需要选择，再选择 action。",
+    "action=options 表示需要用户在同一个新问题下选择下一步方向；适合资料、搜索、参考、素材收集、分析、审稿或比较之后，把结果转成可执行取舍。",
+    "action=artifact 表示下一步已经明确，可以直接生成或更新作品。",
+    "action=complete 表示当前请求已经可以收束，适合用户明确要求结束、发布、交付、停止继续澄清，或当前目标已经没有可行动下一步。",
+    "当工具结果会影响用户选择或理解，且本轮可用过程数据展示工具时，先展示整理后的材料摘要，再提交 next-step 结果。",
     ...finalSubmitExecutionRules(input, "next-step"),
-    "# 输出要求",
+    "# 输出契约",
     "只返回结构化结果。",
-    "action 只能是 options、draft 或 complete。",
+    "action 只能是 options、artifact 或 complete。",
     "当 action=options 时，roundIntent 必须是一个新问题，并必须返回 options[].label、options[].description 和 options[].impact；不需要输出 id 或 kind，系统会自动把三个答案映射为 a、b、c。",
-    "当 action=draft 时，不返回 options；只返回 roundIntent。",
-    "当 action=complete 时，不返回 options；只返回 roundIntent。",
+    "当 action=artifact 时，只返回 action 和 roundIntent；后续 artifact 阶段负责生成作品内容。",
+    "当 action=complete 时，不返回 options；只返回 roundIntent，可以返回 artifact=null。",
     "所有面向用户的字段默认使用简体中文；用户原文、专有名词、代码、品牌名和已启用 Skills 明确要求的非中文文本除外。"
   ]
     .filter(Boolean)
     .join("\n\n");
 }
 
-function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "draft" | "next-step" | "options") {
+function formatGenericReactAgentRole() {
+  return [
+    "你是通用 ReAct agent。",
+    "系统提示词只定义执行边界、工具协议和最终提交契约；领域策略、内容判断和表达取舍来自输入上下文与已启用 Skills。",
+    "先理解本轮目标，再按需思考、调用工具、检查工具返回值，并用最终提交工具交付结果。"
+  ].join("\n");
+}
+
+function actualWorkExecutionProtocol(input: SharedAgentContextInput) {
+  const hasSubagentTools = input.toolSummaries?.some(
+    (summary) => summary.includes("run_subagent_template") || summary.includes("run_custom_subagent")
+  );
+  const lines = [
+    "# ReAct 执行协议",
+    "开始实际工作前，先判断本轮应加载哪些 Skill；选择后按被选中 Skill 的职责和标准执行。",
+    "当本轮目标明确要求查找、核查、补充证据、找来源或确认外部信息时，优先使用可用工具获取或核验材料；只有输入上下文已经提供足够具体且可追溯的材料时，才直接整理。",
+    "先判断本轮最有价值的实际工作，并优先由主 agent 负责推进；能直接完成判断、整理、改写或提交时，直接完成。"
+  ];
+
+  if (hasSubagentTools) {
+    lines.push(
+      "确实需要独立上下文、并且任务适合委托时，优先使用 run_subagent_template；只有没有匹配的预创建模板，且任务边界很窄、期望输出很明确时，才使用 run_custom_subagent。",
+      "subagent 作为工具使用，其返回值不是最终判断。调用任何工具或 subagent 后，必须检查工具返回值是否具体、相关、可信、足以支持本轮目标。"
+    );
+  } else {
+    lines.push("调用任何工具后，必须检查工具返回值是否具体、相关、可信、足以支持本轮目标。");
+  }
+
+  lines.push(
+    "如果工具返回值空泛、偏题、缺少依据或不足以推进，主 agent 要自己补足、改写任务后重试合适工具，或提交需要用户选择的 options。",
+    hasSubagentTools
+      ? "完成工具结果检查后，由主 agent 把可用信息整合成目标要求的最终结构化结果；不要把“已调用工具或 subagent”当作本轮完成。"
+      : "完成工具结果检查后，由主 agent 把可用信息整合成目标要求的最终结构化结果。",
+    ...(hasSubagentTools ? ["调用 subagent 时给出短任务、期望输出和必要约束；运行时会为 subagent 提供当前上下文视图。"] : [])
+  );
+
+  return lines.join("\n");
+}
+
+function threeChoiceProtocol() {
+  return [
+    "# 三选一交互协议",
+    "三选一是用户交互和显示协议：当本轮需要用户从三个可执行答案中选择时，先形成 decisionRationale，再把需要用户决定的问题写成 roundIntent。",
+    "三个 option 都必须回答同一个 roundIntent，不能变成三个彼此无关的新问题。",
+    "三个 option 要足够具体，让用户能直接比较选择后的影响。"
+  ].join("\n");
+}
+
+function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "artifact" | "next-step" | "options") {
   const toolName =
-    target === "draft"
-      ? SUBMIT_TREE_DRAFT_TOOL_NAME
+    target === "artifact"
+      ? SUBMIT_TREE_ARTIFACT_TOOL_NAME
       : target === "next-step"
         ? SUBMIT_TREE_NEXT_STEP_TOOL_NAME
         : SUBMIT_TREE_OPTIONS_TOOL_NAME;
@@ -141,7 +169,7 @@ function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "draf
   );
   if (!hasFinalSubmitTool) return [];
 
-  const taskName = target === "draft" ? "写作" : target === "next-step" ? "路由决策" : "澄清选项";
+  const taskName = target === "artifact" ? "产物生成" : target === "next-step" ? "路由决策" : "澄清选项";
   return [
     `本轮可用工具里包含 ${toolName} 时，最终目标就是调用 ${toolName} 完成本轮${taskName}任务；不要把最终结果写成普通文本。`,
     `调用 ${toolName} 前可以按需调用其他工具收集信息；一旦结果足够，直接把结构化字段作为 ${toolName} 的参数提交。`
@@ -150,8 +178,10 @@ function finalSubmitExecutionRules(input: SharedAgentContextInput, target: "draf
 
 function formatSkillUsageInstructions() {
   return [
-    "以下 Skills 已加载为本轮任务指令。",
-    "每个 Skill 的「说明」用于理解适用目的；每个 Skill 的「要求」都必须遵守。",
+    "以下 Skills 是本作品可用能力库，不代表本轮全部同时执行。",
+    "主 agent 每轮先判断本轮目标应加载哪个或哪些 Skill：通常选择一个主要角色或步骤 Skill，再按需叠加约束、风格或平台类 Skill。",
+    "被本轮选中的 Skill 的要求作为 active instructions；未选中的 Skill 只作为可选能力提示。",
+    "如果选中的是已安装 Skill 且需要未展开的子文档细节，先使用 load_skill_document 加载对应文档。",
     "如果 Skill 之间出现冲突，优先遵守用户本轮明确要求；仍冲突时，选择对当前任务更具体、更直接的要求。"
   ].join("\n");
 }
@@ -161,7 +191,11 @@ function formatEnabledSkills(skills: Skill[]) {
 
   return skills
     .map((skill) => {
-      const lines = [`## Skill: ${skill.title}`, `说明：${skill.description || "无补充说明。"}`];
+      const lines = [
+        `## Skill: ${skill.title}`,
+        `适用目标：${skillScopeLabel(skill.appliesTo)}`,
+        `说明：${skill.description || "无补充说明。"}`
+      ];
       const prompt = skill.prompt.trim();
       if (prompt) {
         lines.push(`要求：${prompt}`);
@@ -169,4 +203,10 @@ function formatEnabledSkills(skills: Skill[]) {
       return lines.join("\n");
     })
     .join("\n\n");
+}
+
+function skillScopeLabel(appliesTo: Skill["appliesTo"]) {
+  if (appliesTo === "writer") return "artifact";
+  if (appliesTo === "editor") return "options/next-step";
+  return "全程";
 }

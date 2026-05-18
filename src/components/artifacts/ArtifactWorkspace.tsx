@@ -39,6 +39,7 @@ export type ArtifactWorkspaceProps = {
   onCancelComparison?: () => void;
   onSave: (artifact: Artifact) => void | Promise<void>;
   onStartComparison?: () => void;
+  publishPlatforms?: string[];
   selectedArtifactId: string | null;
   streamingProcessMaterials?: ProcessMaterial[];
   thinkingText?: string;
@@ -61,6 +62,7 @@ export function ArtifactWorkspace({
   onCancelComparison,
   onSave,
   onStartComparison,
+  publishPlatforms,
   selectedArtifactId,
   streamingProcessMaterials = [],
   thinkingText
@@ -157,6 +159,7 @@ export function ArtifactWorkspace({
               onAction={(actionId, input) => onAction(actionId, selectedArtifact, input)}
               onSave={(payload) => onSave({ ...selectedArtifact, payload: payload ?? selectedArtifact.payload })}
               previousArtifact={previousArtifact}
+              publishPlatforms={publishPlatforms}
             />
           ) : (
             <ArtifactFallback artifact={selectedArtifact} />

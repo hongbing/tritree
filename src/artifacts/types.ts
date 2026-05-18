@@ -76,6 +76,7 @@ export type ArtifactRendererProps = {
   onAction?: (actionId: string, input: unknown) => void | Promise<void>;
   onSave?: (payload: unknown) => void | Promise<void>;
   previousArtifact?: Artifact | null;
+  publishPlatforms?: string[];
 };
 
 export type ArtifactRenderer = (props: ArtifactRendererProps) => ReactNode;

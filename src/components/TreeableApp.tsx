@@ -1613,6 +1613,12 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
   const comparisonLabels =
     comparisonFrom && comparisonTo ? { from: comparisonFrom.label, to: comparisonTo.label } : null;
   const changedArtifactNodeIds = changedArtifactNodeIdsForState(displaySessionState);
+  const selectedArtifactTypeId =
+    (effectiveSelectedArtifactId
+      ? fullDisplayArtifacts.find((a) => a.id === effectiveSelectedArtifactId)?.type
+      : null) ?? sessionState?.session.artifactTypeId ?? null;
+  const selectedArtifactPublishPlatforms = artifactTypes.find((t) => t.id === selectedArtifactTypeId)?.publishPlatforms;
+
   const toastRetryAction = canRetryArtifactGeneration
     ? {
         label: "重试生成",
@@ -1850,6 +1856,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
             comparisonSelectionCount={comparisonSelectionCount}
             currentNode={currentNodeForCanvas}
             generationStage={artifactGenerationStage}
+            publishPlatforms={selectedArtifactPublishPlatforms}
             headerActions={
               <button
                 aria-expanded={isSkillPanelOpen}

@@ -20,7 +20,8 @@ type DiffSegment = {
   type: "added" | "removed" | "same";
 };
 
-export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previousArtifact }: ArtifactRendererProps) {
+export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previousArtifact, publishPlatforms }: ArtifactRendererProps) {
+  const activePlatforms = (publishPlatforms?.length ? publishPlatforms : ["weibo", "xiaohongshu", "moments"]) as PublishPlatform[];
   const parsed = SocialPostPayloadSchema.safeParse(artifact.payload);
   const payload = parsed.success ? parsed.data : null;
   const previousPayload = previousArtifact?.type === artifact.type ? SocialPostPayloadSchema.safeParse(previousArtifact.payload) : null;
@@ -35,7 +36,7 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previou
   const [selectionInstruction, setSelectionInstruction] = useState("");
   const [isSelectionRewritePending, setIsSelectionRewritePending] = useState(false);
   const [isPublishPanelOpen, setIsPublishPanelOpen] = useState(false);
-  const [activePublishPlatform, setActivePublishPlatform] = useState<PublishPlatform>("weibo");
+  const [activePublishPlatform, setActivePublishPlatform] = useState<PublishPlatform>(() => activePlatforms[0] ?? "weibo");
   const [copiedPublishAction, setCopiedPublishAction] = useState<PublishCopyAction | null>(null);
   const [publishCopyError, setPublishCopyError] = useState("");
 
@@ -61,6 +62,10 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previou
     setCopiedPublishAction(null);
     setPublishCopyError("");
   }, [artifact.id, payload?.title, payload?.body, payload?.imagePrompt, payload?.hashtags.join("\u0000")]);
+
+  useEffect(() => {
+    setActivePublishPlatform((current) => (activePlatforms.includes(current) ? current : activePlatforms[0] ?? "weibo"));
+  }, [activePlatforms.join(",")]);
 
   if (!payload) {
     return (
@@ -203,21 +208,23 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previou
               <X aria-hidden="true" size={14} />
             </button>
           </div>
-          <div aria-label="发布平台" className="work-publish-tabs" role="group">
-            {(["weibo", "xiaohongshu", "moments"] as const).map((platform) => (
-              <button
-                aria-pressed={activePublishPlatform === platform}
-                key={platform}
-                onClick={() => {
-                  setActivePublishPlatform(platform);
-                  setCopiedPublishAction(null);
-                }}
-                type="button"
-              >
-                {publishPlatformLabel(platform)}
-              </button>
-            ))}
-          </div>
+          {activePlatforms.length > 1 ? (
+            <div aria-label="发布平台" className="work-publish-tabs" role="group">
+              {activePlatforms.map((platform) => (
+                <button
+                  aria-pressed={activePublishPlatform === platform}
+                  key={platform}
+                  onClick={() => {
+                    setActivePublishPlatform(platform);
+                    setCopiedPublishAction(null);
+                  }}
+                  type="button"
+                >
+                  {publishPlatformLabel(platform)}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <section className="work-publish-preview" aria-label={`${publishPlatformLabel(activePublishPlatform)}版预览`}>
             <div className="work-publish-preview__meta">
               <span>{publishPlatformLabel(activePublishPlatform)}版预览</span>
@@ -251,10 +258,12 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previou
               <Copy aria-hidden="true" size={13} />
               <span>{copiedPublishAction === activePublishPlatform ? "已复制" : `复制${publishPlatformLabel(activePublishPlatform)}文案`}</span>
             </button>
-            <button onClick={() => void copyPublishText("body")} type="button">
-              <Copy aria-hidden="true" size={13} />
-              <span>{copiedPublishAction === "body" ? "已复制" : "复制正文"}</span>
-            </button>
+            {activePlatforms.length > 1 ? (
+              <button onClick={() => void copyPublishText("body")} type="button">
+                <Copy aria-hidden="true" size={13} />
+                <span>{copiedPublishAction === "body" ? "已复制" : "复制正文"}</span>
+              </button>
+            ) : null}
           </div>
           {publishCopyError ? (
             <p className="work-publish-error" role="status">

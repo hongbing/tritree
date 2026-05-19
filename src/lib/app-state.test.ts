@@ -117,7 +117,7 @@ describe("summarizeSessionForDirector", () => {
     expect(workSummary.artifactContext).toContain("artifact.payload.markdown");
     expect(optionSummary.artifactContext).toContain("澄清问题和三个答案应该围绕 PRD 决策");
     expect(workMessages.at(-1)?.content).toContain("作品类型：PRD 文档");
-    expect(optionMessages.at(-1)?.content ?? optionMessages[0].content).toContain("作品类型：PRD 文档");
+    expect(JSON.stringify(optionMessages)).toContain("作品类型：PRD 文档");
   });
 
   it("keeps seed-only sessions from inventing a current artifact", () => {
@@ -151,7 +151,7 @@ describe("summarizeSessionForDirector", () => {
     expect(artifactSummary.currentArtifact).toBe("");
     expect(optionSummary.currentArtifact).toBe("");
     expect(artifactMessages[0].content).toContain("Seed：我想写 AI 产品经理的真实困境");
-    expect(optionMessages.at(-1)?.content ?? optionMessages[0].content).toContain("暂无内容。");
+    expect(optionMessages.at(-1)?.content ?? optionMessages[0].content).toContain("请基于初始内容和已有上下文");
     expect(optionMessages.at(-1)?.content ?? optionMessages[0].content).not.toContain("当前内容：\n标题：");
   });
 
@@ -344,7 +344,8 @@ describe("summarizeSessionForDirector", () => {
     expect(finalMessage).toContain("沿当前产物已经成立的思路继续推进");
     expect(finalMessage).not.toContain("不要主动改换主题、读者、前提或基本结构");
     expect(finalMessage).not.toContain("近距离的三种处理办法");
-    expect(finalMessage.indexOf("本轮要求：")).toBeLessThan(finalMessage.indexOf("当前内容："));
+    expect(finalMessage).not.toContain("当前内容：");
+    expect(finalMessage).toContain("请基于以上 AI 结果继续给出下一步三个可选推进方向。");
   });
 
   it("includes previous and current option labels so the director can avoid repeats", () => {
@@ -493,6 +494,32 @@ describe("summarizeSessionForDirector", () => {
     expectNoProcessTerms(finalMessage);
   });
 
+  it("keeps short custom directions as the original user wording in work generation", () => {
+    const state = createStateWithPath([
+      createNode({
+        id: "current",
+        roundIndex: 2,
+        options: [],
+        selectedOptionId: null
+      })
+    ]);
+    const selectedOption: BranchOption = {
+      id: "custom-manual",
+      label: "确认内容正确性",
+      description: "确认内容正确性",
+      impact: "按用户自定义方向继续生成。",
+      kind: "reframe"
+    };
+
+    const summary = summarizeSessionForDirector(state, selectedOption);
+    const messages = (summary as any).messages as Array<{ role: string; content: string }>;
+    const finalUserRequest = messages.at(-1)?.content ?? "";
+
+    expect(finalUserRequest).toBe("确认内容正确性");
+    expect(finalUserRequest).not.toContain("\n\n确认内容正确性");
+    expect(finalUserRequest).not.toContain("确认内容正确性: 确认内容正确性");
+  });
+
   it("puts the current generated artifact in assistant history instead of the final user request", () => {
     const state = createStateWithPath([
       createNode({
@@ -598,10 +625,13 @@ describe("summarizeSessionForDirector", () => {
     const summary = summarizeCurrentArtifactOptionsForDirector(state);
     const messages = (summary as any).messages as Array<{ role: string; content: string }>;
 
-    expect(messages.map((message) => message.role)).toEqual(["user"]);
+    expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
     expect(messages[0].content).toContain("初始内容：");
-    expect(messages[0].content).toContain("当前内容：");
-    expect(messages[0].content).toContain("本轮审稿材料：");
+    expect(messages[1].content).toContain("第 1 轮已形成产物");
+    expect(messages[1].content).toContain("标题：Work");
+    expect(messages[2].content).toContain("请基于以上 AI 结果继续给出下一步三个可选推进方向。");
+    expect(messages[2].content).not.toContain("当前内容：");
+    expect(messages[2].content).not.toContain("本轮审稿材料：");
     expect(messages[0].content).not.toContain("请作为责任编辑");
     expect(messages[0].content).not.toContain("提出三个建议");
     expect(messages[0].content).not.toContain("AI Director");
@@ -638,7 +668,7 @@ describe("summarizeSessionForDirector", () => {
     const messages = (summary as any).messages as Array<{ role: string; content: string }>;
     const finalMessage = messages.at(-1)?.content ?? "";
 
-    expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "user", "user"]);
+    expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "user", "assistant", "user"]);
     expect(messages[0].content).toContain("初始内容：");
     expect(messages[1].content).toContain("第 1 轮已形成产物");
     expect(messages[1].content).toContain("形成产物：");
@@ -646,10 +676,13 @@ describe("summarizeSessionForDirector", () => {
     expect(messages[1].content).not.toContain("答案标题：扩写完整经历；分析为什么写；确定写给谁看");
     expect(messages[2].content).toContain("用户选择：确定写给谁看");
     expect(messages[2].content).toContain("确定写给谁看的说明");
+    expect(messages[3].content).toContain("第 2 轮已形成产物");
+    expect(messages[3].content).toContain("正文：Body");
     expect(finalMessage).not.toContain("最近一次修改：确定写给谁看");
     expect(finalMessage).not.toContain("确定写给谁看的说明");
-    expect(finalMessage).toContain("当前内容：");
-    expect(finalMessage).toContain("本轮审稿材料：");
+    expect(finalMessage).not.toContain("当前内容：");
+    expect(finalMessage).not.toContain("本轮审稿材料：");
+    expect(finalMessage).toContain("请基于以上 AI 结果继续给出下一步三个可选推进方向。");
     expect(finalMessage).not.toContain("暂未采纳");
     expect(finalMessage).not.toContain("已出现过的建议");
     expect(finalMessage).not.toContain("扩写完整经历；分析为什么写");
@@ -715,6 +748,58 @@ describe("summarizeSessionForDirector", () => {
     expect(selectionIndex).toBeLessThan(chosenTurnToolIndex);
   });
 
+  it("keeps the current AI-generated artifact in assistant history before follow-up options", () => {
+    const state = createStateWithPath([
+      createNode({
+        id: "root",
+        roundIndex: 1,
+        options: [
+          option("a", "DeepSeek <think> 幻觉事件"),
+          option("b", "微塑料生活观察"),
+          option("c", "组织收缩期观察")
+        ],
+        selectedOptionId: "a"
+      }),
+      createNode({
+        id: "current",
+        parentId: "root",
+        parentOptionId: "a",
+        roundIndex: 2,
+        options: [],
+        selectedOptionId: null
+      })
+    ]);
+    const currentArtifact = socialPostArtifact("artifact-current", "current", {
+      title: "DeepSeek 对话泄露乌龙",
+      body: "但说实话，如果我是那个输入了`<think>`的普通用户，我看到模型突然开始讲别人的命理，我也会先截图再思考。",
+      hashtags: ["#DeepSeek"],
+      imagePrompt: "AI 对话框"
+    });
+    state.currentArtifact = currentArtifact;
+    state.artifacts = [state.artifacts[0], currentArtifact];
+    state.nodeArtifacts = [
+      { nodeId: "root", artifact: state.artifacts[0] },
+      { nodeId: "current", artifact: currentArtifact }
+    ];
+    state.selectedPath[1].producedArtifactId = currentArtifact.id;
+    state.treeNodes = state.selectedPath;
+
+    const summary = summarizeCurrentArtifactOptionsForDirector(state, "focused");
+    const messages = (summary as any).messages as Array<{ role: string; content: string }>;
+    const currentArtifactMessage = messages.find(
+      (message) => message.role === "assistant" && message.content.includes("先截图再思考")
+    );
+    const finalUserMessage = messages.at(-1);
+
+    expect(currentArtifactMessage).toBeTruthy();
+    expect(currentArtifactMessage?.content).toContain("第 2 轮已形成产物");
+    expect(finalUserMessage?.role).toBe("user");
+    expect(finalUserMessage?.content).toContain("方向范围：专注");
+    expect(finalUserMessage?.content).not.toContain("本轮审稿材料");
+    expect(finalUserMessage?.content).not.toContain("当前内容：");
+    expect(finalUserMessage?.content).not.toContain("先截图再思考");
+  });
+
   it("does not borrow an ancestor artifact when the current clarification node has no artifact", () => {
     const parent = createNode({
       id: "root",
@@ -763,9 +848,13 @@ describe("summarizeSessionForDirector", () => {
     }));
     const messages = (summary as any).messages as Array<{ role: string; content: string }>;
     const finalMessage = messages.at(-1)?.content ?? "";
+    const assistantMessages = messages.filter((message) => message.role === "assistant").map((message) => message.content).join("\n\n");
 
-    expect(finalMessage).toContain("审稿材料：");
-    expect(finalMessage).toContain("当前内容：");
+    expect(assistantMessages).toContain("标题：Edited");
+    expect(assistantMessages).toContain("正文：Edited body");
+    expect(finalMessage).toContain("请基于以上 AI 结果继续给出下一步三个可选推进方向。");
+    expect(finalMessage).not.toContain("审稿材料：");
+    expect(finalMessage).not.toContain("当前内容：");
     expect(finalMessage).not.toContain("请作为责任编辑");
     expect(finalMessage).not.toContain("提出三个建议");
     expectNoProcessTerms(finalMessage);

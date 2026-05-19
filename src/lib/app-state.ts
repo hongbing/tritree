@@ -40,7 +40,9 @@ export function summarizeSessionForDirector(
           selectedOption,
           selectedOptionNote: trimmedNote
         })
-      ].join("\n\n")
+      ]
+        .filter(Boolean)
+        .join("\n\n")
     )
   };
 }
@@ -247,6 +249,7 @@ function buildEditorMessages(state: SessionState, currentArtifact: Artifact | nu
     }
   ];
   const lastPathIndex = state.selectedPath.length - 1;
+  const representedArtifactIds = new Set<string>();
 
   state.selectedPath.forEach((node, index) => {
     if (index > 0) {
@@ -261,26 +264,21 @@ function buildEditorMessages(state: SessionState, currentArtifact: Artifact | nu
       messages.push(...node.agentMessages);
     }
 
-    if (index < lastPathIndex) {
-      const artifact = artifactForNode(state, node);
-      if (artifact) {
-        messages.push({ role: "assistant", content: formatEditorCompletedArtifact(node, artifact) });
-      }
+    const artifact = artifactForNode(state, node);
+    if (artifact) {
+      const isCurrentArtifact = index === lastPathIndex && artifact.id === currentArtifact?.id;
+      messages.push({ role: "assistant", content: formatEditorCompletedArtifact(node, artifact, isCurrentArtifact) });
+      representedArtifactIds.add(artifact.id);
     }
   });
 
-  const finalReviewMaterial = formatEditorCurrentReviewMaterial({
-    currentArtifact,
-    reviewInstruction
-  });
-
-  if (messages.length === 1 && state.selectedPath.every((node) => node.options.length === 0)) {
-    messages[0].content = `${messages[0].content}\n\n${finalReviewMaterial}`;
-    return messages;
+  if (currentArtifact && !representedArtifactIds.has(currentArtifact.id)) {
+    messages.push({ role: "assistant", content: formatCurrentArtifactForWriter(currentArtifact) });
   }
 
-  messages.push({ role: "user", content: finalReviewMaterial });
-  return messages;
+  messages.push({ role: "user", content: formatFollowUpOptionsRequest(currentArtifact, reviewInstruction) });
+
+  return mergeConsecutiveUserMessages(messages);
 }
 
 function mergeConsecutiveUserMessages(messages: DirectorMessage[]) {
@@ -379,17 +377,12 @@ function shouldRepeatArtifactContextForFinalRequest(state: SessionState) {
   return artifactTypeIdForState(state) !== DEFAULT_ARTIFACT_TYPE_ID;
 }
 
-function formatEditorCurrentReviewMaterial({
-  currentArtifact,
-  reviewInstruction
-}: {
-  currentArtifact: Artifact | null;
-  reviewInstruction: string;
-}) {
+function formatFollowUpOptionsRequest(currentArtifact: Artifact | null, reviewInstruction: string) {
   return [
-    "本轮审稿材料：",
     reviewInstruction ? `本轮要求：\n${reviewInstruction}` : "",
-    `当前内容：\n${currentArtifact ? formatArtifactForDirector(currentArtifact) : "暂无内容。"}`
+    currentArtifact
+      ? "请基于以上 AI 结果继续给出下一步三个可选推进方向。"
+      : "请基于初始内容和已有上下文给出下一步三个可选推进方向。"
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -401,7 +394,18 @@ function formatEditorBranchChoice(node: SessionState["selectedPath"][number], wr
     : `用户继续推进：${node.roundIntent}`;
 }
 
-function formatEditorCompletedArtifact(node: SessionState["selectedPath"][number], artifact: Artifact) {
+function formatEditorCompletedArtifact(
+  node: SessionState["selectedPath"][number],
+  artifact: Artifact,
+  includeFullArtifact = false
+) {
+  if (includeFullArtifact) {
+    return [
+      `第 ${node.roundIndex} 轮已形成产物`,
+      formatArtifactForDirector(artifact)
+    ].join("\n");
+  }
+
   return [
     `第 ${node.roundIndex} 轮已形成产物`,
     `形成产物：${formatArtifactVersionSummary(artifact)}`
@@ -438,6 +442,10 @@ function formatSuggestionsForDirector(options: BranchOption[]) {
 }
 
 function formatSuggestionForDirector(option: BranchOption) {
+  if (option.label.trim() === option.description.trim()) {
+    return option.description.trim();
+  }
+
   return `${option.label}: ${option.description}`;
 }
 

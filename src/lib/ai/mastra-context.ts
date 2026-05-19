@@ -131,6 +131,7 @@ export function buildTreeTurnInstructions(input: SharedAgentContextInput) {
     "# 本轮固定目标",
     "本轮固定目标：在一次主 agent ReAct 循环中推进当前用户请求，并通过一个最终提交工具结束。",
     "如果本轮已经可以形成或更新作品，调用 submit_tree_artifact 提交 artifact 卡片；如果用户需要先从三个可执行答案中选择，调用 submit_tree_options 提交 3 选 1；如果本轮只需要收束且没有新作品，调用 submit_tree_artifact 并让 artifact=null。",
+    "如果本轮用户请求已经指向当前作品的具体推进任务（例如补充论据、核查事实、找案例、压缩结构、改标题），不要把 submit_tree_options 用成重新选题或重新发散主题。只有在完成本轮实际资料/分析工作后，才可以围绕“这些新材料或判断如何作用于当前作品”提交三选一。",
     "不要先提交路由判断再开启另一个主 agent 循环；工具调用、subagent 调用、thinking、过程材料、options 和 artifact 都属于同一个主 agent turn。",
     ...finalSubmitExecutionRules(input, "turn"),
     "# 输出契约",
@@ -187,6 +188,8 @@ function threeChoiceProtocol() {
     "# 三选一交互协议",
     "三选一是用户交互和显示协议：当本轮需要用户从三个可执行答案中选择时，先形成 decisionRationale，再把需要用户决定的问题写成 roundIntent。",
     "三个 option 都必须回答同一个 roundIntent，不能变成三个彼此无关的新问题。",
+    "如果本轮已经有明确的当前作品、已选方向或用户补充要求，roundIntent 和三个 option 必须承接这些上下文；不要回到更早的初始输入、候选方向列表或泛泛的下一步。",
+    "如果本轮调用了搜索、资料、subagent 或过程展示工具，提交 options 时必须体现工具结果已经被检查和吸收：三个 option 应该是基于新增材料的处理方式，而不是把用户重新带回资料收集前的问题。",
     "三个 option 要足够具体，让用户能直接比较选择后的影响。",
     "如果同时展示过程材料，过程材料只能支撑同一个 roundIntent 和三个 options；不要把过程材料写成另一组 A/B/C 选项、候选题或选择清单。"
   ].join("\n");

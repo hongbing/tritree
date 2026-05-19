@@ -158,6 +158,19 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previou
     }
   }
 
+  function togglePublishPanel() {
+    setPublishCopyError("");
+    setCopiedPublishAction(null);
+    setIsPublishPanelOpen((open) => !open);
+  }
+
+  function enterEditMode() {
+    setIsPublishPanelOpen(false);
+    setPublishCopyError("");
+    setCopiedPublishAction(null);
+    setIsEditing(true);
+  }
+
   function closeSelectionEdit() {
     setSelectionEdit(null);
     setSelectionMode("actions");
@@ -170,26 +183,25 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previou
         <Sparkles size={16} />
         <span>社媒内容</span>
         <div className="social-post-panel__actions">
-          <button
-            aria-expanded={isPublishPanelOpen}
-            className="work-publish-button"
-            disabled={isBusy}
-            onClick={() => {
-              setPublishCopyError("");
-              setCopiedPublishAction(null);
-              setIsPublishPanelOpen((open) => !open);
-            }}
-            type="button"
-          >
-            <Send aria-hidden="true" size={13} />
-            <span>发布</span>
-          </button>
           {onSave ? (
-            <button className="work-edit-button" disabled={isBusy} onClick={() => setIsEditing(true)} type="button">
+            <button className="work-edit-button" disabled={isBusy} onClick={enterEditMode} type="button">
               编辑
             </button>
           ) : null}
         </div>
+      </div>
+
+      <div className="social-post-panel__primary-action">
+        <button
+          aria-expanded={isPublishPanelOpen}
+          className="work-publish-button"
+          disabled={isBusy}
+          onClick={togglePublishPanel}
+          type="button"
+        >
+          <Send aria-hidden="true" size={13} />
+          <span>发布</span>
+        </button>
       </div>
 
       {isPublishPanelOpen ? (

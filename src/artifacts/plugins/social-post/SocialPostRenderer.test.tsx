@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Artifact } from "@/lib/domain";
@@ -135,6 +135,79 @@ describe("SocialPostRenderer", () => {
       hashtags: ["#新", "#AI"],
       imagePrompt: "新图"
     });
+  });
+
+  it("renders publish as a prominent card action outside the heading action cluster", () => {
+    render(
+      <SocialPostRenderer
+        artifact={createArtifact({ title: "标题", body: "正文", hashtags: ["#AI"], imagePrompt: "图" })}
+        isBusy={false}
+        onSave={vi.fn()}
+      />
+    );
+
+    const headingActions = document.querySelector(".social-post-panel__actions");
+    expect(headingActions).toBeInstanceOf(HTMLElement);
+    expect(within(headingActions as HTMLElement).queryByRole("button", { name: "发布" })).not.toBeInTheDocument();
+    expect(within(headingActions as HTMLElement).getByRole("button", { name: "编辑" })).toBeInTheDocument();
+
+    const primaryAction = document.querySelector(".social-post-panel__primary-action");
+    expect(primaryAction).toBeInstanceOf(HTMLElement);
+    expect(within(primaryAction as HTMLElement).getByRole("button", { name: "发布" })).toBeInTheDocument();
+  });
+
+  it("opens the publish assistant from the prominent card action", async () => {
+    render(
+      <SocialPostRenderer
+        artifact={createArtifact({ title: "标题", body: "正文", hashtags: ["#AI"], imagePrompt: "图" })}
+        isBusy={false}
+      />
+    );
+
+    const primaryAction = document.querySelector(".social-post-panel__primary-action");
+    expect(primaryAction).toBeInstanceOf(HTMLElement);
+
+    const publishButton = within(primaryAction as HTMLElement).getByRole("button", { name: "发布" });
+    expect(publishButton).toHaveAttribute("aria-expanded", "false");
+
+    await userEvent.click(publishButton);
+
+    expect(publishButton).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("dialog", { name: "发布助手" })).toBeInTheDocument();
+  });
+
+  it("disables the prominent publish action while busy", () => {
+    render(
+      <SocialPostRenderer
+        artifact={createArtifact({ title: "标题", body: "正文", hashtags: ["#AI"], imagePrompt: "图" })}
+        isBusy={true}
+      />
+    );
+
+    const primaryAction = document.querySelector(".social-post-panel__primary-action");
+    expect(primaryAction).toBeInstanceOf(HTMLElement);
+    expect(within(primaryAction as HTMLElement).getByRole("button", { name: "发布" })).toBeDisabled();
+  });
+
+  it("closes the publish assistant before entering edit mode", async () => {
+    render(
+      <SocialPostRenderer
+        artifact={createArtifact({ title: "标题", body: "正文", hashtags: ["#AI"], imagePrompt: "图" })}
+        isBusy={false}
+        onSave={vi.fn()}
+      />
+    );
+
+    const primaryAction = document.querySelector(".social-post-panel__primary-action");
+    expect(primaryAction).toBeInstanceOf(HTMLElement);
+
+    await userEvent.click(within(primaryAction as HTMLElement).getByRole("button", { name: "发布" }));
+    expect(screen.getByRole("dialog", { name: "发布助手" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "编辑" }));
+
+    expect(screen.queryByRole("dialog", { name: "发布助手" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "标题" })).toBeInTheDocument();
   });
 
   it("submits a rewrite-selection action for selected body text", async () => {

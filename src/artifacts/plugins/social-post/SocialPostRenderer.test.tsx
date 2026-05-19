@@ -213,4 +213,27 @@ describe("SocialPostRenderer", () => {
     expect(writeText).toHaveBeenCalledWith("目标句。");
     expect(screen.queryByRole("toolbar", { name: "选中文本操作" })).not.toBeInTheDocument();
   });
+
+  it("copies the edited publish text from the publish assistant", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+
+    render(
+      <SocialPostRenderer
+        artifact={createArtifact({ title: "标题", body: "原始正文", hashtags: ["#AI"], imagePrompt: "图" })}
+        isBusy={false}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "发布" }));
+    const publishText = screen.getByRole("textbox", { name: "微博发布文案" });
+    await userEvent.clear(publishText);
+    await userEvent.type(publishText, "编辑后的微博文案");
+    await userEvent.click(screen.getByRole("button", { name: "复制微博文案" }));
+
+    expect(writeText).toHaveBeenCalledWith("编辑后的微博文案");
+  });
 });

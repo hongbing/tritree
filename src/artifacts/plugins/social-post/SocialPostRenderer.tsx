@@ -8,6 +8,7 @@ import { SocialPostPayloadSchema, type SocialPostPayload } from "./schema";
 type SelectionMode = "actions" | "edit";
 type PublishPlatform = "weibo" | "xiaohongshu" | "moments";
 type PublishCopyAction = PublishPlatform | "title" | "body" | "hashtags" | "imagePrompt";
+type PublishTextByPlatform = Record<PublishPlatform, string>;
 
 type CapturedTextSelection = {
   selectedText: string;
@@ -37,6 +38,8 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previou
   const [isSelectionRewritePending, setIsSelectionRewritePending] = useState(false);
   const [isPublishPanelOpen, setIsPublishPanelOpen] = useState(false);
   const [activePublishPlatform, setActivePublishPlatform] = useState<PublishPlatform>(() => activePlatforms[0] ?? "weibo");
+  const [publishTexts, setPublishTexts] = useState<PublishTextByPlatform>(() => publishTextsFromPayload(payload));
+  const [publishImagePrompt, setPublishImagePrompt] = useState(() => payload?.imagePrompt ?? "");
   const [copiedPublishAction, setCopiedPublishAction] = useState<PublishCopyAction | null>(null);
   const [publishCopyError, setPublishCopyError] = useState("");
 
@@ -57,6 +60,8 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previou
     setBody(payload.body);
     setHashtags(payload.hashtags.join(" "));
     setImagePrompt(payload.imagePrompt);
+    setPublishTexts(publishTextsFromPayload(payload));
+    setPublishImagePrompt(payload.imagePrompt);
     closeSelectionEdit();
     setIsPublishPanelOpen(false);
     setCopiedPublishAction(null);
@@ -151,7 +156,7 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previou
   async function copyPublishText(action: PublishCopyAction) {
     setPublishCopyError("");
     try {
-      await copyTextToClipboard(publishCopyValue(payload!, activePublishPlatform, action));
+      await copyTextToClipboard(publishCopyValue(payload!, activePublishPlatform, action, publishTexts, publishImagePrompt));
       setCopiedPublishAction(action);
     } catch {
       setPublishCopyError("复制失败，请手动选择文本。");
@@ -162,6 +167,21 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previou
     setSelectionEdit(null);
     setSelectionMode("actions");
     setSelectionInstruction("");
+  }
+
+  function updateActivePublishText(value: string) {
+    setPublishTexts((current) => ({
+      ...current,
+      [activePublishPlatform]: value
+    }));
+    setCopiedPublishAction(null);
+    setPublishCopyError("");
+  }
+
+  function updatePublishImagePrompt(value: string) {
+    setPublishImagePrompt(value);
+    setCopiedPublishAction(null);
+    setPublishCopyError("");
   }
 
   return (
@@ -228,26 +248,32 @@ export function SocialPostRenderer({ artifact, isBusy, onAction, onSave, previou
           <section className="work-publish-preview" aria-label={`${publishPlatformLabel(activePublishPlatform)}版预览`}>
             <div className="work-publish-preview__meta">
               <span>{publishPlatformLabel(activePublishPlatform)}版预览</span>
-              <span>约 {formatPublishText(payload, activePublishPlatform).length} 字</span>
+              <span>约 {publishTexts[activePublishPlatform].length} 字</span>
             </div>
             <textarea
               aria-label={`${publishPlatformLabel(activePublishPlatform)}发布文案`}
-              readOnly
+              onChange={(event) => updateActivePublishText(event.target.value)}
               rows={7}
-              value={formatPublishText(payload, activePublishPlatform)}
+              value={publishTexts[activePublishPlatform]}
             />
           </section>
           <section className="work-publish-image-prompt">
             <div className="work-publish-image-prompt__meta">
               <span>配图提示</span>
-              {payload.imagePrompt.trim() ? (
+              {publishImagePrompt.trim() ? (
                 <button onClick={() => void copyPublishText("imagePrompt")} type="button">
                   <Copy aria-hidden="true" size={13} />
                   <span>{copiedPublishAction === "imagePrompt" ? "已复制" : "复制配图提示"}</span>
                 </button>
               ) : null}
             </div>
-            <textarea aria-label="配图提示" readOnly rows={3} value={payload.imagePrompt || "还没有配图提示。"} />
+            <textarea
+              aria-label="配图提示"
+              onChange={(event) => updatePublishImagePrompt(event.target.value)}
+              placeholder="还没有配图提示。"
+              rows={3}
+              value={publishImagePrompt}
+            />
           </section>
           <div className="work-publish-actions">
             <button
@@ -530,18 +556,32 @@ function formatPublishText(payload: SocialPostPayload, platform: PublishPlatform
   return [body, hashtags].filter(Boolean).join("\n\n");
 }
 
+function publishTextsFromPayload(payload: SocialPostPayload | null): PublishTextByPlatform {
+  return {
+    weibo: payload ? formatPublishText(payload, "weibo") : "",
+    xiaohongshu: payload ? formatPublishText(payload, "xiaohongshu") : "",
+    moments: payload ? formatPublishText(payload, "moments") : ""
+  };
+}
+
 function publishPlatformLabel(platform: PublishPlatform) {
   if (platform === "weibo") return "微博";
   if (platform === "xiaohongshu") return "小红书";
   return "朋友圈";
 }
 
-function publishCopyValue(payload: SocialPostPayload, platform: PublishPlatform, action: PublishCopyAction) {
+function publishCopyValue(
+  payload: SocialPostPayload,
+  platform: PublishPlatform,
+  action: PublishCopyAction,
+  publishTexts: PublishTextByPlatform,
+  publishImagePrompt: string
+) {
   if (action === "body") return payload.body.trim();
   if (action === "title") return resolveSocialPostTitle(payload.title, payload.body).trim();
   if (action === "hashtags") return normalizedHashtags(payload.hashtags, platform).join(" ");
-  if (action === "imagePrompt") return payload.imagePrompt.trim();
-  return formatPublishText(payload, action);
+  if (action === "imagePrompt") return publishImagePrompt;
+  return publishTexts[action];
 }
 
 function resolveSocialPostTitle(title: string | undefined, body: string | undefined) {

@@ -456,9 +456,11 @@ describe("summarizeSessionForDirector", () => {
     expect(messages[4].content).not.toContain("会怎么改");
     expect(messages[4].content).not.toContain("当前内容：");
     expect(messages[4].content).not.toContain("配图提示");
-    expect(messages[4].content).not.toContain("用户刚刚选择");
+    expect(messages[4].content).toContain("用户刚刚选择了以下方向：");
+    expect(messages[4].content).toContain("不自动等于要求立即提交产物");
+    expect(messages[4].content).toContain("如果仍需要用户做判断，请提交三个可选方向。");
+    expect(messages[4].content).toContain("不要把“用户选择了一个方向”默认理解为“马上提交产物”。");
     expect(messages[4].content).not.toContain("三选一");
-    expectNoProcessTerms(messages[4].content);
   });
 
   it("asks work generation to apply the selected direction to the work", () => {
@@ -489,9 +491,13 @@ describe("summarizeSessionForDirector", () => {
     expect(finalMessage).toContain("用户补充要求：写给独立开发者");
     expect(finalMessage).not.toContain("提出三选一建议");
     expect(finalMessage).not.toContain("生成下一步三个创作方向");
-    expect(finalMessage).not.toContain("用户刚刚选择");
-    expect(finalMessage).not.toContain("选项");
-    expectNoProcessTerms(finalMessage);
+    expect(finalMessage).toContain("用户刚刚选择了以下方向：");
+    expect(finalMessage).toContain("选择读者视角");
+    expect(finalMessage).toContain("这表示用户确认了当前推进方向，但不自动等于要求立即提交产物。");
+    expect(finalMessage).toContain("请基于上下文、当前可见产物、用户补充要求和已启用 Skills，决定下一轮最合适的推进方式：");
+    expect(finalMessage).toContain("如果仍需要用户做判断，请提交三个可选方向。");
+    expect(finalMessage).toContain("如果用户选择和上下文已经足够明确，且继续询问只会拖慢推进，可以提交产物。");
+    expect(finalMessage).toContain("不要把“用户选择了一个方向”默认理解为“马上提交产物”。");
   });
 
   it("keeps short custom directions as the original user wording in work generation", () => {
@@ -515,7 +521,8 @@ describe("summarizeSessionForDirector", () => {
     const messages = (summary as any).messages as Array<{ role: string; content: string }>;
     const finalUserRequest = messages.at(-1)?.content ?? "";
 
-    expect(finalUserRequest).toBe("确认内容正确性");
+    expect(finalUserRequest).toContain("用户刚刚选择了以下方向：\n确认内容正确性");
+    expect(finalUserRequest).toContain("不自动等于要求立即提交产物");
     expect(finalUserRequest).not.toContain("\n\n确认内容正确性");
     expect(finalUserRequest).not.toContain("确认内容正确性: 确认内容正确性");
   });

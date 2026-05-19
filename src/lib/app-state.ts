@@ -86,13 +86,11 @@ function formatWritingIntentLabel(
       .join("\n\n");
   }
 
-  return [
-    `${selectedOption.label}: ${selectedOption.description}`,
-    selectedOptionNote ? `用户补充要求：${selectedOptionNote}` : "",
-    modeHint
-  ]
-    .filter(Boolean)
-    .join("\n");
+  return formatSelectedDirectionRoutingRequest({
+    modeHint,
+    selectedOption,
+    selectedOptionNote
+  });
 }
 
 export function summarizeEditedArtifactForDirector(state: SessionState, artifact: Artifact): DirectorInputParts {
@@ -348,10 +346,12 @@ function formatArtifactUserRequest({
 
   const selectedLines = selectedOption
     ? [
-        formatSuggestionForDirector(selectedOption),
-        selectedOptionNote ? `用户补充要求：${selectedOptionNote}` : "",
-        modeHint
-      ].filter(Boolean)
+        formatSelectedDirectionRoutingRequest({
+          modeHint,
+          selectedOption,
+          selectedOptionNote
+        })
+      ]
     : ["基于初始内容和上一版产物生成新的内容版本。"];
 
   return [
@@ -359,6 +359,30 @@ function formatArtifactUserRequest({
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function formatSelectedDirectionRoutingRequest({
+  modeHint,
+  selectedOption,
+  selectedOptionNote
+}: {
+  modeHint?: string;
+  selectedOption: BranchOption;
+  selectedOptionNote?: string;
+}) {
+  return [
+    "用户刚刚选择了以下方向：",
+    formatSuggestionForDirector(selectedOption),
+    selectedOptionNote ? `用户补充要求：${selectedOptionNote}` : "",
+    modeHint,
+    "这表示用户确认了当前推进方向，但不自动等于要求立即提交产物。",
+    "请基于上下文、当前可见产物、用户补充要求和已启用 Skills，决定下一轮最合适的推进方式：",
+    "- 如果仍需要用户做判断，请提交三个可选方向。",
+    "- 如果用户选择和上下文已经足够明确，且继续询问只会拖慢推进，可以提交产物。",
+    "- 不要把“用户选择了一个方向”默认理解为“马上执行用户指令”。"
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function isSelectionReferenceOption(option: BranchOption) {

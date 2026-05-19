@@ -4430,6 +4430,7 @@ button:disabled {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 18px;
+  padding-bottom: 58px;
   scrollbar-gutter: stable;
 }
 
@@ -4451,6 +4452,16 @@ button:disabled {
   gap: 7px;
 }
 
+.social-post-panel__primary-action {
+  position: absolute;
+  right: 18px;
+  bottom: 14px;
+  z-index: 3;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
 .work-edit-button,
 .work-diff-toggle,
 .work-publish-button,
@@ -4470,9 +4481,31 @@ button:disabled {
   gap: 5px;
 }
 
+.social-post-panel__primary-action .work-publish-button {
+  min-height: 38px;
+  padding: 8px 13px;
+  color: #102033;
+  background: #facc45;
+  border: 1px solid rgba(180, 83, 9, 0.16);
+  box-shadow: 0 12px 28px rgba(180, 83, 9, 0.18);
+  pointer-events: auto;
+}
+
 .work-publish-button[aria-expanded="true"] {
   color: #102033;
   background: #e0f2fe;
+}
+
+.social-post-panel__primary-action .work-publish-button[aria-expanded="true"] {
+  color: #102033;
+  background: #fde68a;
+  border-color: rgba(180, 83, 9, 0.24);
+}
+
+.social-post-panel__primary-action .work-publish-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+  box-shadow: none;
 }
 
 .work-diff-toggle[aria-pressed="true"] {
@@ -5240,11 +5273,17 @@ button:disabled {
     padding: 14px;
   }
 
+  .social-post-panel__primary-action {
+    right: 14px;
+    bottom: 14px;
+  }
+
   .social-post-panel__scroll {
     overflow-x: visible;
     overflow-y: visible;
     overscroll-behavior: auto;
     padding-right: 0;
+    padding-bottom: 58px;
     scrollbar-gutter: auto;
   }
 }

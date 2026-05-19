@@ -8,6 +8,7 @@ import {
   streamTreeNextStep,
   streamTreeOptions
 } from "./mastra-executor";
+import { SHOW_PROCESS_DATA_TOOL_NAME, withProcessDataDisplayTool } from "./mastra-executor/tools";
 import type { DirectorInputParts } from "./prompts";
 
 const mocks = vi.hoisted(() => ({
@@ -174,6 +175,23 @@ describe("createTreeOptionsAgent", () => {
         inputProcessors: expect.arrayContaining([expect.objectContaining({ id: "token-limiter" })])
       })
     );
+  });
+});
+
+describe("process data display tool", () => {
+  it("acknowledges displayed process data without echoing it as the tool result", async () => {
+    const tools = withProcessDataDisplayTool({});
+    const showProcessDataTool = tools[SHOW_PROCESS_DATA_TOOL_NAME] as {
+      execute: (input: unknown) => Promise<unknown>;
+    };
+
+    await expect(
+      showProcessDataTool.execute({
+        title: "参考材料",
+        sourceToolCallIds: ["tool-1"],
+        items: [{ title: "参考条目 A", subtitle: "方向 A" }]
+      })
+    ).resolves.toBe(true);
   });
 });
 
@@ -2060,7 +2078,7 @@ describe("tree director compatibility generators", () => {
           payload: {
             toolCallId: "display-1",
             toolName: "show_process_data",
-            result: displayedData
+            result: true
           }
         };
         yield {
@@ -2121,7 +2139,7 @@ describe("tree director compatibility generators", () => {
           toolName: "show_process_data",
           output: {
             type: "json",
-            value: displayedData
+            value: true
           }
         }
       ]
@@ -2180,7 +2198,7 @@ describe("tree director compatibility generators", () => {
           payload: {
             toolCallId: "display-1",
             toolName: "show_process_data",
-            result: displayedData
+            result: true
           }
         };
         yield {

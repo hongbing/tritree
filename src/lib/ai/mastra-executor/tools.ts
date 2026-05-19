@@ -1,7 +1,7 @@
 import { DirectorArtifactOutputSchema, DirectorNextStepOutputSchema, DirectorOptionsOutputSchema } from "@/lib/domain";
 import type { ToolsInput } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
-import { ZodError } from "zod";
+import { ZodError, z } from "zod";
 import type { SharedAgentContextInput } from "../mastra-context";
 import type { RuntimeSubmitTarget } from "./types";
 import { ShowProcessDataInputSchema } from "./schemas";
@@ -62,7 +62,8 @@ export function withProcessDataDisplayTool(tools: ToolsInput): ToolsInput {
       description:
         "Display user-facing process data from newly called and inspected tool results during this ReAct turn. Use before the final submit tool when the user should see source material or evidence. Do not replay historical show_process_data, duplicate final options, or create another A/B/C choice list. The UI renders exactly this generic display shape.",
       inputSchema: ShowProcessDataInputSchema,
-      execute: async (input) => input
+      outputSchema: z.literal(true),
+      execute: async () => true as const
     })
   };
 }

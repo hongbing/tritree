@@ -117,6 +117,39 @@ describe("POST /api/sessions/:sessionId/options", () => {
     expect(await response.json()).toEqual({ error: "请先登录。" });
   });
 
+  it("does not persist partial options when the request is aborted", async () => {
+    const abortController = new AbortController();
+    const updateNodeOptions = vi.fn();
+    getRepositoryMock.mockReturnValue({
+      getSessionState: vi.fn().mockReturnValue(state),
+      updateNodeOptions
+    });
+    streamDirectorOptionsMock.mockImplementation(async (_parts, options) => {
+      options.onText({
+        delta: "预览方向",
+        accumulatedText: "",
+        partialOptions: [{ id: "a", label: "预览方向", description: "A", impact: "A", kind: "explore" }],
+        partialRoundIntent: "预览"
+      });
+      abortController.abort();
+      throw new DOMException("User stopped generation.", "AbortError");
+    });
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/options", {
+        method: "POST",
+        body: JSON.stringify({ nodeId: "node-1" }),
+        signal: abortController.signal
+      }),
+      { params: Promise.resolve({ sessionId: "session-1" }) }
+    );
+    const text = await response.text();
+
+    expect(text).toContain('"type":"options"');
+    expect(text).not.toContain('"type":"done"');
+    expect(updateNodeOptions).not.toHaveBeenCalled();
+  });
+
   it("streams partial options before persisting and sending done", async () => {
     const output = {
       roundIntent: "下一步",

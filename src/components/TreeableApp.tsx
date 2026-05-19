@@ -133,6 +133,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function isAbortError(error: unknown) {
+  if (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError") {
+    return true;
+  }
+
+  if (!error || typeof error !== "object" || !("name" in error)) return false;
+  return error.name === "AbortError" || error.name === "ResponseAborted";
+}
+
 function isBranchOption(value: unknown): value is BranchOption {
   return (
     isRecord(value) &&
@@ -489,6 +498,8 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
   const [isMobileTreeExpanded, setIsMobileTreeExpanded] = useState(false);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const activeGenerationControllerRef = useRef<AbortController | null>(null);
+  const activeGenerationStopRequestedRef = useRef(false);
   const loadRequestIdRef = useRef(0);
   const mobileArtifactRegionRef = useRef<HTMLDivElement>(null);
   const wasMobileArtifactGenerationActiveRef = useRef(false);
@@ -502,6 +513,15 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     loadRequestIdRef.current = requestId;
     void loadRoot(requestId);
   }, [initialSessionId, startNewWork]);
+
+  useEffect(() => {
+    return () => {
+      const controller = activeGenerationControllerRef.current;
+      if (!controller || controller.signal.aborted) return;
+      activeGenerationStopRequestedRef.current = true;
+      controller.abort(new DOMException("Generation view unmounted.", "AbortError"));
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -567,6 +587,36 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
 
   function isCurrentLoadRequest(requestId: number) {
     return loadRequestIdRef.current === requestId;
+  }
+
+  function createGenerationAbortController() {
+    const controller = new AbortController();
+    activeGenerationControllerRef.current = controller;
+    activeGenerationStopRequestedRef.current = false;
+    return controller;
+  }
+
+  function clearGenerationAbortController(controller: AbortController) {
+    if (activeGenerationControllerRef.current === controller) {
+      activeGenerationControllerRef.current = null;
+    }
+  }
+
+  function isIntentionalGenerationAbort(error: unknown) {
+    return activeGenerationStopRequestedRef.current && isAbortError(error);
+  }
+
+  function stopActiveGeneration() {
+    const controller = activeGenerationControllerRef.current;
+    if (!controller || controller.signal.aborted) return;
+    activeGenerationStopRequestedRef.current = true;
+    controller.abort(new DOMException("User stopped generation.", "AbortError"));
+  }
+
+  function handleGenerationError(error: unknown, fallback: string) {
+    if (isIntentionalGenerationAbort(error)) return;
+    const text = error instanceof Error ? error.message : fallback;
+    setMessage(apiKeyMessage(text));
   }
 
   async function loadRoot(requestId: number) {
@@ -903,8 +953,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       await allowArtifactRender();
       await finishNodeGeneration(data.state, nextNodeId, trimmedNote, optionMode);
     } catch (error) {
-      const text = error instanceof Error ? error.message : "选择失败。";
-      setMessage(apiKeyMessage(text));
+      handleGenerationError(error, "选择失败。");
     } finally {
       setPendingChoice(null);
       setGenerationStage(null);
@@ -912,6 +961,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       setStreamingOptions(null);
       setStreamingThinking(null);
       setStreamingProcessMaterials(null);
+      activeGenerationStopRequestedRef.current = false;
       setIsBusy(false);
     }
   }
@@ -953,8 +1003,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       await allowArtifactRender();
       await finishNodeGeneration(data.state, nextNodeId, trimmedNote, optionMode);
     } catch (error) {
-      const text = error instanceof Error ? error.message : "切换分支失败。";
-      setMessage(apiKeyMessage(text));
+      handleGenerationError(error, "切换分支失败。");
     } finally {
       setPendingBranch(null);
       setGenerationStage(null);
@@ -962,6 +1011,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       setStreamingOptions(null);
       setStreamingThinking(null);
       setStreamingProcessMaterials(null);
+      activeGenerationStopRequestedRef.current = false;
       setIsBusy(false);
     }
   }
@@ -987,16 +1037,24 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       })
     };
 
-    const streamResponse = await fetch(apiPath(`/api/sessions/${state.session.id}/artifact/generate/stream`), requestOptions);
-    if (!streamResponse.ok) {
-      const data = (await streamResponse.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(data?.error ?? "生成下一版作品失败。");
-    }
-    if (!streamResponse.body) throw new Error("生成下一版作品失败。");
+    const abortController = createGenerationAbortController();
+    try {
+      const streamResponse = await fetch(apiPath(`/api/sessions/${state.session.id}/artifact/generate/stream`), {
+        ...requestOptions,
+        signal: abortController.signal
+      });
+      if (!streamResponse.ok) {
+        const data = (await streamResponse.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error ?? "生成下一版作品失败。");
+      }
+      if (!streamResponse.body) throw new Error("生成下一版作品失败。");
 
-    const streamedState = await readArtifactStream(streamResponse, nodeId);
-    if (!streamedState) throw new Error("生成下一版作品失败。");
-    return streamedState;
+      const streamedState = await readArtifactStream(streamResponse, nodeId);
+      if (!streamedState) throw new Error("生成下一版作品失败。");
+      return streamedState;
+    } finally {
+      clearGenerationAbortController(abortController);
+    }
   }
 
   function applyStreamingOptionsPreview(
@@ -1155,24 +1213,30 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     setStreamingOptions({ nodeId, options: [] });
     setStreamingThinking(null);
     setStreamingProcessMaterials(null);
-    const response = await fetch(apiPath(`/api/sessions/${state.session.id}/options`), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        nodeId,
-        ...(optionMode !== "balanced" ? { optionMode } : {}),
-        ...(force ? { force } : {})
-      })
-    });
-    if (!response.ok) {
-      const data = (await response.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(data?.error ?? "生成下一步选项失败。");
-    }
-    if (!response.body) throw new Error("生成下一步选项失败。");
+    const abortController = createGenerationAbortController();
+    try {
+      const response = await fetch(apiPath(`/api/sessions/${state.session.id}/options`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
+        body: JSON.stringify({
+          nodeId,
+          ...(optionMode !== "balanced" ? { optionMode } : {}),
+          ...(force ? { force } : {})
+        })
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error ?? "生成下一步选项失败。");
+      }
+      if (!response.body) throw new Error("生成下一步选项失败。");
 
-    const streamedState = await readOptionsStream(response, nodeId);
-    if (!streamedState) throw new Error("生成下一步选项失败。");
-    return streamedState;
+      const streamedState = await readOptionsStream(response, nodeId);
+      if (!streamedState) throw new Error("生成下一步选项失败。");
+      return streamedState;
+    } finally {
+      clearGenerationAbortController(abortController);
+    }
   }
 
   async function readOptionsStream(response: Response, fallbackNodeId?: string | null) {
@@ -1289,14 +1353,14 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
         setViewNodeId(nodeId);
       }
     } catch (error) {
-      const text = error instanceof Error ? error.message : "生成下一步选项失败。";
-      setMessage(apiKeyMessage(text));
+      handleGenerationError(error, "生成下一步选项失败。");
     } finally {
       setGenerationStage(null);
       setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
       setStreamingProcessMaterials(null);
+      activeGenerationStopRequestedRef.current = false;
       setIsBusy(false);
     }
   }
@@ -1316,14 +1380,14 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
         setViewNodeId(nodeId);
       }
     } catch (error) {
-      const text = error instanceof Error ? error.message : "生成下一步选项失败。";
-      setMessage(apiKeyMessage(text));
+      handleGenerationError(error, "生成下一步选项失败。");
     } finally {
       setGenerationStage(null);
       setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
       setStreamingProcessMaterials(null);
+      activeGenerationStopRequestedRef.current = false;
       setIsBusy(false);
     }
   }
@@ -1433,14 +1497,14 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     try {
       await saveArtifactForNode(artifact, artifactParentNodeId);
     } catch (error) {
-      const text = error instanceof Error ? error.message : "保存作品失败。";
-      setMessage(apiKeyMessage(text));
+      handleGenerationError(error, "保存作品失败。");
     } finally {
       setGenerationStage(null);
       setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
       setStreamingProcessMaterials(null);
+      activeGenerationStopRequestedRef.current = false;
       setIsBusy(false);
     }
   }
@@ -1469,14 +1533,14 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       await allowArtifactRender();
       await finishNodeGeneration(data.state, nextNodeId);
     } catch (error) {
-      const text = error instanceof Error ? error.message : "无法执行作品操作。";
-      setMessage(apiKeyMessage(text));
+      handleGenerationError(error, "无法执行作品操作。");
     } finally {
       setGenerationStage(null);
       setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
       setStreamingProcessMaterials(null);
+      activeGenerationStopRequestedRef.current = false;
       setIsBusy(false);
     }
   }
@@ -1645,14 +1709,14 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       await allowArtifactRender();
       await finishNodeGeneration(sessionState, activeViewNodeId);
     } catch (error) {
-      const text = error instanceof Error ? error.message : "生成下一版作品失败。";
-      setMessage(apiKeyMessage(text));
+      handleGenerationError(error, "生成下一版作品失败。");
     } finally {
       setGenerationStage(null);
       setStreamingArtifact(null);
       setStreamingOptions(null);
       setStreamingThinking(null);
       setStreamingProcessMaterials(null);
+      activeGenerationStopRequestedRef.current = false;
       setIsBusy(false);
     }
   }
@@ -1907,6 +1971,7 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
             onCancelComparison={cancelArtifactComparison}
             onSave={saveArtifact}
             onStartComparison={startArtifactComparison}
+            onStopGeneration={isBusy && generationStage ? stopActiveGeneration : undefined}
             selectedArtifactId={effectiveSelectedArtifactId}
             streamingProcessMaterials={activeProcessMaterials}
             thinkingText={activeThinking?.text}

@@ -123,6 +123,49 @@ beforeEach(() => {
 });
 
 describe("POST /api/sessions/:sessionId/artifact/generate/stream", () => {
+  it("does not persist partial artifact output when the request is aborted", async () => {
+    const abortController = new AbortController();
+    const updateNodeArtifact = vi.fn();
+    const updateNodeOptions = vi.fn();
+    const completeNode = vi.fn();
+    getRepositoryMock.mockReturnValue({
+      getSessionState: vi.fn().mockReturnValue(state),
+      updateNodeArtifact,
+      updateNodeOptions,
+      completeNode
+    });
+    streamDirectorTurnMock.mockImplementation(async (_parts, options) => {
+      options.onText?.({
+        accumulatedText: "",
+        delta: "",
+        partialArtifact: {
+          type: "social-post",
+          payload: { title: "半截草稿", body: "半截正文", hashtags: ["#半截"], imagePrompt: "半截图" }
+        },
+        partialOptions: null,
+        partialRoundIntent: null
+      });
+      abortController.abort();
+      throw new DOMException("User stopped generation.", "AbortError");
+    });
+
+    const response = await POST(
+      new Request("http://test.local/api/sessions/session-1/artifact/generate/stream", {
+        method: "POST",
+        body: JSON.stringify({ nodeId: "node-2" }),
+        signal: abortController.signal
+      }),
+      { params: Promise.resolve({ sessionId: "session-1" }) }
+    );
+    const text = await response.text();
+
+    expect(text).toContain('"type":"artifact.replace"');
+    expect(text).not.toContain('"type":"done"');
+    expect(updateNodeArtifact).not.toHaveBeenCalled();
+    expect(updateNodeOptions).not.toHaveBeenCalled();
+    expect(completeNode).not.toHaveBeenCalled();
+  });
+
   it("streams artifact.replace and done when the director produces an artifact", async () => {
     const generatedArtifact = {
       type: "social-post",

@@ -192,6 +192,32 @@ describe("ArtifactWorkspace", () => {
     expect(pressedRule).toContain("background: #dcfce7");
   });
 
+  it("shows a stop button while generation is active", async () => {
+    const user = userEvent.setup();
+    const onStopGeneration = vi.fn();
+
+    renderWorkspace({
+      generationStage: "artifact",
+      isBusy: true,
+      isGenerating: true,
+      onStopGeneration
+    });
+
+    await user.click(screen.getByRole("button", { name: "停止" }));
+
+    expect(onStopGeneration).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the stop button while idle", () => {
+    renderWorkspace({
+      isBusy: false,
+      isGenerating: false,
+      onStopGeneration: vi.fn()
+    });
+
+    expect(screen.queryByRole("button", { name: "停止" })).not.toBeInTheDocument();
+  });
+
   it("caps process materials so the draft keeps more vertical room", () => {
     const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
     const materialsRule = css.match(/\.artifact-workspace__materials\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";

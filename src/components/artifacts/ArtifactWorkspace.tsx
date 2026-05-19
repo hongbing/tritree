@@ -39,6 +39,7 @@ export type ArtifactWorkspaceProps = {
   onCancelComparison?: () => void;
   onSave: (artifact: Artifact) => void | Promise<void>;
   onStartComparison?: () => void;
+  onStopGeneration?: () => void;
   publishPlatforms?: string[];
   selectedArtifactId: string | null;
   streamingProcessMaterials?: ProcessMaterial[];
@@ -62,6 +63,7 @@ export function ArtifactWorkspace({
   onCancelComparison,
   onSave,
   onStartComparison,
+  onStopGeneration,
   publishPlatforms,
   selectedArtifactId,
   streamingProcessMaterials = [],
@@ -104,6 +106,12 @@ export function ArtifactWorkspace({
       <header className="artifact-workspace__header">
         <h2 id="artifact-workspace-title">产物</h2>
         <div className="artifact-workspace__header-actions">
+          {isGenerating && onStopGeneration ? (
+            <button className="artifact-workspace__stop-button" onClick={onStopGeneration} type="button">
+              <X aria-hidden="true" size={14} />
+              <span>停止</span>
+            </button>
+          ) : null}
           {canUseComparison ? (
             <button
               aria-pressed={isComparisonMode}

@@ -3671,6 +3671,17 @@ button:disabled {
   cursor: pointer;
 }
 
+.artifact-workspace__stop-button {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: rgba(239, 68, 68, 0.38);
+}
+
+.artifact-workspace__stop-button:hover:not(:disabled) {
+  background: #fecaca;
+  border-color: rgba(220, 38, 38, 0.5);
+}
+
 .artifact-workspace__compare-button[aria-pressed="true"] {
   color: #0f172a;
   background: #dcfce7;
@@ -3808,14 +3819,14 @@ button:disabled {
   grid-template-rows: auto auto;
   gap: 10px;
   min-height: min(200px, 28dvh);
-  max-height: min(420px, 52dvh);
-  overflow: auto;
+  max-height: min(280px, 36dvh);
+  overflow: hidden;
   background: #fff;
 }
 
 .artifact-workspace__materials--streaming {
   min-height: min(200px, 30dvh);
-  max-height: min(600px, 72dvh);
+  max-height: min(340px, 44dvh);
 }
 
 .artifact-workspace__materials-header {
@@ -3842,6 +3853,7 @@ button:disabled {
 .artifact-workspace__materials-list {
   display: grid;
   gap: 8px;
+  overflow: auto;
   padding-right: 4px;
 }
 

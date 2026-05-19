@@ -143,6 +143,7 @@ vi.mock("@/components/artifacts/ArtifactWorkspace", () => ({
     onCancelComparison?: () => void;
     onSave?: (artifact: Artifact) => void | Promise<void>;
     onStartComparison?: () => void;
+    onStopGeneration?: () => void;
     selectedArtifactId: string | null;
     streamingProcessMaterials?: Array<{
       items: Array<{ meta?: string; subtitle?: string; title: string; url?: string }>;
@@ -181,6 +182,11 @@ vi.mock("@/components/artifacts/ArtifactWorkspace", () => ({
         <div data-testid="artifact-generation-status">
           {generationStatus}
         </div>
+        {props.onStopGeneration ? (
+          <button onClick={props.onStopGeneration} type="button">
+            停止
+          </button>
+        ) : null}
         {props.canCompareArtifacts || props.isComparisonMode ? (
           <button
             onClick={() => (props.isComparisonMode ? props.onCancelComparison?.() : props.onStartComparison?.())}
@@ -476,6 +482,37 @@ function controlledNdjsonResponse() {
     },
     close() {
       controller?.close();
+    }
+  };
+}
+
+function abortableControlledNdjsonResponse(signal: AbortSignal) {
+  const encoder = new TextEncoder();
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+  signal.addEventListener(
+    "abort",
+    () => {
+      controller?.error(new DOMException("User stopped generation.", "AbortError"));
+    },
+    { once: true }
+  );
+
+  return {
+    response: {
+      ok: true,
+      body: new ReadableStream<Uint8Array>({
+        start(streamController) {
+          controller = streamController;
+        }
+      }),
+      json: async () => {
+        throw new Error("stream response should not call json");
+      }
+    },
+    push(value: unknown) {
+      if (!controller) throw new Error("stream controller is not ready");
+      controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
     }
   };
 }
@@ -3058,6 +3095,95 @@ describe("TreeableApp", () => {
     });
   });
 
+  it("lets the user stop options generation without saving preview options", async () => {
+    const childNode = {
+      ...activeState.currentNode,
+      id: "node-2",
+      parentId: "node-1",
+      parentOptionId: "a" as const,
+      kind: "analysis" as const,
+      producedArtifactId: null,
+      sourceArtifactIds: ["artifact-1"],
+      roundIndex: 2,
+      roundIntent: "A",
+      options: []
+    };
+    const nodeOnlyState = {
+      ...activeState,
+      session: { ...activeState.session, currentNodeId: "node-2" },
+      currentNode: childNode,
+      currentArtifact: null,
+      artifacts: [activeState.currentArtifact],
+      selectedPath: [activeState.currentNode, childNode],
+      treeNodes: [activeState.currentNode, childNode]
+    };
+    const finalArtifact = testSocialPostArtifact(
+      "artifact-2",
+      "node-2",
+      { title: "Artifact", body: "Artifact body", hashtags: ["#artifact"], imagePrompt: "" },
+      ["artifact-1"]
+    );
+    const artifactState = {
+      ...nodeOnlyState,
+      currentNode: { ...childNode, kind: "artifact" as const, producedArtifactId: finalArtifact.id },
+      currentArtifact: finalArtifact,
+      artifacts: [activeState.currentArtifact, finalArtifact],
+      nodeArtifacts: [...activeState.nodeArtifacts, { nodeId: "node-2", artifact: finalArtifact }]
+    };
+    let optionsStream: ReturnType<typeof abortableControlledNdjsonResponse> | null = null;
+    let optionsSignal: AbortSignal | null = null;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: activeState }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: nodeOnlyState }) })
+      .mockResolvedValueOnce(ndjsonResponse([`${JSON.stringify({ type: "done", state: artifactState })}\n`]))
+      .mockImplementationOnce((_url: string, init?: RequestInit) => {
+        optionsSignal = init?.signal as AbortSignal;
+        optionsStream = abortableControlledNdjsonResponse(optionsSignal);
+        return Promise.resolve(optionsStream.response);
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "choose displayed option" }));
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        6,
+        "/api/sessions/session-1/options",
+        expect.objectContaining({
+          method: "POST",
+          signal: expect.any(AbortSignal),
+          body: JSON.stringify({ nodeId: "node-2" })
+        })
+      );
+    });
+
+    act(() => {
+      optionsStream!.push({
+        type: "options",
+        nodeId: "node-2",
+        roundIntent: "Preview choices",
+        options: [{ id: "a", label: "Preview A", description: "A", impact: "A", kind: "explore" }]
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId("canvas-options")).toHaveTextContent("Preview A");
+    });
+    await userEvent.click(screen.getByRole("button", { name: "停止" }));
+
+    await vi.waitFor(() => {
+      expect(optionsSignal?.aborted).toBe(true);
+      expect(screen.getByTestId("canvas-generation-stage")).toHaveTextContent("idle");
+    });
+    expect(screen.getByTestId("canvas-options")).not.toHaveTextContent("Preview A");
+    expect(screen.queryByText("生成下一步选项失败。")).not.toBeInTheDocument();
+  });
+
   it("moves artifact-stream routing thinking to the options area before option text arrives", async () => {
     const childNode = {
       ...activeState.currentNode,
@@ -3498,6 +3624,88 @@ describe("TreeableApp", () => {
       );
       expect(screen.getByTestId("canvas-generation-stage")).toHaveTextContent("idle");
     });
+  });
+
+  it("lets the user stop artifact generation without saving the partial stream", async () => {
+    const childNode = {
+      ...activeState.currentNode,
+      id: "node-2",
+      parentId: "node-1",
+      parentOptionId: "a" as const,
+      kind: "analysis" as const,
+      producedArtifactId: null,
+      sourceArtifactIds: ["artifact-1"],
+      roundIndex: 2,
+      roundIntent: "A",
+      options: []
+    };
+    const nodeOnlyState = {
+      ...activeState,
+      session: { ...activeState.session, currentNodeId: "node-2" },
+      currentNode: childNode,
+      currentArtifact: null,
+      artifacts: [activeState.currentArtifact],
+      selectedPath: [activeState.currentNode, childNode],
+      treeNodes: [activeState.currentNode, childNode]
+    };
+    const streamingArtifact = testSocialPostArtifact(
+      "streaming-node-2",
+      "node-2",
+      { title: "Partial", body: "Halfway body", hashtags: ["#partial"], imagePrompt: "" },
+      ["artifact-1"]
+    );
+    let artifactStream: ReturnType<typeof abortableControlledNdjsonResponse> | null = null;
+    let artifactSignal: AbortSignal | null = null;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: activeState }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ state: nodeOnlyState }) })
+      .mockImplementationOnce((_url: string, init?: RequestInit) => {
+        artifactSignal = init?.signal as AbortSignal;
+        artifactStream = abortableControlledNdjsonResponse(artifactSignal);
+        return Promise.resolve(artifactStream.response);
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "choose displayed option" }));
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        5,
+        "/api/sessions/session-1/artifact/generate/stream",
+        expect.objectContaining({
+          method: "POST",
+          signal: expect.any(AbortSignal),
+          body: JSON.stringify({ nodeId: "node-2" })
+        })
+      );
+    });
+
+    act(() => {
+      artifactStream!.push({ type: "artifact.replace", artifact: streamingArtifact });
+    });
+
+    expect(await screen.findByRole("button", { name: "停止" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "停止" }));
+
+    await vi.waitFor(() => {
+      expect(artifactSignal?.aborted).toBe(true);
+      expect(screen.getByTestId("canvas-generation-stage")).toHaveTextContent("idle");
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(screen.queryByText("生成下一版作品失败。")).not.toBeInTheDocument();
+    expect(liveArtifactMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        artifact: activeState.nodeArtifacts[0].artifact,
+        generationStage: null,
+        isGenerating: false,
+        selectedArtifactId: "artifact-1"
+      })
+    );
   });
 
   it("shows the parent artifact while waiting for the first streamed artifact", async () => {

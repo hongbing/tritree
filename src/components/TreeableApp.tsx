@@ -758,8 +758,14 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
       await requestNewSession(payload.enabledSkillIds);
       setLoadState("ready");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Seed 保存失败。");
+      handleGenerationError(error, "Seed 保存失败。");
     } finally {
+      setGenerationStage(null);
+      setStreamingArtifact(null);
+      setStreamingOptions(null);
+      setStreamingThinking(null);
+      setStreamingProcessMaterials(null);
+      activeGenerationStopRequestedRef.current = false;
       setIsBusy(false);
     }
   }
@@ -902,13 +908,14 @@ export function TreeableApp({ currentUser, initialSessionId, startNewWork = fals
     try {
       await requestNewSession();
     } catch (error) {
-      const text = error instanceof Error ? error.message : "启动创作失败。";
-      setMessage(
-        text.includes("Kimi API Key") || text.includes("KIMI_API_KEY")
-          ? "请在 .env.local 添加 ANTHROPIC_AUTH_TOKEN 或 KIMI_API_KEY，然后重启开发服务器。"
-          : text
-      );
+      handleGenerationError(error, "启动创作失败。");
     } finally {
+      setGenerationStage(null);
+      setStreamingArtifact(null);
+      setStreamingOptions(null);
+      setStreamingThinking(null);
+      setStreamingProcessMaterials(null);
+      activeGenerationStopRequestedRef.current = false;
       setIsBusy(false);
     }
   }

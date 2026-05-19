@@ -1709,6 +1709,70 @@ describe("TreeableApp", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(6, "/api/sessions/session-1/options", expect.objectContaining({ method: "POST" }));
   });
 
+  it("does not show the abort reason when the first generation is stopped", async () => {
+    const createdState = {
+      ...finishedState,
+      currentNode: { ...finishedState.currentNode, options: [] },
+      selectedPath: [],
+      treeNodes: []
+    };
+    let optionsSignal: AbortSignal | null = null;
+    let optionsStream: ReturnType<typeof abortableControlledNdjsonResponse> | null = null;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ rootMemory: null }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ inspirations: [] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          rootMemory: {
+            ...rootMemory,
+            preferences: {
+              ...rootMemory.preferences,
+              seed: "我想写 AI 产品经理的真实困境"
+            }
+          }
+        })
+      })
+      .mockResolvedValueOnce(jsonResponse({ state: createdState }))
+      .mockImplementationOnce((_url: string, init?: RequestInit) => {
+        optionsSignal = init?.signal as AbortSignal;
+        optionsStream = abortableControlledNdjsonResponse(optionsSignal);
+        return Promise.resolve(optionsStream.response);
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TreeableApp />);
+
+    await userEvent.type(await screen.findByRole("textbox", { name: "创作 seed" }), "我想写 AI 产品经理的真实困境");
+    await userEvent.click(screen.getByRole("button", { name: "用这个念头开始" }));
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        6,
+        "/api/sessions/session-1/options",
+        expect.objectContaining({
+          method: "POST",
+          signal: expect.any(AbortSignal),
+          body: JSON.stringify({ nodeId: "node-1" })
+        })
+      );
+      expect(screen.getByTestId("canvas-generation-stage")).toHaveTextContent("node-1:options");
+    });
+    expect(optionsStream).not.toBeNull();
+
+    await userEvent.click(await screen.findByRole("button", { name: "停止" }));
+
+    await vi.waitFor(() => {
+      expect(optionsSignal?.aborted).toBe(true);
+      expect(screen.queryByRole("button", { name: "停止" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId("canvas-generation-stage")).toHaveTextContent("idle");
+    expect(screen.queryByText("User stopped generation.")).not.toBeInTheDocument();
+    expect(screen.queryByText("生成下一步选项失败。")).not.toBeInTheDocument();
+  });
+
   it("lets the user start over with a new seed", async () => {
     const fetchMock = vi
       .fn()

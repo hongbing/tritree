@@ -247,35 +247,30 @@ function buildEditorMessages(state: SessionState, currentArtifact: Artifact | nu
     }
   ];
   const lastPathIndex = state.selectedPath.length - 1;
-  let latestRevisionSummary = "";
 
   state.selectedPath.forEach((node, index) => {
+    if (index > 0) {
+      const parent = state.selectedPath[index - 1];
+      const writingIntent = node.parentOptionId
+        ? (parent.options.find((option) => option.id === node.parentOptionId) ?? null)
+        : null;
+      messages.push({ role: "user", content: formatEditorBranchChoice(node, writingIntent) });
+    }
+
     if (node.agentMessages.length > 0) {
       messages.push(...node.agentMessages);
     }
 
-    if (node.options.length > 0) {
-      messages.push({ role: "assistant", content: formatEditorSuggestionRound(node) });
-    }
-
-    if (index >= lastPathIndex) return;
-
-    const nextNode = state.selectedPath[index + 1];
-    const writingIntent = nextNode.parentOptionId
-      ? (node.options.find((option) => option.id === nextNode.parentOptionId) ?? null)
-      : null;
-    const revisionSummary = formatEditorRevisionSummary(nextNode, writingIntent, artifactForNode(state, nextNode));
-
-    if (index + 1 === lastPathIndex) {
-      latestRevisionSummary = revisionSummary;
-    } else {
-      messages.push({ role: "user", content: revisionSummary });
+    if (index < lastPathIndex) {
+      const artifact = artifactForNode(state, node);
+      if (artifact) {
+        messages.push({ role: "assistant", content: formatEditorCompletedArtifact(node, artifact) });
+      }
     }
   });
 
   const finalReviewMaterial = formatEditorCurrentReviewMaterial({
     currentArtifact,
-    latestRevisionSummary,
     reviewInstruction
   });
 
@@ -386,39 +381,30 @@ function shouldRepeatArtifactContextForFinalRequest(state: SessionState) {
 
 function formatEditorCurrentReviewMaterial({
   currentArtifact,
-  latestRevisionSummary,
   reviewInstruction
 }: {
   currentArtifact: Artifact | null;
-  latestRevisionSummary: string;
   reviewInstruction: string;
 }) {
   return [
     "本轮审稿材料：",
     reviewInstruction ? `本轮要求：\n${reviewInstruction}` : "",
-    `当前内容：\n${currentArtifact ? formatArtifactForDirector(currentArtifact) : "暂无内容。"}`,
-    latestRevisionSummary
+    `当前内容：\n${currentArtifact ? formatArtifactForDirector(currentArtifact) : "暂无内容。"}`
   ]
     .filter(Boolean)
     .join("\n\n");
 }
 
-function formatEditorSuggestionRound(node: SessionState["selectedPath"][number]) {
-  return [
-    `第 ${node.roundIndex} 次澄清问题摘要`,
-    `当前问题：${truncateText(node.roundIntent, 120)}`,
-    `答案标题：${formatSuggestionsForDirector(node.options)}`
-  ].join("\n");
+function formatEditorBranchChoice(node: SessionState["selectedPath"][number], writingIntent: BranchOption | null) {
+  return writingIntent
+    ? `用户选择：${formatSuggestionForDirector(writingIntent)}`
+    : `用户继续推进：${node.roundIntent}`;
 }
 
-function formatEditorRevisionSummary(
-  node: SessionState["selectedPath"][number],
-  writingIntent: BranchOption | null,
-  artifact: Artifact | null
-) {
+function formatEditorCompletedArtifact(node: SessionState["selectedPath"][number], artifact: Artifact) {
   return [
-    `最近一次修改：${writingIntent ? writingIntent.label : node.roundIntent}`,
-    `形成产物：${artifact ? formatArtifactVersionSummary(artifact) : node.roundIntent}`
+    `第 ${node.roundIndex} 轮已形成产物`,
+    `形成产物：${formatArtifactVersionSummary(artifact)}`
   ].join("\n");
 }
 

@@ -316,8 +316,8 @@ describe("summarizeSessionForDirector", () => {
     expect(JSON.stringify(workMessages)).toContain("第 1 版已形成产物");
     expect(optionMessages).toContainEqual(expect.objectContaining({ role: "tool", content: expect.any(Array) }));
     expect(JSON.stringify(optionMessages)).toContain("青岛三天两晚攻略");
-    expect(JSON.stringify(optionMessages)).toContain("第 1 次澄清问题摘要");
-    expect(JSON.stringify(optionMessages)).toContain("答案标题：");
+    expect(JSON.stringify(optionMessages)).not.toContain("第 1 次澄清问题摘要");
+    expect(JSON.stringify(optionMessages)).not.toContain("答案标题：");
   });
 
   it("puts the direction range into editor conversation messages", () => {
@@ -638,27 +638,81 @@ describe("summarizeSessionForDirector", () => {
     const messages = (summary as any).messages as Array<{ role: string; content: string }>;
     const finalMessage = messages.at(-1)?.content ?? "";
 
-    expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+    expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "user", "user"]);
     expect(messages[0].content).toContain("初始内容：");
-    expect(messages[1].content).toContain("第 1 次澄清问题摘要");
-    expect(messages[1].content).toContain("答案标题：扩写完整经历；分析为什么写；确定写给谁看");
-    expect(messages[1].content).not.toContain("扩写完整经历的说明");
-    expect(finalMessage).toContain("最近一次修改：确定写给谁看");
+    expect(messages[1].content).toContain("第 1 轮已形成产物");
+    expect(messages[1].content).toContain("形成产物：");
+    expect(messages[1].content).not.toContain("第 1 次澄清问题摘要");
+    expect(messages[1].content).not.toContain("答案标题：扩写完整经历；分析为什么写；确定写给谁看");
+    expect(messages[2].content).toContain("用户选择：确定写给谁看");
+    expect(messages[2].content).toContain("确定写给谁看的说明");
+    expect(finalMessage).not.toContain("最近一次修改：确定写给谁看");
     expect(finalMessage).not.toContain("确定写给谁看的说明");
-    expect(finalMessage).toContain("确定写给谁看");
     expect(finalMessage).toContain("当前内容：");
     expect(finalMessage).toContain("本轮审稿材料：");
     expect(finalMessage).not.toContain("暂未采纳");
     expect(finalMessage).not.toContain("已出现过的建议");
     expect(finalMessage).not.toContain("扩写完整经历；分析为什么写");
     expect(finalMessage).not.toContain("扩写完整经历的说明");
-    expect(finalMessage.indexOf("当前内容：")).toBeLessThan(finalMessage.indexOf("最近一次修改："));
     expect(finalMessage).not.toContain("请作为责任编辑");
     expect(finalMessage).not.toContain("提出三个建议");
     expect(finalMessage).not.toContain("用户刚刚选择");
     expect(finalMessage).not.toContain("用户选择");
     expect(finalMessage).not.toContain("三选一");
     expectNoProcessTerms(finalMessage);
+  });
+
+  it("models a branch choice as a user message before the chosen turn agent trace", () => {
+    const state = createStateWithPath([
+      createNode({
+        id: "root",
+        roundIndex: 1,
+        options: [
+          option("a", "DeepSeek <think> 幻觉事件"),
+          option("b", "微塑料生活观察"),
+          option("c", "组织收缩期观察")
+        ],
+        selectedOptionId: "a"
+      }),
+      createNode({
+        id: "current",
+        parentId: "root",
+        parentOptionId: "a",
+        roundIndex: 2,
+        options: [],
+        selectedOptionId: null,
+        agentMessages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool-call",
+                toolCallId: "load-skill",
+                toolName: "load_skill",
+                input: { skillId: "system-writer" }
+              }
+            ]
+          }
+        ]
+      })
+    ]);
+
+    const summary = summarizeCurrentArtifactOptionsForDirector(state);
+    const messages = (summary as any).messages as Array<{ role: string; content: unknown }>;
+    const serializedMessages = JSON.stringify(messages);
+    const selectionIndex = messages.findIndex(
+      (message) =>
+        message.role === "user" &&
+        typeof message.content === "string" &&
+        message.content.includes("用户选择：DeepSeek <think> 幻觉事件")
+    );
+    const chosenTurnToolIndex = messages.findIndex((message) => JSON.stringify(message.content).includes("load_skill"));
+
+    expect(serializedMessages).not.toContain("第 1 次澄清问题摘要");
+    expect(serializedMessages).not.toContain("答案标题：");
+    expect(selectionIndex).toBeGreaterThan(-1);
+    expect(chosenTurnToolIndex).toBeGreaterThan(-1);
+    expect(selectionIndex).toBeLessThan(chosenTurnToolIndex);
   });
 
   it("does not borrow an ancestor artifact when the current clarification node has no artifact", () => {

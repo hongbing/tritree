@@ -24,6 +24,8 @@ const repositorySystemSkills: ConfiguredSystemSkill[] = [
     prompt: "你是写作者。负责把 seed、当前作品、用户选择和已启用技能写成下一版作品。",
     appliesTo: "writer",
     defaultEnabled: true,
+    defaultLoaded: true,
+    parentSkillId: null,
     isArchived: false,
     sortOrder: 0
   },
@@ -35,12 +37,15 @@ const repositorySystemSkills: ConfiguredSystemSkill[] = [
     prompt: "你是审核者。负责判断当前作品最需要创作者澄清、选择或推进什么。",
     appliesTo: "editor",
     defaultEnabled: true,
+    defaultLoaded: true,
+    parentSkillId: null,
     isArchived: false,
     sortOrder: 1
   }
 ];
 
 const defaultSystemSkillIds = [
+  "system-creator",
   "system-planner",
   "system-researcher",
   "system-writer",
@@ -726,6 +731,12 @@ describe("Treeable repository", () => {
     const state = await createSessionWithOptions(repo, user.id);
 
     expect(state.enabledSkillIds).toEqual(defaultSystemSkillIds);
+    expect(state.enabledSkills.find((skill) => skill.id === "system-creator")?.defaultLoaded).toBe(true);
+    expect(state.enabledSkills.find((skill) => skill.id === "system-creator")?.parentSkillId).toBeNull();
+    for (const skillId of defaultSystemSkillIds.filter((id) => id !== "system-creator")) {
+      expect(state.enabledSkills.find((skill) => skill.id === skillId)?.defaultLoaded).toBe(false);
+      expect(state.enabledSkills.find((skill) => skill.id === skillId)?.parentSkillId).toBe("system-creator");
+    }
 
     const updated = repo.replaceSessionEnabledSkills(user.id, state.session.id, ["system-writer"]);
 

@@ -27,6 +27,12 @@ const defaultPreferences = {
 
 const visibleRequestOptionCount = 6;
 
+type SkillSummaryItem = {
+  enabledSkillCount: number;
+  id: string;
+  title: string;
+};
+
 function splitCreationRequest(value: string) {
   return value
     .split(/[，,\n]/)
@@ -36,6 +42,36 @@ function splitCreationRequest(value: string) {
 
 function formatCreationRequest(parts: string[]) {
   return parts.join("，");
+}
+
+function summarizeEnabledSkills(selectedSkills: Skill[]): SkillSummaryItem[] {
+  const selectedIds = new Set(selectedSkills.map((skill) => skill.id));
+  const childCountByParentId = new Map<string, number>();
+
+  for (const skill of selectedSkills) {
+    if (!skill.parentSkillId || !selectedIds.has(skill.parentSkillId)) continue;
+    childCountByParentId.set(skill.parentSkillId, (childCountByParentId.get(skill.parentSkillId) ?? 0) + 1);
+  }
+
+  return selectedSkills
+    .filter((skill) => !skill.parentSkillId || !selectedIds.has(skill.parentSkillId))
+    .map((skill) => ({
+      enabledSkillCount: 1 + (childCountByParentId.get(skill.id) ?? 0),
+      id: skill.id,
+      title: skill.title
+    }));
+}
+
+function formatEnabledSkillSummaryCopy(summarySkills: SkillSummaryItem[], selectedSkillCount: number) {
+  const groupCount = summarySkills.filter((skill) => skill.enabledSkillCount > 1).length;
+
+  if (groupCount > 0) return `已启用 ${groupCount} 个技能组，${selectedSkillCount} 个技能`;
+  return `已启用 ${selectedSkillCount} 个技能`;
+}
+
+function formatSkillSummaryTitle(skill: SkillSummaryItem) {
+  if (skill.enabledSkillCount <= 1) return skill.title;
+  return `${skill.title}（含 ${skill.enabledSkillCount} 个）`;
 }
 
 function inspirationAppliesToArtifactType(inspiration: Inspiration, artifactTypeId: ArtifactTypeId) {
@@ -106,8 +142,10 @@ export function RootMemorySetup({
     () => orderSkillsForDisplay(skills.filter((skill) => selectedSkillIds.includes(skill.id))),
     [selectedSkillIds, skills]
   );
-  const summarySkills = selectedSkills.slice(0, 3);
-  const remainingSkillCount = Math.max(0, selectedSkills.length - summarySkills.length);
+  const summarySkills = useMemo(() => summarizeEnabledSkills(selectedSkills), [selectedSkills]);
+  const skillSummaryCopy = formatEnabledSkillSummaryCopy(summarySkills, selectedSkills.length);
+  const visibleSummarySkills = summarySkills.slice(0, 3);
+  const remainingSkillCount = Math.max(0, summarySkills.length - visibleSummarySkills.length);
   const creationRequestParts = splitCreationRequest(creationRequest);
   const visibleCreationRequestOptions = areAllRequestOptionsVisible
     ? creationRequestOptions
@@ -551,7 +589,7 @@ export function RootMemorySetup({
           <div className="root-setup__skills-header">
             <div>
               <p className="eyebrow">本作品启用技能</p>
-              <p className="root-setup__skills-copy">已启用 {selectedSkills.length} 个技能</p>
+              <p className="root-setup__skills-copy">{skillSummaryCopy}</p>
             </div>
             <div className="root-setup__skills-actions">
               {isSkillPickerOpen ? (
@@ -579,8 +617,8 @@ export function RootMemorySetup({
           <div aria-label="已启用技能摘要" className="root-setup__skill-summary">
             {selectedSkills.length > 0 ? (
               <div className="root-setup__skill-tags">
-                {summarySkills.map((skill) => (
-                  <span key={skill.id}>{skill.title}</span>
+                {visibleSummarySkills.map((skill) => (
+                  <span key={skill.id}>{formatSkillSummaryTitle(skill)}</span>
                 ))}
                 {remainingSkillCount > 0 ? (
                   <button

@@ -55,6 +55,8 @@ export const skills = sqliteTable("skills", {
   appliesTo: text("applies_to").notNull().default("both"),
   isSystem: integer("is_system").notNull(),
   defaultEnabled: integer("default_enabled").notNull(),
+  defaultLoaded: integer("default_loaded").notNull().default(1),
+  parentSkillId: text("parent_skill_id"),
   isArchived: integer("is_archived").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`)

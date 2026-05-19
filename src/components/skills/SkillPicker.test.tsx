@@ -66,19 +66,23 @@ describe("SkillPicker", () => {
 
   it("orders content team skills by the creation workflow", () => {
     const contentTeamSkills: Skill[] = [
-      contentTeamSkill("system-writer", "写手", 2),
-      contentTeamSkill("system-publisher", "发布编辑", 4),
-      contentTeamSkill("system-reviewer", "审稿", 3),
-      contentTeamSkill("system-planner", "策划", 0),
-      contentTeamSkill("system-researcher", "资料员", 1)
+      contentTeamSkill("system-creator", "创作者", 0, { defaultLoaded: true }),
+      contentTeamSkill("system-writer", "写手", 3, { parentSkillId: "system-creator" }),
+      contentTeamSkill("system-publisher", "发布编辑", 5, { parentSkillId: "system-creator" }),
+      contentTeamSkill("system-reviewer", "审稿", 4, { parentSkillId: "system-creator" }),
+      contentTeamSkill("system-planner", "策划", 1, { parentSkillId: "system-creator" }),
+      contentTeamSkill("system-researcher", "资料员", 2, { parentSkillId: "system-creator" })
     ];
 
     render(<SkillPicker skills={contentTeamSkills} selectedSkillIds={contentTeamSkills.map((skill) => skill.id)} onChange={vi.fn()} />);
 
     const contentTeamGroup = screen.getByRole("group", { name: "内容团队" });
-    const labels = within(contentTeamGroup).getAllByRole("checkbox").map((checkbox) => checkbox.closest("label")?.textContent);
+    const creatorGroup = within(contentTeamGroup).getByRole("group", { name: "创作者" });
+    const labels = within(creatorGroup).getAllByRole("checkbox").map((checkbox) => checkbox.closest("label")?.textContent);
 
     expect(labels).toEqual([
+      expect.stringContaining("创作者"),
+      expect.stringContaining("整体流程"),
       expect.stringContaining("策划"),
       expect.stringContaining("资料员"),
       expect.stringContaining("写手"),
@@ -86,9 +90,29 @@ describe("SkillPicker", () => {
       expect.stringContaining("发布编辑")
     ]);
   });
+
+  it("lets users cancel a child skill without disabling the whole creator group", async () => {
+    const contentTeamSkills: Skill[] = [
+      contentTeamSkill("system-creator", "创作者", 0, { defaultLoaded: true }),
+      contentTeamSkill("system-planner", "策划", 1, { parentSkillId: "system-creator" }),
+      contentTeamSkill("system-researcher", "资料员", 2, { parentSkillId: "system-creator" })
+    ];
+    const onChange = vi.fn();
+
+    render(<SkillPicker skills={contentTeamSkills} selectedSkillIds={contentTeamSkills.map((skill) => skill.id)} onChange={onChange} />);
+
+    await userEvent.click(screen.getByRole("checkbox", { name: /资料员/ }));
+
+    expect(onChange).toHaveBeenCalledWith(["system-creator", "system-planner"]);
+  });
 });
 
-function contentTeamSkill(id: string, title: string, sortOrder: number): Skill {
+function contentTeamSkill(
+  id: string,
+  title: string,
+  sortOrder: number,
+  overrides: Partial<Skill> = {}
+): Skill {
   return {
     id,
     title,
@@ -99,8 +123,11 @@ function contentTeamSkill(id: string, title: string, sortOrder: number): Skill {
     isSystem: true,
     sortOrder,
     defaultEnabled: true,
+    defaultLoaded: false,
+    parentSkillId: null,
     isArchived: false,
     createdAt: "2026-05-01T00:00:00.000Z",
-    updatedAt: "2026-05-01T00:00:00.000Z"
+    updatedAt: "2026-05-01T00:00:00.000Z",
+    ...overrides
   };
 }

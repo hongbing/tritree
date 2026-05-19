@@ -71,6 +71,15 @@ export type InstalledSkillDocumentOutput = {
   skillName: string;
 };
 
+export type SessionSkillDocumentOutput = {
+  content: string;
+  description: string;
+  id: string;
+  ok: true;
+  parentSkillId: string | null;
+  title: string;
+};
+
 type InstalledSkillDocumentEntry = SkillDocumentSummary & {
   content: string;
   filePath: string;
@@ -189,21 +198,64 @@ export async function createSkillRuntimeTools(
     runCommand?: SkillCommandRunner;
     stateRoot?: string;
   } = {}
-): Promise<{ availableSkillSummaries: string[]; enabledSkills: Skill[]; toolSummaries: string[]; tools: ToolsInput }> {
+): Promise<{
+  availableSkillSummaries: string[];
+  enabledSkills: Skill[];
+  toolLabels: Record<string, string>;
+  toolSummaries: string[];
+  tools: ToolsInput;
+}> {
+  const loadableSessionSkills = enabledSkills.filter((skill) => skill.defaultLoaded === false && skill.prompt.trim().length > 0);
   const installedSkillNames = enabledSkills
     .map((skill) => skill.id)
     .filter((skillName) => isInstalledSkill(installRoot, skillName));
   const executableSkillNames = installedSkillNames
     .filter((skillName) => isInstalledExecutableSkill(installRoot, skillName));
-  const progressiveEnabledSkills = enabledSkills.map((skill) =>
-    installedSkillNames.includes(skill.id) ? compactInstalledSkillPrompt(skill, installRoot) : skill
-  );
+  const progressiveEnabledSkills = enabledSkills.map((skill) => {
+    if (skill.defaultLoaded === false) return { ...skill, prompt: "" };
+    return installedSkillNames.includes(skill.id) ? compactInstalledSkillPrompt(skill, installRoot) : skill;
+  });
   const availableSkillSummaries = installedSkillNames.flatMap((skillName) => skillDocumentSummaryLines(installRoot, skillName));
+  const toolLabels: Record<string, string> = {};
   const toolSummaries: string[] = [];
   const tools: ToolsInput = {};
 
+  if (loadableSessionSkills.length > 0) {
+    const loadableIds = loadableSessionSkills.map((skill) => skill.id);
+    for (const skill of loadableSessionSkills) {
+      toolLabels[`load_skill:${skill.id}`] = skill.title;
+    }
+    const loadSkill = createTool({
+      id: "load_skill",
+      description:
+        "Load the full prompt for an enabled Tritree session skill that was listed as available but not expanded in the active instructions.",
+      inputSchema: z.object({
+        skillId: z.enum(loadableIds as [string, ...string[]]).describe("Enabled session skill id.")
+      }),
+      execute: async ({ skillId }): Promise<SessionSkillDocumentOutput> => {
+        const skill = loadableSessionSkills.find((item) => item.id === skillId);
+        if (!skill) throw new Error(`Skill ${skillId} is not enabled for this session.`);
+        return {
+          content: skill.prompt,
+          description: skill.description,
+          id: skill.id,
+          ok: true,
+          parentSkillId: skill.parentSkillId ?? null,
+          title: skill.title
+        };
+      }
+    });
+    tools.load_skill = loadSkill;
+    toolSummaries.push(
+      `load_skill：按需加载本 session 已启用但未默认展开的 Skill 全文。可加载 Skill：${loadableIds.join("、")}。只有任务需要某个子 Skill 的具体规则时才调用；未启用的 Skill 不可加载。`
+    );
+  }
+
   if (installedSkillNames.length === 0) {
-    return { availableSkillSummaries: [], enabledSkills, toolSummaries: [], tools: {} };
+    if (loadableSessionSkills.length > 0) {
+      return { availableSkillSummaries: [], enabledSkills: progressiveEnabledSkills, toolLabels, toolSummaries, tools };
+    }
+    return { availableSkillSummaries: [], enabledSkills, toolLabels, toolSummaries: [], tools: {} };
   }
 
   const loadSkillDocument = createTool({
@@ -254,6 +306,7 @@ export async function createSkillRuntimeTools(
   return {
     availableSkillSummaries,
     enabledSkills: progressiveEnabledSkills,
+    toolLabels,
     toolSummaries,
     tools
   };

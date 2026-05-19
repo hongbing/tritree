@@ -1295,6 +1295,20 @@ button:disabled {
   font-weight: 900;
 }
 
+.skill-picker__subgroup {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.skill-picker__children {
+  display: grid;
+  gap: 6px;
+  padding-left: 18px;
+}
+
 .skill-picker__item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -1304,6 +1318,10 @@ button:disabled {
   background: #ffffff;
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 8px;
+}
+
+.skill-picker__item--group {
+  background: rgba(240, 253, 250, 0.72);
 }
 
 .skill-picker__item span {

@@ -101,6 +101,51 @@ describe("buildSharedAgentContext", () => {
     expect(context).not.toContain("# 内容工作流阶段");
     expect(context).not.toContain("AI Director");
   });
+
+  it("expands only default-loaded skills while listing unloaded enabled skills as loadable", () => {
+    const context = buildSharedAgentContext({
+      rootSummary: "",
+      learnedSummary: "",
+      enabledSkills: [
+        {
+          id: "system-creator",
+          title: "创作者",
+          category: "content-team",
+          description: "统筹创作流程。",
+          prompt: "创作者整体流程正文。",
+          appliesTo: "both",
+          isSystem: true,
+          defaultEnabled: true,
+          defaultLoaded: true,
+          parentSkillId: null,
+          isArchived: false,
+          createdAt: "2026-05-19T00:00:00.000Z",
+          updatedAt: "2026-05-19T00:00:00.000Z"
+        },
+        {
+          id: "system-planner",
+          title: "策划",
+          category: "content-team",
+          description: "负责方向判断。",
+          prompt: "策划子技能完整正文。",
+          appliesTo: "both",
+          isSystem: true,
+          defaultEnabled: true,
+          defaultLoaded: false,
+          parentSkillId: "system-creator",
+          isArchived: false,
+          createdAt: "2026-05-19T00:00:00.000Z",
+          updatedAt: "2026-05-19T00:00:00.000Z"
+        }
+      ]
+    });
+
+    expect(context).toContain("要求：创作者整体流程正文。");
+    expect(context).toContain("## Skill: 策划");
+    expect(context).toContain("加载状态：按需加载");
+    expect(context).toContain("父级 Skill：system-creator");
+    expect(context).not.toContain("策划子技能完整正文。");
+  });
 });
 
 describe("agent instructions", () => {

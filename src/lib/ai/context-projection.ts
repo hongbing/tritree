@@ -89,7 +89,9 @@ function formatSkill(skill: Skill) {
   return [
     `Skill: ${skill.title}`,
     `说明：${skill.description || "无补充说明。"}`,
-    skill.prompt.trim() ? `要求：${skill.prompt.trim()}` : ""
+    `加载状态：${skill.defaultLoaded === false ? "按需加载" : "默认加载"}`,
+    skill.parentSkillId ? `父级 Skill：${skill.parentSkillId}` : "",
+    skill.defaultLoaded === false ? "要求：未展开，按需加载后再使用具体规则。" : skill.prompt.trim() ? `要求：${skill.prompt.trim()}` : ""
   ]
     .filter(Boolean)
     .join("\n");

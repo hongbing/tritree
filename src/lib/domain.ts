@@ -16,6 +16,8 @@ export const SkillUpsertSchema = z.object({
   prompt: z.string().trim().min(1).max(MAX_SKILL_PROMPT_LENGTH),
   appliesTo: SkillAppliesToSchema.default("both"),
   defaultEnabled: z.boolean().default(false),
+  defaultLoaded: z.boolean().optional(),
+  parentSkillId: z.string().trim().min(1).nullable().optional(),
   isArchived: z.boolean().default(false)
 });
 

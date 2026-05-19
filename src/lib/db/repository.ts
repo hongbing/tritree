@@ -162,6 +162,8 @@ type SkillRow = {
   sort_order: number;
   is_system: number;
   default_enabled: number;
+  default_loaded?: number;
+  parent_skill_id?: string | null;
   is_archived: number;
   created_at: string;
   updated_at: string;
@@ -358,6 +360,8 @@ function toSkill(row: SkillRow): Skill {
     isSystem: Boolean(row.is_system),
     sortOrder: row.sort_order,
     defaultEnabled: Boolean(row.default_enabled),
+    defaultLoaded: row.default_loaded === undefined ? true : Boolean(row.default_loaded),
+    parentSkillId: row.parent_skill_id ?? null,
     isArchived: Boolean(row.is_archived),
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -440,7 +444,7 @@ export function createTreeableRepository(
         db.prepare(
           `
             UPDATE skills
-            SET user_id = NULL, title = ?, category = ?, description = ?, prompt = ?, applies_to = ?, sort_order = ?, is_system = 1, default_enabled = ?, is_archived = ?, updated_at = ?
+            SET user_id = NULL, title = ?, category = ?, description = ?, prompt = ?, applies_to = ?, sort_order = ?, is_system = 1, default_enabled = ?, default_loaded = ?, parent_skill_id = ?, is_archived = ?, updated_at = ?
             WHERE id = ?
           `
         ).run(
@@ -451,6 +455,8 @@ export function createTreeableRepository(
           parsed.appliesTo,
           sortOrder,
           parsed.defaultEnabled ? 1 : 0,
+          (parsed.defaultLoaded ?? true) ? 1 : 0,
+          parsed.parentSkillId ?? null,
           parsed.isArchived ? 1 : 0,
           timestamp,
           skill.id
@@ -458,8 +464,8 @@ export function createTreeableRepository(
       } else {
         db.prepare(
           `
-            INSERT INTO skills (id, title, category, description, prompt, applies_to, sort_order, is_system, default_enabled, is_archived, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+            INSERT INTO skills (id, title, category, description, prompt, applies_to, sort_order, is_system, default_enabled, default_loaded, parent_skill_id, is_archived, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
           `
         ).run(
           skill.id,
@@ -470,6 +476,8 @@ export function createTreeableRepository(
           parsed.appliesTo,
           sortOrder,
           parsed.defaultEnabled ? 1 : 0,
+          (parsed.defaultLoaded ?? true) ? 1 : 0,
+          parsed.parentSkillId ?? null,
           parsed.isArchived ? 1 : 0,
           timestamp,
           timestamp
@@ -755,8 +763,8 @@ export function createTreeableRepository(
     const timestamp = now();
     db.prepare(
       `
-        INSERT INTO skills (id, user_id, title, category, description, prompt, applies_to, is_system, default_enabled, is_archived, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+        INSERT INTO skills (id, user_id, title, category, description, prompt, applies_to, is_system, default_enabled, default_loaded, parent_skill_id, is_archived, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
       `
     ).run(
       id,
@@ -767,6 +775,8 @@ export function createTreeableRepository(
       parsed.prompt,
       parsed.appliesTo,
       parsed.defaultEnabled ? 1 : 0,
+      (parsed.defaultLoaded ?? true) ? 1 : 0,
+      parsed.parentSkillId ?? null,
       parsed.isArchived ? 1 : 0,
       timestamp,
       timestamp
@@ -816,7 +826,7 @@ export function createTreeableRepository(
       db.prepare(
         `
           UPDATE skills
-          SET title = ?, category = ?, description = ?, prompt = ?, applies_to = ?, default_enabled = ?, is_archived = ?, updated_at = ?
+          SET title = ?, category = ?, description = ?, prompt = ?, applies_to = ?, default_enabled = ?, default_loaded = ?, parent_skill_id = ?, is_archived = ?, updated_at = ?
           WHERE id = ?
         `
       ).run(
@@ -826,6 +836,8 @@ export function createTreeableRepository(
         parsed.prompt,
         parsed.appliesTo,
         parsed.defaultEnabled ? 1 : 0,
+        (parsed.defaultLoaded ?? true) ? 1 : 0,
+        parsed.parentSkillId ?? null,
         parsed.isArchived ? 1 : 0,
         timestamp,
         input.id
@@ -833,8 +845,8 @@ export function createTreeableRepository(
     } else {
       db.prepare(
         `
-          INSERT INTO skills (id, title, category, description, prompt, applies_to, is_system, default_enabled, is_archived, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+          INSERT INTO skills (id, title, category, description, prompt, applies_to, is_system, default_enabled, default_loaded, parent_skill_id, is_archived, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
         `
       ).run(
         input.id,
@@ -844,6 +856,8 @@ export function createTreeableRepository(
         parsed.prompt,
         parsed.appliesTo,
         parsed.defaultEnabled ? 1 : 0,
+        (parsed.defaultLoaded ?? true) ? 1 : 0,
+        parsed.parentSkillId ?? null,
         parsed.isArchived ? 1 : 0,
         timestamp,
         timestamp
@@ -866,13 +880,15 @@ export function createTreeableRepository(
       prompt: input.prompt ?? existing.prompt,
       appliesTo: input.appliesTo ?? existing.applies_to ?? "both",
       defaultEnabled: input.defaultEnabled ?? Boolean(existing.default_enabled),
+      defaultLoaded: input.defaultLoaded ?? (existing.default_loaded === undefined ? true : Boolean(existing.default_loaded)),
+      parentSkillId: input.parentSkillId === undefined ? existing.parent_skill_id ?? null : input.parentSkillId,
       isArchived: input.isArchived ?? Boolean(existing.is_archived)
     });
     const timestamp = now();
     db.prepare(
       `
         UPDATE skills
-        SET title = ?, category = ?, description = ?, prompt = ?, applies_to = ?, default_enabled = ?, is_archived = ?, updated_at = ?
+        SET title = ?, category = ?, description = ?, prompt = ?, applies_to = ?, default_enabled = ?, default_loaded = ?, parent_skill_id = ?, is_archived = ?, updated_at = ?
         WHERE id = ? AND (user_id IS NULL OR user_id = ?)
       `
     ).run(
@@ -882,6 +898,8 @@ export function createTreeableRepository(
       parsed.prompt,
       parsed.appliesTo,
       parsed.defaultEnabled ? 1 : 0,
+      (parsed.defaultLoaded ?? true) ? 1 : 0,
+      parsed.parentSkillId ?? null,
       parsed.isArchived ? 1 : 0,
       timestamp,
       skillId,

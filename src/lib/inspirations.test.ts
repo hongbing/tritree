@@ -19,6 +19,8 @@ const defaultSystemSkills: ConfiguredDefaults["systemSkills"] = [
     appliesTo: "writer",
     sortOrder: 0,
     defaultEnabled: true,
+    defaultLoaded: true,
+    parentSkillId: null,
     isArchived: false
   }
 ];

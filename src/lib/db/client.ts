@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-const CURRENT_SCHEMA_VERSION = 12;
+const CURRENT_SCHEMA_VERSION = 13;
 const CONTENT_RESET_SCHEMA_VERSION = 12;
 const TREEABLE_CONTENT_TABLES = [
   "artifacts",
@@ -116,6 +116,8 @@ function createSchema(sqlite: DatabaseSync) {
       sort_order INTEGER NOT NULL DEFAULT 0,
       is_system INTEGER NOT NULL,
       default_enabled INTEGER NOT NULL,
+      default_loaded INTEGER NOT NULL DEFAULT 1,
+      parent_skill_id TEXT,
       is_archived INTEGER NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -197,6 +199,8 @@ function createSchema(sqlite: DatabaseSync) {
   addColumnIfMissing(sqlite, "tree_nodes", "agent_messages_json", "TEXT NOT NULL DEFAULT '[]'");
   addColumnIfMissing(sqlite, "skills", "applies_to", "TEXT NOT NULL DEFAULT 'both'");
   addColumnIfMissing(sqlite, "skills", "sort_order", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(sqlite, "skills", "default_loaded", "INTEGER NOT NULL DEFAULT 1");
+  addColumnIfMissing(sqlite, "skills", "parent_skill_id", "TEXT");
   addColumnIfMissing(sqlite, "root_memory", "user_id", "TEXT REFERENCES users(id)");
   addColumnIfMissing(sqlite, "sessions", "user_id", "TEXT REFERENCES users(id)");
   addColumnIfMissing(sqlite, "sessions", "is_archived", "INTEGER NOT NULL DEFAULT 0");

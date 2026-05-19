@@ -10,13 +10,22 @@ import {
 
 const exampleDefaultsConfigPath = path.resolve("config/defaults.example.json");
 const defaultSystemSkillIds = [
+  "system-creator",
   "system-planner",
   "system-researcher",
   "system-writer",
   "system-reviewer",
   "system-publisher"
 ];
-const roleSectionPhrases = ["角色职责", "有用输出", "适合委托", "调用前最小上下文"];
+const defaultLoadedSystemSkillIds = ["system-creator"];
+const creatorChildSkillIds = [
+  "system-planner",
+  "system-researcher",
+  "system-writer",
+  "system-reviewer",
+  "system-publisher"
+];
+const roleSectionPhrases = ["角色职责", "有用输出", "调用前最小上下文"];
 const protocolPhrases = ["roundIntent", "options[]", "三个答案", "让用户选择"];
 
 const validConfig = JSON.stringify({
@@ -210,11 +219,32 @@ describe("defaults config loader", () => {
 
     expect(defaults.systemSkills.map((skill) => skill.id)).toEqual(defaultSystemSkillIds);
     expect(defaults.systemSkills).toHaveLength(defaultSystemSkillIds.length);
+    expect(systemSkillsById.get("system-creator")?.title).toBe("创作者");
     expect(systemSkillsById.get("system-planner")?.title).toBe("策划");
     expect(systemSkillsById.get("system-researcher")?.title).toBe("资料员");
     expect(systemSkillsById.get("system-writer")?.title).toBe("写手");
     expect(systemSkillsById.get("system-reviewer")?.title).toBe("审稿");
     expect(systemSkillsById.get("system-publisher")?.title).toBe("发布编辑");
+    expect(systemSkillsById.get("system-creator")?.defaultLoaded).toBe(true);
+    expect(systemSkillsById.get("system-creator")?.parentSkillId).toBeNull();
+    expect(defaults.systemSkills.filter((skill) => skill.defaultLoaded).map((skill) => skill.id)).toEqual(
+      defaultLoadedSystemSkillIds
+    );
+    for (const skillId of creatorChildSkillIds) {
+      expect(systemSkillsById.get(skillId)?.parentSkillId).toBe("system-creator");
+      expect(systemSkillsById.get(skillId)?.defaultLoaded).toBe(false);
+    }
+    expect(systemSkillsById.get("system-creator")?.prompt).toContain("创作流程总览");
+    expect(systemSkillsById.get("system-creator")?.prompt).toContain("先判断当前最值得推进的是方向、资料、成稿、审稿还是发布收口");
+    expect(systemSkillsById.get("system-creator")?.prompt).toContain("方向不清时用策划");
+    expect(systemSkillsById.get("system-creator")?.prompt).toContain("需要事实、例子或来源时用资料员");
+    expect(systemSkillsById.get("system-creator")?.prompt).toContain("需要正文产出或改写时用写手");
+    expect(systemSkillsById.get("system-creator")?.prompt).toContain("需要质量判断时用审稿");
+    expect(systemSkillsById.get("system-creator")?.prompt).toContain("接近交付时用发布编辑");
+    expect(systemSkillsById.get("system-creator")?.prompt).toContain("先调用 load_skill");
+    expect(systemSkillsById.get("system-creator")?.prompt).toContain("load_skill(system-writer)");
+    expect(systemSkillsById.get("system-creator")?.prompt).toContain("不要只凭总览模拟子 skill");
+    expect(systemSkillsById.get("system-creator")?.prompt).toContain("用户可见输出必须落到本轮目标产物");
     expect(systemSkillsById.get("system-planner")?.prompt).toContain("内容创作通常会在策划、资料、写作、审稿和发布编辑之间往复");
     expect(systemSkillsById.get("system-planner")?.prompt).toContain("已经生成草稿后，也可以回到找资料");
     expect(systemSkillsById.get("system-researcher")?.prompt).toContain("material-search");
@@ -222,10 +252,15 @@ describe("defaults config loader", () => {
     expect(systemSkillsById.get("system-researcher")?.prompt).toContain("优先主动使用可用搜索、检索、MCP 或资料型能力获取或核验外部材料");
     expect(systemSkillsById.get("system-researcher")?.prompt).toContain("交叉验证");
     expect(systemSkillsById.get("system-researcher")?.prompt).toContain("不得编造来源、数字、人物话语或时间线");
+    expect(systemSkillsById.get("system-researcher")?.prompt).toContain("无法核验时标注待确认");
     expect(systemSkillsById.get("system-researcher")?.prompt).toContain("关键材料转成用户可见摘要");
+    expect(systemSkillsById.get("system-writer")?.prompt).toContain("若作品类型需要标题、话题或配图提示");
     expect(systemSkillsById.get("system-publisher")?.prompt).not.toContain("platform-rewrite");
+    for (const skill of defaults.systemSkills) {
+      expect(skill.prompt).not.toContain("适合委托");
+    }
     expect(defaults.systemSkills.filter((skill) => skill.defaultEnabled).map((skill) => skill.id)).toEqual(defaultSystemSkillIds);
-    expect(defaults.systemSkills.map((skill) => skill.sortOrder)).toEqual([0, 1, 2, 3, 4]);
+    expect(defaults.systemSkills.map((skill) => skill.sortOrder)).toEqual([0, 1, 2, 3, 4, 5]);
 
     for (const skillId of defaultSystemSkillIds) {
       const skill = systemSkillsById.get(skillId);
@@ -238,6 +273,7 @@ describe("defaults config loader", () => {
       for (const phrase of roleSectionPhrases) {
         expect(skill?.prompt).toContain(phrase);
       }
+      expect(skill?.prompt).toMatch(/适合(加载|使用)/);
       for (const phrase of protocolPhrases) {
         expect(skill?.prompt).not.toContain(phrase);
       }

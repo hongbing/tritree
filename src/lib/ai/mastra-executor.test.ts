@@ -1108,6 +1108,75 @@ describe("tree director compatibility generators", () => {
     expect(visibleProgress).not.toContain("xiaohongshu-skills");
   });
 
+  it("streams load_skill progress with the selected skill title", async () => {
+    const finalObject = {
+      roundIntent: "选择下一步",
+      options: [
+        { id: "a", label: "补具体场景", description: "加入真实场景。", impact: "让文章更具体。", kind: "explore" },
+        { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
+        { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
+      ],
+    };
+    const loadSkillTool = {
+      id: "load_skill",
+      description: "Load a skill.",
+      execute: vi.fn()
+    };
+    mocks.createSkillRuntimeTools.mockResolvedValueOnce({
+      enabledSkills,
+      toolLabels: { "load_skill:weibo-hot-search": "检索微博热搜" },
+      toolSummaries: ["load_skill：按需加载技能。"],
+      tools: { load_skill: loadSkillTool }
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream: vi.fn(async () => ({
+          fullStream: async function* () {
+            yield {
+              type: "tool-call",
+              payload: {
+                toolCallId: "skill-1",
+                toolName: "load_skill",
+                args: { skillId: "weibo-hot-search" }
+              }
+            };
+            yield {
+              type: "tool-result",
+              payload: {
+                toolCallId: "skill-1",
+                toolName: "load_skill",
+                result: { id: "weibo-hot-search", ok: true, title: "检索微博热搜" }
+              }
+            };
+            yield { type: "object-result", object: finalObject };
+          },
+          object: Promise.resolve(finalObject)
+        })),
+        generate: vi.fn()
+      };
+    });
+    const progressEvents: Array<{ delta: string; accumulatedText: string }> = [];
+
+    await expect(
+      streamTreeOptions({
+        parts: directorParts,
+        onReasoningText: (event) => progressEvents.push(event)
+      })
+    ).resolves.toMatchObject(finalObject);
+
+    expect(progressEvents).toEqual([
+      {
+        delta: "\n[工具] 调用 加载技能：检索微博热搜",
+        accumulatedText: "\n[工具] 调用 加载技能：检索微博热搜"
+      },
+      {
+        delta: "\n[工具] 加载技能：检索微博热搜 完成",
+        accumulatedText: "\n[工具] 调用 加载技能：检索微博热搜\n[工具] 加载技能：检索微博热搜 完成"
+      }
+    ]);
+  });
+
   it("hides tool-call argument deltas while the model is preparing a skill command", async () => {
     const runSkillCommand = {
       id: "run_skill_command",

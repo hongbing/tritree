@@ -230,7 +230,7 @@ function formatSkillUsageInstructions() {
     "以下 Skills 是本作品可用能力库，不代表本轮全部同时执行。",
     "主 agent 每轮先判断本轮目标应加载哪个或哪些 Skill：通常选择一个主要角色或步骤 Skill，再按需叠加约束、风格或平台类 Skill。",
     "被本轮选中的 Skill 的要求作为 active instructions；未选中的 Skill 只作为可选能力提示。",
-    "如果选中的是已安装 Skill 且需要未展开的子文档细节，先使用 load_skill_document 加载对应文档。",
+    "如果选中的是按需加载 Skill，先使用 load_skill 加载全文；如果选中的是已安装 Skill 且需要未展开的子文档细节，先使用 load_skill_document 加载对应文档。",
     "如果 Skill 之间出现冲突，优先遵守用户本轮明确要求；仍冲突时，选择对当前任务更具体、更直接的要求。"
   ].join("\n");
 }
@@ -243,13 +243,17 @@ function formatEnabledSkills(skills: Skill[]) {
       const lines = [
         `## Skill: ${skill.title}`,
         `适用目标：${skillScopeLabel(skill.appliesTo)}`,
-        `说明：${skill.description || "无补充说明。"}`
+        `说明：${skill.description || "无补充说明。"}`,
+        `加载状态：${skill.defaultLoaded === false ? "按需加载" : "默认加载"}`,
+        skill.parentSkillId ? `父级 Skill：${skill.parentSkillId}` : ""
       ];
       const prompt = skill.prompt.trim();
-      if (prompt) {
+      if (prompt && skill.defaultLoaded !== false) {
         lines.push(`要求：${prompt}`);
+      } else if (skill.defaultLoaded === false) {
+        lines.push("要求：未展开。需要使用这个 Skill 的具体规则时，先调用 load_skill。");
       }
-      return lines.join("\n");
+      return lines.filter(Boolean).join("\n");
     })
     .join("\n\n");
 }

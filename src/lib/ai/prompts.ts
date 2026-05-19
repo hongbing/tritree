@@ -50,8 +50,10 @@ export function formatEnabledSkills(skills: Skill[]) {
       [
         `技能 ${index + 1}：${skill.title}`,
         `说明：${skill.description}`,
-        `提示词：\n${skill.prompt}`
-      ].join("\n")
+        `加载状态：${skill.defaultLoaded === false ? "按需加载" : "默认加载"}`,
+        skill.parentSkillId ? `父级 Skill：${skill.parentSkillId}` : "",
+        skill.defaultLoaded === false ? "提示词：未展开，按需加载后再使用具体规则。" : `提示词：\n${skill.prompt}`
+      ].filter(Boolean).join("\n")
     )
     .join("\n\n");
 

@@ -1615,7 +1615,10 @@ async function executionContextForDirectorParts(
       ]
     },
     disconnect: () => disconnectRuntimeTools(mcpRuntime),
-    toolLabels: mcpRuntime.toolLabels,
+    toolLabels: {
+      ...(runtime.toolLabels ?? {}),
+      ...mcpRuntime.toolLabels
+    },
     tools
   };
 }
@@ -1658,6 +1661,8 @@ function normalizeSkill(skill: Skill): Skill {
     ...skill,
     appliesTo: skill.appliesTo ?? "both",
     defaultEnabled: skill.defaultEnabled ?? false,
+    defaultLoaded: skill.defaultLoaded ?? true,
+    parentSkillId: skill.parentSkillId ?? null,
     isArchived: skill.isArchived ?? false
   };
 }
@@ -1856,7 +1861,7 @@ function toolProgressDeltaFromStreamChunk(chunk: unknown, toolLabels?: Record<st
   if (isFinalSubmitToolName(toolName)) return "";
   if (isProcessDataDisplayToolName(toolName)) return "";
 
-  const displayName = toolLabels?.[toolName] ?? toolName;
+  const displayName = toolProgressDisplayName(toolName, payload, toolLabels);
 
   if (chunkType === "tool-call" || chunkType === "tool-execution-start") {
     if (isSubagentToolName(toolName)) {
@@ -1887,6 +1892,25 @@ function toolProgressDeltaFromStreamChunk(chunk: unknown, toolLabels?: Record<st
   }
 
   return "";
+}
+
+function toolProgressDisplayName(
+  toolName: string,
+  payload: Record<string, unknown>,
+  toolLabels?: Record<string, string>
+) {
+  if (toolName === "load_skill") {
+    const input = toolInputFromPayload(payload);
+    const inputSkillId = isObjectRecord(input) ? stringFromPayload(input, "skillId") : "";
+    const output = parseMaybeJson(toolOutputFromPayload(payload));
+    const outputSkillId = isObjectRecord(output) ? stringFromPayload(output, "id") : "";
+    const outputTitle = isObjectRecord(output) ? stringFromPayload(output, "title") : "";
+    const skillId = inputSkillId || outputSkillId;
+    const title = (skillId ? toolLabels?.[`load_skill:${skillId}`] : "") || outputTitle || skillId;
+    return title ? `加载技能：${title}` : "加载技能";
+  }
+
+  return toolLabels?.[toolName] ?? toolName;
 }
 
 function toolCallDeltaProgressFromStreamChunk(chunk: unknown, state: ToolCallDeltaState): string {

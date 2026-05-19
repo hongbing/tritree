@@ -198,6 +198,34 @@ describe("runInstalledSkillCommand", () => {
 });
 
 describe("createSkillRuntimeTools", () => {
+  it("exposes a load_skill tool for enabled skills whose prompts are loaded on demand", async () => {
+    const runtime = await createSkillRuntimeTools([
+      {
+        ...xhsSkill,
+        id: "system-planner",
+        title: "策划",
+        description: "负责方向判断。",
+        prompt: "策划子技能完整正文。",
+        defaultEnabled: true,
+        defaultLoaded: false,
+        parentSkillId: "system-creator"
+      }
+    ]);
+
+    expect(runtime.toolSummaries.join("\n")).toContain("load_skill");
+    expect(Object.keys(runtime.tools)).toEqual(["load_skill"]);
+    await expect((runtime.tools.load_skill as { execute: (input: { skillId: string }) => Promise<unknown> }).execute({
+      skillId: "system-planner"
+    })).resolves.toEqual(
+      expect.objectContaining({
+        content: "策划子技能完整正文。",
+        id: "system-planner",
+        ok: true,
+        title: "策划"
+      })
+    );
+  });
+
   it("exposes an agent tool for installed enabled skills", async () => {
     const installRoot = mkdtempSync(path.join(tmpdir(), "tritree-skill-tools-"));
     const skillDir = path.join(installRoot, "xiaohongshu-skills");

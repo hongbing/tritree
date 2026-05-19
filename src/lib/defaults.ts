@@ -21,7 +21,14 @@ const DefaultsConfigSchema = z.object({
   systemSkills: z
     .array(ConfiguredSystemSkillSchema)
     .min(1, "systemSkills must be a non-empty array")
-    .transform((skills) => skills.map((skill, index) => ({ ...skill, sortOrder: skill.sortOrder ?? index }))),
+    .transform((skills) =>
+      skills.map((skill, index) => ({
+        ...skill,
+        defaultLoaded: skill.defaultLoaded ?? true,
+        parentSkillId: skill.parentSkillId ?? null,
+        sortOrder: skill.sortOrder ?? index
+      }))
+    ),
   creationRequestOptions: z.array(ConfiguredCreationRequestOptionSchema),
   inspirations: z.array(InspirationSchema)
 });

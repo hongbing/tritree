@@ -50,8 +50,22 @@ export async function executionContextForDirectorParts(
     ? runtime.availableSkillSummaries
     : [];
   const includeSubagentTools = toolPolicy.includeSubagentTools ?? true;
+  const subagentTools = {
+    ...(runtime.tools ?? {}),
+    ...(mcpRuntime.tools ?? {})
+  };
+  const toolLabels = {
+    ...(runtime.toolLabels ?? {}),
+    ...mcpRuntime.toolLabels
+  };
   const subagentRuntime = includeSubagentTools
-    ? createSubagentRuntimeTools({ contextSource: parts, env })
+    ? createSubagentRuntimeTools({
+        contextSource: parts,
+        env,
+        progressBridge: toolPolicy.progressBridge,
+        toolLabels,
+        tools: subagentTools
+      })
     : { subagentTemplateSummaries: [], toolSummaries: [], tools: {} };
   const tools = {
     ...(runtime.tools ?? {}),
@@ -78,10 +92,7 @@ export async function executionContextForDirectorParts(
       ]
     },
     disconnect: () => disconnectRuntimeTools(mcpRuntime),
-    toolLabels: {
-      ...(runtime.toolLabels ?? {}),
-      ...mcpRuntime.toolLabels
-    },
+    toolLabels,
     tools
   };
 }

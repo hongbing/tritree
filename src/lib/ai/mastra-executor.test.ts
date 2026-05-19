@@ -421,11 +421,13 @@ describe("tree director compatibility generators", () => {
     mocks.createSkillRuntimeTools.mockResolvedValueOnce({
       availableSkillSummaries: [],
       enabledSkills,
+      toolLabels: { run_skill_command: "Skill 命令" },
       toolSummaries: ["run_skill_command：调用已安装 skill 的脚本命令。"],
       tools: { run_skill_command: runSkillCommand }
     });
     mocks.createMcpRuntimeTools.mockResolvedValueOnce({
       disconnect: vi.fn(),
+      toolLabels: { filesystem_read_file: "读取文件" },
       toolSummaries: ["MCP filesystem：可用工具 filesystem_read_file。"],
       tools: { filesystem_read_file: readFile }
     });
@@ -447,6 +449,18 @@ describe("tree director compatibility generators", () => {
     expect(mocks.createMcpRuntimeTools).toHaveBeenCalledWith(
       expect.objectContaining({
         existingTools: { run_skill_command: runSkillCommand }
+      })
+    );
+    expect(mocks.createSubagentRuntimeTools).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools: {
+          run_skill_command: runSkillCommand,
+          filesystem_read_file: readFile
+        },
+        toolLabels: {
+          run_skill_command: "Skill 命令",
+          filesystem_read_file: "读取文件"
+        }
       })
     );
     expect(mocks.agentConstructor).toHaveBeenCalledWith(
@@ -1126,6 +1140,97 @@ describe("tree director compatibility generators", () => {
     expect(visibleProgress).not.toContain("xiaohongshu-skills");
   });
 
+  it("keeps subagent thinking and tool progress in the main accumulated thinking stream", async () => {
+    const finalObject = {
+      roundIntent: "选择下一步",
+      options: [
+        { id: "a", label: "补具体场景", description: "加入真实场景。", impact: "让文章更具体。", kind: "explore" },
+        { id: "b", label: "压缩表达", description: "删掉重复句子。", impact: "让文章更利落。", kind: "deepen" },
+        { id: "c", label: "检查发布", description: "整理标题和话题。", impact: "让文章接近发布。", kind: "finish" }
+      ],
+    };
+    let progressBridge: { emit?: (segments: Array<{ delta: string; kind: "text" | "tool" }>) => void } | null = null;
+    mocks.createSubagentRuntimeTools.mockImplementationOnce((options) => {
+      progressBridge = options.progressBridge;
+      return {
+        subagentTemplateSummaries: ["material-search｜搜索资料：围绕给定主题快速寻找可用素材。"],
+        toolSummaries: ["run_subagent_template：运行预定义子代理。"],
+        tools: {
+          run_subagent_template: {
+            id: "run_subagent_template",
+            description: "Run a predefined subagent.",
+            execute: vi.fn()
+          }
+        }
+      };
+    });
+    mocks.agentConstructor.mockImplementationOnce(function Agent(options) {
+      return {
+        options,
+        stream: vi.fn(async () => ({
+          fullStream: async function* () {
+            yield {
+              type: "tool-call",
+              payload: {
+                toolCallId: "subagent-1",
+                toolName: "run_subagent_template",
+                args: {
+                  templateId: "material-search",
+                  task: "找三条可用资料"
+                }
+              }
+            };
+            progressBridge?.emit?.([{ delta: "子代理正在判断资料方向。", kind: "text" }]);
+            progressBridge?.emit?.([{ delta: "\n[工具] 调用 子代理内部搜索", kind: "tool" }]);
+            yield {
+              type: "tool-result",
+              payload: {
+                toolCallId: "subagent-1",
+                toolName: "run_subagent_template",
+                result: {
+                  ok: true,
+                  result: "资料结果",
+                  templateId: "material-search",
+                  title: "搜索资料"
+                }
+              }
+            };
+            yield {
+              type: "tool-call",
+              payload: {
+                toolCallId: "submit-1",
+                toolName: "submit_tree_options",
+                args: finalObject
+              }
+            };
+          },
+          object: Promise.resolve(undefined)
+        })),
+        generate: vi.fn()
+      };
+    });
+    const progressEvents: Array<{ delta: string; accumulatedText: string }> = [];
+
+    await expect(
+      streamTreeOptions({
+        parts: directorParts,
+        env: { KIMI_API_KEY: "token" },
+        onReasoningText: (event) => progressEvents.push(event)
+      })
+    ).resolves.toMatchObject(finalObject);
+
+    expect(progressBridge).not.toBeNull();
+    expect(progressEvents.map((event) => event.delta)).toEqual([
+      "\n[子代理] 运行 搜索资料：找三条可用资料",
+      "\n子代理正在判断资料方向。",
+      "\n[工具] 调用 子代理内部搜索",
+      "\n[子代理] 搜索资料 完成，主 agent 正在检查返回值"
+    ]);
+    expect(progressEvents.at(-1)?.accumulatedText).toContain("子代理正在判断资料方向。");
+    expect(progressEvents.at(-1)?.accumulatedText).toContain("[工具] 调用 子代理内部搜索");
+    expect(progressEvents.at(-1)?.accumulatedText).toContain("[子代理] 搜索资料 完成，主 agent 正在检查返回值");
+  });
+
   it("streams load_skill progress with the selected skill title", async () => {
     const finalObject = {
       roundIntent: "选择下一步",
@@ -1268,7 +1373,7 @@ describe("tree director compatibility generators", () => {
     expect(visibleProgress).not.toContain("青岛旅游攻略");
   });
 
-  it("streams tool-phase text deltas as visible thinking progress", async () => {
+  it("hides tool-phase text deltas while keeping reasoning and tool progress", async () => {
     const runSkillCommand = {
       id: "run_skill_command",
       description: "Run an installed skill command.",
@@ -1284,6 +1389,7 @@ describe("tree director compatibility generators", () => {
     };
     const stream = vi.fn(async () => ({
       fullStream: async function* () {
+        yield { type: "reasoning-delta", payload: { text: "先判断是否需要搜索。" } };
         yield { type: "text-delta", payload: { text: "先看已有搜索结果是否够用。" } };
         yield {
           type: "tool-call",
@@ -1328,17 +1434,15 @@ describe("tree director compatibility generators", () => {
     });
 
     expect(progressEvents).toEqual([
-      { delta: "先看已有搜索结果是否够用。", accumulatedText: "先看已有搜索结果是否够用。" },
+      { delta: "先判断是否需要搜索。", accumulatedText: "先判断是否需要搜索。" },
       {
         delta: "\n[工具] 调用 run_skill_command",
-        accumulatedText: "先看已有搜索结果是否够用。\n[工具] 调用 run_skill_command"
-      },
-      {
-        delta: "\n搜索后开始避开常见角度。",
-        accumulatedText: "先看已有搜索结果是否够用。\n[工具] 调用 run_skill_command\n搜索后开始避开常见角度。"
+        accumulatedText: "先判断是否需要搜索。\n[工具] 调用 run_skill_command"
       }
     ]);
     const visibleProgress = progressEvents.map((event) => event.accumulatedText).join("\n");
+    expect(visibleProgress).not.toContain("先看已有搜索结果是否够用。");
+    expect(visibleProgress).not.toContain("搜索后开始避开常见角度。");
     expect(visibleProgress).not.toContain("青岛旅游攻略");
     expect(stream).toHaveBeenCalledTimes(1);
     expect(generate).not.toHaveBeenCalled();
@@ -2668,7 +2772,7 @@ describe("tree director compatibility generators", () => {
     ]);
   });
 
-  it("shows hidden text deltas in progress for debugging", async () => {
+  it("hides text deltas that arrive during submit streaming", async () => {
     const runSkillCommand = {
       id: "run_skill_command",
       description: "Run an installed skill command.",
@@ -2728,9 +2832,7 @@ describe("tree director compatibility generators", () => {
       options: finalObject.options
     });
 
-    expect(progressEvents.map((event) => event.delta)).toEqual([
-      "\n[调试 hidden textPolicy=hidden]\n模型在 submit 过程中又输出了一段自然语言。"
-    ]);
+    expect(progressEvents).toEqual([]);
   });
 
   it("stops consuming the stream after a final submit tool call", async () => {

@@ -2,6 +2,7 @@ import type { AgentMessage } from "@/lib/domain";
 import type { ToolsInput } from "@mastra/core/agent";
 import { ZodError } from "zod";
 import { logTritreeAiDebug } from "../debug-log";
+import { attachRuntimeProgressBridge, type RuntimeProgressBridge, type RuntimeProgressSegment } from "../runtime-progress";
 import { executionOptionsForTools, structuredOutputForDirector } from "./context";
 import { logAiResponse, logAiStream } from "./logging";
 import type { DirectorAgentTrace, MastraConversationMessage, ParseableOutputSchema, ReasoningTextEvent, RuntimeSubmitTarget, StructuredObjectStreamResult, StreamSource, TreeArtifactAgentLike, TreeOptionsAgentLike } from "./types";
@@ -9,7 +10,7 @@ import type { ProcessDataDisplay } from "./schemas";
 import { finalSubmitToolRequiredError, isFinalSubmitToolName } from "./tools";
 import { resolveStructuredStreamOutput, summarizeErrorForLog, unwrapMastraToolInput, withStructuredOutputRetries, zodIssuesFromError } from "./structured-output";
 import { isObjectRecord, stringifyDiagnosticValue, summarizeJsonValue, toAsyncIterable, truncateText } from "./json-utils";
-import { collectAgentMessageFromStreamChunk, formatProgressSegments, hiddenTextDebugDeltaFromPolicy, processDataDisplayFromStreamChunk, progressSegmentsFromStreamChunk, reasoningDeltaFromStreamChunk, runtimeTextDeltaPolicy, streamChunkKeysForLog, streamChunkTypeForLog, structuredObjectFromStreamChunk, submittedOutputDeltaFromStreamChunk, submittedOutputFromStreamChunk, summarizePartialObjectForLog, textDeltaFromStreamChunk, toolCallDeltaProgressFromStreamChunk, toolNameFromPayload, toolProgressDeltaFromStreamChunk, type AgentMessageHistoryState, type ProgressSegmentKind, type ToolCallDeltaState, visibleRuntimeTextDelta } from "./stream-chunks";
+import { collectAgentMessageFromStreamChunk, formatProgressSegments, processDataDisplayFromStreamChunk, progressSegmentsFromStreamChunk, reasoningDeltaFromStreamChunk, runtimeTextDeltaPolicy, streamChunkKeysForLog, streamChunkTypeForLog, structuredObjectFromStreamChunk, submittedOutputDeltaFromStreamChunk, submittedOutputFromStreamChunk, summarizePartialObjectForLog, textDeltaFromStreamChunk, toolCallDeltaProgressFromStreamChunk, toolNameFromPayload, toolProgressDeltaFromStreamChunk, type AgentMessageHistoryState, type ProgressSegmentKind, type ToolCallDeltaState } from "./stream-chunks";
 
 
 type RuntimeToolStreamSummary = {
@@ -55,6 +56,7 @@ export async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
   onPartialObject,
   onProcessData,
   onReasoningText,
+  progressBridge,
   schema,
   signal,
   target,
@@ -67,6 +69,7 @@ export async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
   onPartialObject?: (partial: TPartial) => void;
   onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
+  progressBridge?: RuntimeProgressBridge;
   schema: ParseableOutputSchema<TOutput>;
   signal?: AbortSignal;
   target: RuntimeSubmitTarget;
@@ -81,6 +84,7 @@ export async function streamRuntimeToolsThenStructure<TPartial, TOutput>({
       onPartialObject,
       onProcessData,
       onReasoningText,
+      progressBridge,
       schema,
       signal,
       target,
@@ -106,6 +110,7 @@ async function streamRuntimeToolsOnce<TPartial, TOutput>({
   onPartialObject,
   onProcessData,
   onReasoningText,
+  progressBridge,
   schema,
   signal,
   target,
@@ -118,6 +123,7 @@ async function streamRuntimeToolsOnce<TPartial, TOutput>({
   onPartialObject?: (partial: TPartial) => void;
   onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
+  progressBridge?: RuntimeProgressBridge;
   schema: ParseableOutputSchema<TOutput>;
   signal?: AbortSignal;
   target: RuntimeSubmitTarget;
@@ -149,6 +155,7 @@ async function streamRuntimeToolsOnce<TPartial, TOutput>({
     onPartialObject,
     onProcessData,
     onReasoningText,
+    progressBridge,
     signal,
     target,
     toolLabels
@@ -165,6 +172,7 @@ async function consumeRuntimeReActStream<TPartial>(
     onPartialObject?: (partial: TPartial) => void;
     onProcessData?: (data: ProcessDataDisplay) => void;
     onReasoningText?: (event: ReasoningTextEvent) => void;
+    progressBridge?: RuntimeProgressBridge;
     signal?: AbortSignal;
     target: RuntimeSubmitTarget;
     toolLabels?: Record<string, string>;
@@ -176,7 +184,6 @@ async function consumeRuntimeReActStream<TPartial>(
   let accumulatedProgressText = "";
   let hasSeenToolActivity = false;
   let hasSeenFinalSubmitOutput = false;
-  let hiddenTextDebugOpen = false;
   let latestPartial: unknown = null;
   let previousProgressSegmentKind: ProgressSegmentKind | null = null;
   let rawText = "";
@@ -193,106 +200,132 @@ async function consumeRuntimeReActStream<TPartial>(
     submittedOutputById: new Map(),
     toolNamesById: new Map()
   };
+  const emitProgressSegments = (segments: RuntimeProgressSegment[]) => {
+    const formattedProgress = formatProgressSegments(segments, accumulatedProgressText, previousProgressSegmentKind);
+    const visibleDelta = formattedProgress.delta;
+    if (!visibleDelta) return "";
 
-  if (stream.fullStream) {
-    for await (const chunk of toAsyncIterable(stream.fullStream)) {
-      streamChunks.push(summarizeRuntimeStreamChunk(chunk, streamChunks.length, "fullStream"));
-      logAiStream(options.target, "chunk", chunk);
-      const textDelta = textDeltaFromStreamChunk(chunk);
-      const submittedDeltaOutput = submittedOutputDeltaFromStreamChunk(chunk, toolCallDeltaState);
-      const submittedChunkOutput = submittedOutputFromStreamChunk(chunk);
-      const processData = processDataDisplayFromStreamChunk(chunk, toolCallDeltaState);
-      const reasoningDelta = hasSeenFinalSubmitOutput ? "" : reasoningDeltaFromStreamChunk(chunk);
-      const toolProgressDelta =
-        toolProgressDeltaFromStreamChunk(chunk, options.toolLabels) || toolCallDeltaProgressFromStreamChunk(chunk, toolCallDeltaState);
-      collectAgentMessageFromStreamChunk(chunk, agentMessageHistoryState);
-      const hasToolActivity = Boolean(toolProgressDelta);
-      const visibleTextDelta = hasSeenFinalSubmitOutput ? "" : visibleRuntimeTextDelta(textDelta, rawText);
-      const textPolicy = runtimeTextDeltaPolicy(textDelta, rawText, visibleTextDelta);
-      const hiddenTextDebugDelta = hiddenTextDebugDeltaFromPolicy(textDelta, textPolicy, hiddenTextDebugOpen);
-      const formattedProgress = formatProgressSegments(
-        [
-          { delta: reasoningDelta, kind: "text" },
-          { delta: toolProgressDelta, kind: "tool" },
-          { delta: visibleTextDelta, kind: "text" },
-          { delta: hiddenTextDebugDelta, kind: "debug" }
-        ],
-        accumulatedProgressText,
-        previousProgressSegmentKind
-      );
-      const visibleDelta = formattedProgress.delta;
-      const partial = structuredObjectFromStreamChunk(chunk);
+    accumulatedProgressText += visibleDelta;
+    previousProgressSegmentKind = formattedProgress.lastKind;
+    options.onReasoningText?.({
+      delta: visibleDelta,
+      accumulatedText: accumulatedProgressText
+    });
+    return visibleDelta;
+  };
+  const detachProgressBridge = attachRuntimeProgressBridge(options.progressBridge, emitProgressSegments);
 
-      const chunkPayloadForLog = isObjectRecord(chunk) && isObjectRecord((chunk as Record<string, unknown>).payload)
-        ? (chunk as Record<string, unknown>).payload as Record<string, unknown>
-        : isObjectRecord(chunk) ? chunk as Record<string, unknown> : {};
-      const chunkToolNameForLog = toolNameFromPayload(chunkPayloadForLog);
-      logTritreeAiDebug("react-stream", "chunk", {
-        type: streamChunkTypeForLog(chunk),
-        keys: streamChunkKeysForLog(chunk),
-        toolName: chunkToolNameForLog || undefined,
-        isFinalSubmit: chunkToolNameForLog ? isFinalSubmitToolName(chunkToolNameForLog) : undefined,
-        reasoningChars: reasoningDelta.length,
-        textChars: textDelta.length,
-        textPolicy,
-        toolProgressChars: toolProgressDelta.length,
-        visibleChars: visibleDelta.length,
-        rawTextCharsAfterChunk: rawText.length + textDelta.length,
-        hasSeenToolActivity,
-        hasToolActivity,
-        partial: summarizePartialObjectForLog(partial),
-        submittedDeltaOutput: summarizePartialObjectForLog(submittedDeltaOutput),
-        submittedOutput: summarizePartialObjectForLog(submittedChunkOutput)
-      });
+  try {
+    if (stream.fullStream) {
+      for await (const chunk of toAsyncIterable(stream.fullStream)) {
+        streamChunks.push(summarizeRuntimeStreamChunk(chunk, streamChunks.length, "fullStream"));
+        logAiStream(options.target, "chunk", chunk);
+        const textDelta = textDeltaFromStreamChunk(chunk);
+        const submittedDeltaOutput = submittedOutputDeltaFromStreamChunk(chunk, toolCallDeltaState);
+        const submittedChunkOutput = submittedOutputFromStreamChunk(chunk);
+        const processData = processDataDisplayFromStreamChunk(chunk, toolCallDeltaState);
+        const reasoningDelta = hasSeenFinalSubmitOutput ? "" : reasoningDeltaFromStreamChunk(chunk);
+        const toolProgressDelta =
+          toolProgressDeltaFromStreamChunk(chunk, options.toolLabels) || toolCallDeltaProgressFromStreamChunk(chunk, toolCallDeltaState);
+        collectAgentMessageFromStreamChunk(chunk, agentMessageHistoryState);
+        const hasToolActivity = Boolean(toolProgressDelta);
+        const textPolicy = runtimeTextDeltaPolicy(textDelta, rawText, "");
+        const formattedProgressSegments = [
+          { delta: reasoningDelta, kind: "text" as const },
+          { delta: toolProgressDelta, kind: "tool" as const }
+        ];
+        const visibleDelta = formatProgressSegments(
+          formattedProgressSegments,
+          accumulatedProgressText,
+          previousProgressSegmentKind
+        ).delta;
+        const partial = structuredObjectFromStreamChunk(chunk);
 
-      if (visibleDelta) {
-        accumulatedProgressText += visibleDelta;
-        previousProgressSegmentKind = formattedProgress.lastKind;
-        options.onReasoningText?.({
-          delta: visibleDelta,
-          accumulatedText: accumulatedProgressText
+        const chunkPayloadForLog = isObjectRecord(chunk) && isObjectRecord((chunk as Record<string, unknown>).payload)
+          ? (chunk as Record<string, unknown>).payload as Record<string, unknown>
+          : isObjectRecord(chunk) ? chunk as Record<string, unknown> : {};
+        const chunkToolNameForLog = toolNameFromPayload(chunkPayloadForLog);
+        logTritreeAiDebug("react-stream", "chunk", {
+          type: streamChunkTypeForLog(chunk),
+          keys: streamChunkKeysForLog(chunk),
+          toolName: chunkToolNameForLog || undefined,
+          isFinalSubmit: chunkToolNameForLog ? isFinalSubmitToolName(chunkToolNameForLog) : undefined,
+          reasoningChars: reasoningDelta.length,
+          textChars: textDelta.length,
+          textPolicy,
+          toolProgressChars: toolProgressDelta.length,
+          visibleChars: visibleDelta.length,
+          rawTextCharsAfterChunk: rawText.length + textDelta.length,
+          hasSeenToolActivity,
+          hasToolActivity,
+          partial: summarizePartialObjectForLog(partial),
+          submittedDeltaOutput: summarizePartialObjectForLog(submittedDeltaOutput),
+          submittedOutput: summarizePartialObjectForLog(submittedChunkOutput)
         });
+
+        emitProgressSegments(formattedProgressSegments);
+
+        if (processData) {
+          options.onProcessData?.(processData);
+        }
+
+        rawText += textDelta;
+        hasSeenToolActivity = hasSeenToolActivity || hasToolActivity;
+
+        if (partial !== undefined) {
+          logAiStream(options.target, "partial", partial);
+          latestPartial = partial;
+          options.onPartialObject?.(partial as TPartial);
+        }
+
+        if (submittedDeltaOutput !== undefined) {
+          logAiStream(options.target, "partial", submittedDeltaOutput);
+          submittedOutput = submittedDeltaOutput;
+          latestPartial = submittedDeltaOutput;
+          options.onPartialObject?.(submittedDeltaOutput as TPartial);
+        }
+
+        if (submittedChunkOutput !== undefined) {
+          logAiStream(options.target, "partial", submittedChunkOutput);
+          submittedOutput = submittedChunkOutput;
+          latestPartial = submittedChunkOutput;
+          options.onPartialObject?.(submittedChunkOutput as TPartial);
+        }
+
+        hasSeenFinalSubmitOutput =
+          hasSeenFinalSubmitOutput || submittedDeltaOutput !== undefined || submittedChunkOutput !== undefined;
+        if (submittedChunkOutput !== undefined) {
+          break;
+        }
       }
+      return {
+        abortSignalAborted: Boolean(options.signal?.aborted),
+        abortSignalReason: summarizeJsonValue(options.signal?.reason, 1000),
+        agentMessages: agentMessageHistoryState.messages,
+        latestPartial,
+        rawText,
+        streamChunkCount: streamChunks.length,
+        streamChunks,
+        streamDurationMs: Date.now() - streamStartedAt,
+        streamShape,
+        submittedOutput
+      };
+    }
 
-      if (processData) {
-        options.onProcessData?.(processData);
-      }
-
-      if (hiddenTextDebugDelta) {
-        hiddenTextDebugOpen = true;
-      } else if (textPolicy !== "hidden" && textDelta.trim()) {
-        hiddenTextDebugOpen = false;
-      }
-
-      rawText += textDelta;
-      hasSeenToolActivity = hasSeenToolActivity || hasToolActivity;
-
-      if (partial !== undefined) {
+    if (stream.objectStream) {
+      for await (const partial of toAsyncIterable(stream.objectStream)) {
+        streamChunks.push(summarizeRuntimeStreamChunk(partial, streamChunks.length, "objectStream"));
         logAiStream(options.target, "partial", partial);
         latestPartial = partial;
         options.onPartialObject?.(partial as TPartial);
       }
-
-      if (submittedDeltaOutput !== undefined) {
-        logAiStream(options.target, "partial", submittedDeltaOutput);
-        submittedOutput = submittedDeltaOutput;
-        latestPartial = submittedDeltaOutput;
-        options.onPartialObject?.(submittedDeltaOutput as TPartial);
-      }
-
-      if (submittedChunkOutput !== undefined) {
-        logAiStream(options.target, "partial", submittedChunkOutput);
-        submittedOutput = submittedChunkOutput;
-        latestPartial = submittedChunkOutput;
-        options.onPartialObject?.(submittedChunkOutput as TPartial);
-      }
-
-      hasSeenFinalSubmitOutput =
-        hasSeenFinalSubmitOutput || submittedDeltaOutput !== undefined || submittedChunkOutput !== undefined;
-      if (submittedChunkOutput !== undefined) {
-        break;
+    } else {
+      const output = await resolveLooseStreamOutput(stream);
+      if (output !== undefined) {
+        rawText = summarizeJsonValue(output, 4000);
       }
     }
+
     return {
       abortSignalAborted: Boolean(options.signal?.aborted),
       abortSignalReason: summarizeJsonValue(options.signal?.reason, 1000),
@@ -305,34 +338,9 @@ async function consumeRuntimeReActStream<TPartial>(
       streamShape,
       submittedOutput
     };
+  } finally {
+    detachProgressBridge();
   }
-
-  if (stream.objectStream) {
-    for await (const partial of toAsyncIterable(stream.objectStream)) {
-      streamChunks.push(summarizeRuntimeStreamChunk(partial, streamChunks.length, "objectStream"));
-      logAiStream(options.target, "partial", partial);
-      latestPartial = partial;
-      options.onPartialObject?.(partial as TPartial);
-    }
-  } else {
-    const output = await resolveLooseStreamOutput(stream);
-    if (output !== undefined) {
-      rawText = summarizeJsonValue(output, 4000);
-    }
-  }
-
-  return {
-    abortSignalAborted: Boolean(options.signal?.aborted),
-    abortSignalReason: summarizeJsonValue(options.signal?.reason, 1000),
-    agentMessages: agentMessageHistoryState.messages,
-    latestPartial,
-    rawText,
-    streamChunkCount: streamChunks.length,
-    streamChunks,
-    streamDurationMs: Date.now() - streamStartedAt,
-    streamShape,
-    submittedOutput
-  };
 }
 
 async function parseRuntimeReActStreamOutput<TOutput>(

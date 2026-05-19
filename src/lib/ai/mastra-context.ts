@@ -233,7 +233,8 @@ function formatSkillUsageInstructions() {
     "以下 Skills 是本作品可用能力库，不代表本轮全部同时执行。",
     "主 agent 每轮先判断本轮目标应加载哪个或哪些 Skill：通常选择一个主要角色或步骤 Skill，再按需叠加约束、风格或平台类 Skill。",
     "被本轮选中的 Skill 的要求作为 active instructions；未选中的 Skill 只作为可选能力提示。",
-    "如果选中的是按需加载 Skill，先使用 load_skill 加载全文；如果选中的是已安装 Skill 且需要未展开的子文档细节，先使用 load_skill_document 加载对应文档。",
+    "如果选中的是按需加载 Skill，必须先使用 load_skill 加载全文，再按全文要求执行。",
+    "不要只凭 Skill 名称、说明、摘要或未展开占位文本模拟该 Skill 的具体规则；如果需要已安装 Skill 的未展开子文档细节，先使用 load_skill_document 加载对应文档。",
     "如果 Skill 之间出现冲突，优先遵守用户本轮明确要求；仍冲突时，选择对当前任务更具体、更直接的要求。"
   ].join("\n");
 }

@@ -7,6 +7,7 @@ import type {
   Skill
 } from "@/lib/domain";
 import type { SharedAgentContextInput } from "../mastra-context";
+import type { RuntimeProgressBridge } from "../runtime-progress";
 import type { ProcessDataDisplay } from "./schemas";
 
 export type { ProcessDataDisplay };
@@ -98,4 +99,5 @@ export type RuntimeSubmitTarget = "artifact" | "next-step" | "options" | "turn";
 
 export type DirectorRuntimeToolPolicy = {
   includeSubagentTools?: boolean;
+  progressBridge?: RuntimeProgressBridge;
 };

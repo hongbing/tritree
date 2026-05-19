@@ -10,8 +10,20 @@ import {
   type ContextViewPolicy
 } from "./context-projection";
 import { createTreeableAnthropicModel } from "./mastra-agents";
+import { toAsyncIterable } from "./mastra-executor/json-utils";
+import {
+  reasoningDeltaFromStreamChunk,
+  textDeltaFromStreamChunk,
+  toolProgressDeltaFromStreamChunk
+} from "./mastra-executor/stream-chunks";
 import { DEFAULT_MAX_OUTPUT_TOKENS, resolveModelContextBudget } from "./model-context";
 import type { DirectorInputParts } from "./prompts";
+import type { StreamSource } from "./mastra-executor/types";
+import {
+  emitRuntimeProgressSegments,
+  type RuntimeProgressBridge,
+  type RuntimeProgressSegment
+} from "./runtime-progress";
 import {
   DEFAULT_SUBAGENT_TEMPLATES,
   formatSubagentTemplateSummaries,
@@ -27,9 +39,12 @@ export type SubagentTask = {
   context: string;
   env?: StringEnv;
   expectedOutput: string;
+  onProgress?: (segments: RuntimeProgressSegment[]) => void;
   task: string;
   template?: SubagentTemplate;
   title: string;
+  toolLabels?: Record<string, string>;
+  tools?: ToolsInput;
 };
 
 export type SubagentTaskRunner = (task: SubagentTask) => Promise<string>;
@@ -42,16 +57,22 @@ type CreateSubagentRuntimeToolsOptions = {
   contextPolicy?: ContextViewPolicy;
   contextSource?: DirectorInputParts;
   env?: StringEnv;
+  progressBridge?: RuntimeProgressBridge;
   runSubagentTask?: SubagentTaskRunner;
   templates?: SubagentTemplate[];
+  toolLabels?: Record<string, string>;
+  tools?: ToolsInput;
 };
 
 export function createSubagentRuntimeTools({
   contextPolicy = SUBAGENT_CONTEXT_POLICY,
   contextSource,
   env = process.env,
+  progressBridge,
   runSubagentTask = runSubagentTaskWithModel,
-  templates = DEFAULT_SUBAGENT_TEMPLATES
+  templates = DEFAULT_SUBAGENT_TEMPLATES,
+  toolLabels = {},
+  tools: runtimeTools
 }: CreateSubagentRuntimeToolsOptions = {}) {
   const subagentContext = subagentContextForRun(contextSource, contextPolicy);
   const tools: ToolsInput = {
@@ -75,9 +96,12 @@ export function createSubagentRuntimeTools({
           context: subagentContext,
           env,
           expectedOutput: expectedOutput ?? template.expectedOutput,
+          onProgress: createSubagentProgressReporter(progressBridge, template.title),
           task,
           template,
-          title: template.title
+          title: template.title,
+          toolLabels,
+          tools: runtimeTools
         });
 
         return {
@@ -105,9 +129,12 @@ export function createSubagentRuntimeTools({
           context: subagentContext,
           env,
           expectedOutput,
+          onProgress: createSubagentProgressReporter(progressBridge, title),
           task,
           template: undefined,
-          title
+          title,
+          toolLabels,
+          tools: runtimeTools
         });
 
         return {
@@ -142,17 +169,141 @@ export async function runSubagentTaskWithModel(task: SubagentTask): Promise<stri
     instructions: buildSubagentInstructions(task),
     model: createTreeableAnthropicModel(env),
     defaultOptions: { modelSettings: { maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS } },
-    inputProcessors: [new TokenLimiterProcessor({ limit: resolveModelContextBudget(env).inputBudgetTokens })]
+    inputProcessors: [new TokenLimiterProcessor({ limit: resolveModelContextBudget(env).inputBudgetTokens })],
+    ...(hasRuntimeTools(task.tools) ? { tools: task.tools } : {})
   });
 
+  const streamedText = await streamSubagentTask(agent, task);
+  if (streamedText.trim()) return streamedText;
+
+  return runSubagentTaskWithGenerate(agent, task);
+}
+
+function createSubagentProgressReporter(progressBridge: RuntimeProgressBridge | undefined, title: string) {
+  if (!progressBridge) return undefined;
+
+  return (segments: RuntimeProgressSegment[]) => {
+    const visibleSegments = segments
+      .filter((segment) => segment.delta)
+      .map((segment) => ({
+        ...segment,
+        delta: segment.kind === "tool" ? labelSubagentToolProgress(segment.delta, title) : segment.delta
+      }));
+
+    emitRuntimeProgressSegments(progressBridge, visibleSegments);
+  };
+}
+
+function labelSubagentToolProgress(delta: string, title: string) {
+  if (!delta || delta.includes("[子代理]")) return delta;
+
+  const subagentLabel = `[子代理] ${title}：`;
+  const callMatch = delta.match(/^(\n?\[工具\] 调用 )(.+)$/);
+  if (callMatch) return `${callMatch[1]}${subagentLabel}${callMatch[2]}`;
+
+  const completionMatch = delta.match(/^(\n?\[工具\] )(.+) (完成|失败)$/);
+  if (completionMatch) return `${completionMatch[1]}${subagentLabel}${completionMatch[2]} ${completionMatch[3]}`;
+
+  return delta;
+}
+
+type SubagentStreamResult = {
+  fullStream?: StreamSource<unknown>;
+  object?: Promise<unknown> | unknown;
+  output?: Promise<unknown> | unknown;
+  text?: Promise<string> | string;
+};
+
+async function streamSubagentTask(agent: Agent, task: SubagentTask) {
+  const stream = await agent.stream(
+    [
+      {
+        role: "user",
+        content: buildSubagentUserPrompt(task)
+      }
+    ],
+    {
+      abortSignal: task.abortSignal,
+      ...executionOptionsForSubagentTools(task.tools)
+    }
+  ) as SubagentStreamResult;
+
+  const streamedText = stream.fullStream
+    ? await consumeSubagentFullStream(stream.fullStream, task.onProgress, task.toolLabels)
+    : "";
+  return resolveSubagentStreamText(stream, streamedText);
+}
+
+async function consumeSubagentFullStream(
+  streamSource: StreamSource<unknown>,
+  onProgress?: (segments: RuntimeProgressSegment[]) => void,
+  toolLabels?: Record<string, string>
+) {
+  let rawText = "";
+
+  for await (const chunk of toAsyncIterable(streamSource)) {
+    const reasoningDelta = reasoningDeltaFromStreamChunk(chunk);
+    const toolProgressDelta = toolProgressDeltaFromStreamChunk(chunk, toolLabels);
+    const textDelta = textDeltaFromStreamChunk(chunk);
+    const segments: RuntimeProgressSegment[] = [
+      { delta: reasoningDelta, kind: "text" as const },
+      { delta: toolProgressDelta, kind: "tool" as const }
+    ].filter((segment) => segment.delta);
+    if (segments.length > 0) onProgress?.(segments);
+    rawText += textDelta;
+  }
+
+  return rawText;
+}
+
+async function resolveSubagentStreamText(stream: SubagentStreamResult, fallbackText: string) {
+  const text = await safeResolve(stream.text);
+  if (typeof text === "string" && text.trim()) return text;
+
+  const output = await safeResolve(stream.output);
+  const outputText = resultToText(output);
+  if (outputText.trim()) return outputText;
+
+  const object = await safeResolve(stream.object);
+  const objectText = resultToText(object);
+  if (objectText.trim()) return objectText;
+
+  return fallbackText;
+}
+
+async function safeResolve<T>(value: Promise<T> | T | undefined): Promise<T | undefined> {
+  try {
+    return await value;
+  } catch {
+    return undefined;
+  }
+}
+
+async function runSubagentTaskWithGenerate(agent: Agent, task: SubagentTask) {
   const result = await agent.generate([
     {
       role: "user",
       content: buildSubagentUserPrompt(task)
     }
-  ], { abortSignal: task.abortSignal });
+  ], {
+    abortSignal: task.abortSignal,
+    ...executionOptionsForSubagentTools(task.tools)
+  });
 
   return resultToText(result);
+}
+
+function executionOptionsForSubagentTools(tools: ToolsInput | undefined) {
+  if (!hasRuntimeTools(tools)) return {};
+  return {
+    maxSteps: 20,
+    toolCallConcurrency: 1,
+    toolChoice: "auto" as const
+  };
+}
+
+function hasRuntimeTools(tools: ToolsInput | undefined): tools is ToolsInput {
+  return Boolean(tools && Object.keys(tools).length > 0);
 }
 
 function buildSubagentInstructions(task: SubagentTask) {

@@ -3,6 +3,7 @@ import type { SubagentTask } from "./subagent-runtime";
 import { createSubagentRuntimeTools, runSubagentTaskWithModel } from "./subagent-runtime";
 
 const mockGenerate = vi.fn();
+const mockStream = vi.fn();
 const mockAgentConstructor = vi.fn();
 
 vi.mock("@mastra/core/agent", async (importOriginal) => {
@@ -12,6 +13,7 @@ vi.mock("@mastra/core/agent", async (importOriginal) => {
     Agent: vi.fn(
       class {
         generate = mockGenerate;
+        stream = mockStream;
 
         constructor(options: unknown) {
           mockAgentConstructor(options);
@@ -40,6 +42,7 @@ function executableTool(tool: unknown) {
 describe("subagent runtime tools", () => {
   beforeEach(() => {
     mockGenerate.mockReset();
+    mockStream.mockReset();
     mockAgentConstructor.mockClear();
   });
 
@@ -108,6 +111,35 @@ describe("subagent runtime tools", () => {
     });
     expect(calls[0].context).toContain("# Scoped Working Context");
     expect(calls[0].context).toContain("用户补充：保留真实感。");
+  });
+
+  it("labels template subagent tool progress before forwarding it through the runtime bridge", async () => {
+    const progressSegments: Array<Array<{ delta: string; kind: string }>> = [];
+    const runtime = createSubagentRuntimeTools({
+      progressBridge: {
+        emit: (segments) => progressSegments.push(segments)
+      },
+      runSubagentTask: async (task) => {
+        task.onProgress?.([{ delta: "先判断要查哪个来源。", kind: "text" }]);
+        task.onProgress?.([{ delta: "\n[工具] 调用 search", kind: "tool" }]);
+        task.onProgress?.([{ delta: "\n[工具] search 完成", kind: "tool" }]);
+        return "search result";
+      }
+    });
+
+    await executableTool(runtime.tools.run_subagent_template).execute(
+      {
+        templateId: "material-search",
+        task: "找三条资料"
+      },
+      {}
+    );
+
+    expect(progressSegments.flat()).toEqual([
+      { delta: "先判断要查哪个来源。", kind: "text" },
+      { delta: "\n[工具] 调用 [子代理] 搜索资料：search", kind: "tool" },
+      { delta: "\n[工具] [子代理] 搜索资料：search 完成", kind: "tool" }
+    ]);
   });
 
   it("runs a selected template with expected output override", async () => {
@@ -180,9 +212,97 @@ describe("subagent runtime tools", () => {
     });
   });
 
-  it("passes abortSignal to the default Mastra agent generate call", async () => {
+  it("streams subagent model thinking and tool progress while returning the final text", async () => {
     const controller = new AbortController();
-    mockGenerate.mockResolvedValueOnce({ text: "model result" });
+    const progressSegments: Array<Array<{ delta: string; kind: string }>> = [];
+    mockStream.mockResolvedValueOnce({
+      fullStream: async function* () {
+        yield { type: "reasoning-delta", payload: { text: "先核查事实链。" } };
+        yield { type: "text-delta", payload: { text: "正在核查" } };
+        yield {
+          type: "tool-call",
+          payload: {
+            toolCallId: "tool-1",
+            toolName: "search"
+          }
+        };
+        yield { type: "text-delta", payload: { text: "事实链。" } };
+        yield {
+          type: "tool-result",
+          payload: {
+            toolCallId: "tool-1",
+            toolName: "search",
+            result: { ok: true }
+          }
+        };
+      },
+      text: Promise.resolve("核查结果")
+    });
+
+    const result = await runSubagentTaskWithModel({
+      abortSignal: controller.signal,
+      context: "背景",
+      env: { KIMI_API_KEY: "test-token" },
+      expectedOutput: "输出",
+      onProgress: (segments) => progressSegments.push(segments),
+      task: "任务",
+      title: "自定义子代理"
+    });
+
+    expect(result).toBe("核查结果");
+    expect(mockAgentConstructor).toHaveBeenCalledWith(expect.objectContaining({ model: "mock-model" }));
+    expect(mockStream).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ role: "user", content: expect.stringContaining("任务") })]),
+      { abortSignal: controller.signal }
+    );
+    expect(mockGenerate).not.toHaveBeenCalled();
+    expect(progressSegments.flat()).toEqual([
+      { delta: "先核查事实链。", kind: "text" },
+      { delta: "\n[工具] 调用 search", kind: "tool" },
+      { delta: "\n[工具] search 完成", kind: "tool" }
+    ]);
+  });
+
+  it("passes runtime tools to the default Mastra subagent stream", async () => {
+    const searchTool = {
+      id: "search",
+      description: "Search material.",
+      execute: vi.fn()
+    };
+    mockStream.mockResolvedValueOnce({
+      text: Promise.resolve("model result")
+    });
+
+    const result = await runSubagentTaskWithModel({
+      context: "背景",
+      env: { KIMI_API_KEY: "test-token" },
+      expectedOutput: "输出",
+      task: "任务",
+      title: "资料子代理",
+      tools: { search: searchTool }
+    });
+
+    expect(result).toBe("model result");
+    expect(mockAgentConstructor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools: { search: searchTool }
+      })
+    );
+    expect(mockStream).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        maxSteps: 20,
+        toolCallConcurrency: 1,
+        toolChoice: "auto"
+      })
+    );
+  });
+
+  it("passes abortSignal to the default Mastra agent stream call", async () => {
+    const controller = new AbortController();
+    mockStream.mockResolvedValueOnce({
+      text: Promise.resolve("model result")
+    });
 
     const result = await runSubagentTaskWithModel({
       abortSignal: controller.signal,
@@ -195,9 +315,10 @@ describe("subagent runtime tools", () => {
 
     expect(result).toBe("model result");
     expect(mockAgentConstructor).toHaveBeenCalledWith(expect.objectContaining({ model: "mock-model" }));
-    expect(mockGenerate).toHaveBeenCalledWith(
+    expect(mockStream).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ role: "user", content: expect.stringContaining("任务") })]),
       { abortSignal: controller.signal }
     );
+    expect(mockGenerate).not.toHaveBeenCalled();
   });
 });

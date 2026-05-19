@@ -9,6 +9,7 @@ import {
   type DirectorTurnOutput
 } from "@/lib/domain";
 import type { ToolsInput } from "@mastra/core/agent";
+import { createRuntimeProgressBridge } from "./runtime-progress";
 import {
   createTreeArtifactAgent,
   createTreeNextStepAgent,
@@ -255,7 +256,10 @@ export async function streamTreeTurn({
   onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorTurnOutput & DirectorAgentTrace> {
-  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeTurnAgent));
+  const progressBridge = createRuntimeProgressBridge();
+  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeTurnAgent), {
+    progressBridge
+  });
   const { agentContext, toolLabels, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
@@ -277,6 +281,7 @@ export async function streamTreeTurn({
         onPartialObject,
         onProcessData,
         onReasoningText,
+        progressBridge,
         schema: DirectorTurnOutputSchema,
         signal,
         target: "turn",
@@ -345,7 +350,10 @@ export async function streamTreeArtifact({
   onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorArtifactOutput & DirectorAgentTrace> {
-  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeArtifactAgent));
+  const progressBridge = createRuntimeProgressBridge();
+  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeArtifactAgent), {
+    progressBridge
+  });
   const { agentContext, toolLabels, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
@@ -368,6 +376,7 @@ export async function streamTreeArtifact({
         onPartialObject,
         onProcessData,
         onReasoningText,
+        progressBridge,
         schema: DirectorArtifactOutputSchema,
         signal,
         target: "artifact",
@@ -447,7 +456,10 @@ export async function streamTreeOptions({
   onProcessData?: (data: ProcessDataDisplay) => void;
   onReasoningText?: (event: ReasoningTextEvent) => void;
 }): Promise<DirectorOptionsOutput & DirectorAgentTrace> {
-  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeOptionsAgent));
+  const progressBridge = createRuntimeProgressBridge();
+  const executionContext = await executionContextForDirectorParts(parts, env, context, Boolean(treeOptionsAgent), {
+    progressBridge
+  });
   const { agentContext, toolLabels, tools } = executionContext;
   try {
     const runtimeHasTools = hasRuntimeTools(tools);
@@ -469,6 +481,7 @@ export async function streamTreeOptions({
         onPartialObject,
         onProcessData,
         onReasoningText,
+        progressBridge,
         schema: DirectorOptionsOutputSchema,
         signal,
         target: "options",
